@@ -8,6 +8,8 @@ import { jwtVerify, createRemoteJWKSet } from "jose";
 import { createRequestHandler } from "react-router";
 import { app as apiApp, receiveEmail } from "./index";
 import { mockAccessShim, type JwtClaims } from "./lib/mock-access";
+import { authzContext } from "./middleware/authz-context";
+import type { AuthzContext } from "./db/control-plane/forGroup";
 import { EmailMCP } from "./mcp";
 import type { Env } from "./types";
 
@@ -43,8 +45,12 @@ function getAccessUrls(teamDomain: string) {
 type AppVariables = {
   /** Set by the auth middleware (real JWT verify in prod, mock-Access shim
    *  in dev). Absent when CF_ACCESS_DEV_MODE is unset and we take the
-   *  legacy dev-bypass path. (Phase 2) authzContext consumes this. */
+   *  legacy dev-bypass path. authzContext consumes this. */
   jwt?: JwtClaims;
+  /** Set by the authzContext middleware after JWT auth. Carries
+   *  (user_id, role, group_ids, authorized_mailbox_ids). Absent on the
+   *  legacy dev-bypass path; downstream handlers MUST guard against it. */
+  authzContext?: AuthzContext;
 };
 
 // Main app that wraps the API and adds React Router fallback
@@ -93,6 +99,14 @@ app.use("*", async (c, next) => {
 
   return next();
 });
+
+// Resolve (user_id, role, group_ids, authorized_mailbox_ids) from D1 once
+// per request and pack into c.var.authzContext. Runs after auth so the
+// JWT is already on c.var.jwt. Wildcard scope means /mcp routes also get
+// it — service-token agents traverse the same authz path. The DO at the
+// other end of /mcp doesn't see Hono's context; per-mailbox token
+// enforcement (V2.5) will pass scope via headers.
+app.use("*", authzContext());
 
 // MCP server endpoint — used by AI coding tools (ProtoAgent, Claude Code, Cursor, etc.)
 // Must be before API routes and React Router catch-all

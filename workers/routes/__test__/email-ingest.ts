@@ -4,8 +4,28 @@
 
 import { Hono } from "hono";
 import type { Env } from "../../types";
+import type { JwtClaims } from "../../lib/mock-access";
+import type { AuthzContext } from "../../db/control-plane/forGroup";
 
-const testRoutes = new Hono<{ Bindings: Env }>();
+const testRoutes = new Hono<{
+  Bindings: Env;
+  Variables: { jwt?: JwtClaims; authzContext?: AuthzContext };
+}>();
+
+/**
+ * Local-only authz probe. Returns the JWT shape and authzContext that the
+ * middleware chain produced for this request — the e2e acceptance script
+ * uses this to verify bootstrap-owner promotion + group isolation.
+ */
+testRoutes.get("/whoami", (c) => {
+  if (!import.meta.env.DEV) {
+    return c.text("Test routes are dev-only", 404);
+  }
+  return c.json({
+    jwt: c.var.jwt ?? null,
+    authzContext: c.var.authzContext ?? null,
+  });
+});
 
 /**
  * Local-only email ingest. Mirrors the prod email handler so devs can iterate

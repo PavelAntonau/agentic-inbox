@@ -10,6 +10,7 @@ import type { Env } from "../types";
 import type { JwtClaims } from "../lib/mock-access";
 import { isServiceToken, jwtEmail, serviceTokenClientId } from "../lib/auth";
 import type { AuthzContext } from "../db/control-plane/forGroup";
+import { bootstrapOwner } from "../lib/bootstrap-owner";
 
 type Ctx = {
   Bindings: Env;
@@ -81,19 +82,36 @@ export function authzContext(): MiddlewareHandler<Ctx> {
     const email = jwtEmail(jwt);
     if (!email) return c.text("JWT missing email", 403);
 
-    const user = await orm
+    let user = await orm
       .select()
       .from(schema.users)
       .where(eq(schema.users.email, email))
       .get();
+
     if (!user || user.status !== "active") {
-      // First-login promotion path runs in workers/lib/bootstrap-owner.ts;
-      // this middleware does NOT auto-create. The bootstrap helper is wired
-      // separately by Phase 3 integration on the path it's relevant to.
-      return c.text(
-        "User not found or inactive — first-login flow required",
-        403,
+      // First-login flow: if the email matches BOOTSTRAP_OWNER_EMAIL, promote
+      // it to a global_owner row inside the same transaction and continue.
+      // Any other email lands as 403 — admins must explicitly invite users
+      // via the /admin/users API (V2.2).
+      const promotedId = await bootstrapOwner(
+        c.env.DB,
+        c.env,
+        email,
+        Date.now(),
       );
+      if (promotedId) {
+        user = await orm
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, promotedId))
+          .get();
+      }
+      if (!user || user.status !== "active") {
+        return c.text(
+          "User not found or inactive — first-login flow required",
+          403,
+        );
+      }
     }
 
     const memberships = await orm
