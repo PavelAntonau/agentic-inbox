@@ -2,12 +2,10 @@
 // Licensed under the Apache 2.0 license
 
 import { Link } from "react-router";
-import lightLogoUrl from "~/assets/branding/anai-mail-logo-light.png?url";
-import darkLogoUrl from "~/assets/branding/anai-mail-logo-dark.png?url";
-import { useTheme } from "~/hooks/useTheme";
+import logoUrl from "~/assets/branding/anai-mail-logo.png?url";
 
 type LogoProps = {
-  /** Pixel height of the logo. Default 96. */
+  /** Pixel height of the logo. Default 64. */
   height?: number;
   /** Where to navigate when clicked. Default `/`. Pass null to render
    *  the logo as a plain image with no link wrapper. */
@@ -16,12 +14,10 @@ type LogoProps = {
   className?: string;
 };
 
-export default function Logo({ height = 96, to = "/", className }: LogoProps) {
-  const { theme } = useTheme();
-  const src = theme === "dark" ? darkLogoUrl : lightLogoUrl;
+export default function Logo({ height = 64, to = "/", className }: LogoProps) {
   const img = (
     <img
-      src={src}
+      src={logoUrl}
       alt="ActionNow.AI — Trusted Agent Inbox"
       height={height}
       style={{ height, width: "auto" }}

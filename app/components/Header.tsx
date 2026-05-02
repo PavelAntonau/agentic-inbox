@@ -69,8 +69,8 @@ export default function Header() {
 
   return (
     <header className="flex items-center gap-2 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
-      {/* Logo — always visible. Height 96 per design direction. */}
-      <Logo height={96} className="shrink-0 mr-2" />
+      {/* Logo — always visible. Height 64 (~2× the original 32). */}
+      <Logo height={64} className="shrink-0 mr-2" />
 
       {mailboxId && (
         <>

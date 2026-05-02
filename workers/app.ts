@@ -216,9 +216,9 @@ app.all("*", (c) => {
  *
  * Server-rendered as a single HTML template — no React, no client JS, no
  * dependency on the SSR runner-worker. The page references the hero asset
- * (`/anai-mail-login-hero-{light,dark}.png`) that lives in `public/` and is
- * served by the static-assets binding. A `<picture>` element switches on
- * `prefers-color-scheme` so the right variant loads with no flash.
+ * (`/anai-mail-login-hero.png`) that lives in `public/` and is served by
+ * the static-assets binding. The PNG is transparent and looks correct on
+ * both light and dark surfaces, so no per-theme variant is needed.
  *
  * Reads SW palette tokens via inline CSS so the picker looks branded even
  * when the React Router bundle hasn't loaded yet.
@@ -400,10 +400,7 @@ function renderDevLoginPicker(env: Env, errorMessage?: string): string {
 </head>
 <body>
 <main>
-  <picture>
-    <source srcset="/anai-mail-login-hero-dark.png" media="(prefers-color-scheme: dark)" />
-    <img class="hero" src="/anai-mail-login-hero-light.png" alt="" aria-hidden="true" />
-  </picture>
+  <img class="hero" src="/anai-mail-login-hero.png" alt="" aria-hidden="true" />
   <h1>ActionNow.AI</h1>
   <p class="tagline">Trusted Agent Inbox</p>
   <form method="post" action="/login" autocomplete="off" novalidate>

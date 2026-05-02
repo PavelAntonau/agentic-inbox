@@ -39,27 +39,31 @@
   --line-height-normal: 1.4;
 }
 
-/* Small World palette — dark mode overrides. Applied when <html> has
- * `theme-dark` (set by the boot script + ThemeToggle). The boot script
- * picks the class based on localStorage and falls back to system pref,
- * so users who never toggle still see the right theme. */
+/* Dark mode — midnight-ocean palette. Drops the neutral grays for a
+ * richer, saturated scheme keyed off the navy + cyan in the logo art.
+ * Bg + cards trend deep navy (not black-gray); borders are saturated
+ * blue rather than gray; the accent is the same vibrant cyan that the
+ * envelope eye-iris and `.AI` characters use, so the chrome echoes
+ * the artwork. Body has a subtle radial glow for depth. */
 :root.theme-dark {
-  --color-bg: #1a1a1a;
-  --color-bg-alt: #222222;
-  --color-card: #262626;
-  --color-card-light: #2e2e2e;
-  --color-border: #383838;
-  --color-text: #e0e0e0;
-  --color-text-bright: #fafafa;
-  --color-text-muted: #9e9e9e;
-  --color-green: #4caf50;
-  --color-accent: #4caf50;
-  --color-node-shadow: rgba(76, 175, 80, 0.3);
-  --color-hover-border: #555555;
-  --color-scrollbar: #3e3e3e;
-  --color-overlay-bg: rgba(0, 0, 0, 0.5);
-  --color-tx-card-bg: color-mix(in srgb, #262626 80%, #1a1a1a 20%);
-  --color-tx-card-hover: color-mix(in srgb, #262626 60%, #1a1a1a 40%);
+  --color-bg: #0a1226;
+  --color-bg-alt: #0d1830;
+  --color-card: #131e3e;
+  --color-card-light: #1a2a52;
+  --color-border: #233566;
+  --color-text: #e9eefa;
+  --color-text-bright: #ffffff;
+  --color-text-muted: #8ea2c7;
+  --color-green: #4ade80;
+  --color-blue: #4ec3ff;
+  --color-red: #ff6b6b;
+  --color-accent: #4ec3ff;
+  --color-node-shadow: rgba(78, 195, 255, 0.35);
+  --color-hover-border: #3a5388;
+  --color-scrollbar: #1e2c50;
+  --color-overlay-bg: rgba(2, 8, 22, 0.6);
+  --color-tx-card-bg: color-mix(in srgb, #131e3e 80%, #0a1226 20%);
+  --color-tx-card-hover: color-mix(in srgb, #131e3e 55%, #0a1226 45%);
   color-scheme: dark;
 }
 
@@ -67,13 +71,111 @@
   color-scheme: light;
 }
 
-/* Override kumo's "brand" colour (bright Cloudflare blue by default) with
- * the Small World accent so primary CTAs match the rest of the design.
- * `light-dark()` resolves against the root `color-scheme` we set above. */
+/* Subtle radial glow for the dark theme so the canvas doesn't feel
+ * like flat charcoal. Anchored top-left so the logo lockup sits on a
+ * slight cyan halo. */
+:root.theme-dark body {
+  background-image: radial-gradient(
+    ellipse 80% 60% at 12% 0%,
+    rgba(45, 110, 200, 0.18) 0%,
+    transparent 60%
+  );
+  background-attachment: fixed;
+}
+
+/* === Primary CTA — shimmering navy → cyan gradient =========================
+ *
+ * Kumo's `<Button variant="primary">` renders with the Tailwind utility
+ * `bg-kumo-brand`. We keep the variable bound (so disabled states still
+ * have a fallback colour) but layer a `background-image` gradient on top.
+ * The gradient pulls the same navy + cyan that drive the logo artwork —
+ * deep navy → mid royal blue → bright cyan — so the CTA visually echoes
+ * the envelope.
+ *
+ * Shimmer: `background-size: 220% 100%` + animated `background-position`
+ * on hover sweeps the highlight across the button. A double box-shadow
+ * (inner top sheen + outer cyan glow) gives the surface depth and lifts
+ * it on hover.
+ */
 :root {
-  --color-kumo-brand: light-dark(#1b7a28, #4caf50);
-  --color-kumo-brand-hover: light-dark(#155c1e, #43a047);
-  --text-color-kumo-brand: light-dark(#155c1e, #4caf50);
+  --color-kumo-brand: #1c5cb6;
+  --color-kumo-brand-hover: #4ec3ff;
+  --text-color-kumo-brand: #ffffff;
+  --gradient-cta: linear-gradient(
+    135deg,
+    #0a1d44 0%,
+    #142d6e 22%,
+    #1c5cb6 52%,
+    #2e8ad9 78%,
+    #4ec3ff 100%
+  );
+}
+
+button.bg-kumo-brand,
+a.bg-kumo-brand {
+  background-image: var(--gradient-cta);
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  background-repeat: no-repeat;
+  border: 1px solid rgba(78, 195, 255, 0.35);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.18) inset,
+    0 0 0 1px rgba(20, 80, 180, 0.15) inset,
+    0 6px 18px -4px rgba(28, 92, 182, 0.45),
+    0 2px 6px -2px rgba(10, 29, 68, 0.5);
+  color: #ffffff !important;
+  transition:
+    background-position 0.7s cubic-bezier(0.25, 1, 0.5, 1),
+    box-shadow 0.3s ease,
+    transform 0.15s ease,
+    border-color 0.3s ease;
+}
+
+button.bg-kumo-brand:hover:not(:disabled),
+a.bg-kumo-brand:hover {
+  background-position: 100% 50%;
+  border-color: rgba(78, 195, 255, 0.7);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.28) inset,
+    0 0 0 1px rgba(78, 195, 255, 0.25) inset,
+    0 10px 28px -4px rgba(78, 195, 255, 0.55),
+    0 4px 10px -2px rgba(10, 29, 68, 0.55);
+}
+
+button.bg-kumo-brand:active:not(:disabled),
+a.bg-kumo-brand:active {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.18) inset,
+    0 0 0 1px rgba(78, 195, 255, 0.2) inset,
+    0 4px 12px -3px rgba(28, 92, 182, 0.4);
+}
+
+button.bg-kumo-brand:disabled {
+  background-image: var(--gradient-cta);
+  filter: saturate(0.4) brightness(0.85);
+  box-shadow: none;
+  border-color: rgba(78, 195, 255, 0.15);
+}
+
+/* Dark-theme tweak — slightly stronger glow on the dark canvas so the
+ * gradient pops without looking neon. */
+:root.theme-dark button.bg-kumo-brand,
+:root.theme-dark a.bg-kumo-brand {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.22) inset,
+    0 0 0 1px rgba(78, 195, 255, 0.2) inset,
+    0 8px 24px -4px rgba(78, 195, 255, 0.4),
+    0 2px 8px -2px rgba(0, 0, 0, 0.5);
+}
+
+:root.theme-dark button.bg-kumo-brand:hover:not(:disabled),
+:root.theme-dark a.bg-kumo-brand:hover {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.32) inset,
+    0 0 0 1px rgba(78, 195, 255, 0.4) inset,
+    0 14px 36px -4px rgba(78, 195, 255, 0.6),
+    0 4px 12px -2px rgba(0, 0, 0, 0.55);
 }
 
 body {
