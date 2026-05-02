@@ -178,6 +178,141 @@ button.bg-kumo-brand:disabled {
     0 4px 12px -2px rgba(0, 0, 0, 0.55);
 }
 
+/* === Glass panels ===========================================================
+ *
+ * Every Tailwind `bg-card` surface (empty-state cards, modals via kumo's
+ * `bg-kumo-base`, the agent sidebar, the header itself) gets a frosted-
+ * glass treatment: the underlying surface is alpha-mixed against the
+ * canvas, a backdrop-filter blurs whatever's behind, and a thin cyan-
+ * tinted border (matching the gradient CTA's accent) ties the whole
+ * design language together.
+ *
+ * Borders stay 1 px. Shadows are layered — soft outer for depth, inner
+ * highlight for a subtle bevel.
+ */
+.bg-card,
+.bg-kumo-base,
+[role="dialog"] {
+  background-color: color-mix(in oklab, var(--color-card) 68%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+
+:root.theme-dark .bg-card,
+:root.theme-dark .bg-kumo-base,
+:root.theme-dark [role="dialog"] {
+  background-color: color-mix(in oklab, var(--color-card) 62%, transparent);
+}
+
+/* Borders on cards / modals / surfaces — thin, tinted with the accent
+ * cyan so every surface speaks the same colour vocabulary. */
+.border-border,
+.ring-kumo-line {
+  border-color: rgba(78, 195, 255, 0.18) !important;
+}
+
+[role="dialog"] {
+  /* kumo applies `ring ring-kumo-line` — cleaner to set the ring
+   * colour directly so the override survives both border + ring. */
+  --tw-ring-color: rgba(78, 195, 255, 0.22);
+}
+
+:root.theme-dark .border-border,
+:root.theme-dark .ring-kumo-line {
+  border-color: rgba(78, 195, 255, 0.24) !important;
+}
+
+:root.theme-dark [role="dialog"] {
+  --tw-ring-color: rgba(78, 195, 255, 0.32);
+}
+
+/* Layered drop-shadow on every glass surface. Softer in light theme,
+ * deeper + cyan-tinted in dark. */
+[role="dialog"] {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.18) inset,
+    0 24px 60px -16px rgba(10, 18, 38, 0.35),
+    0 8px 24px -8px rgba(10, 18, 38, 0.2);
+}
+
+:root.theme-dark [role="dialog"] {
+  box-shadow:
+    0 1px 0 0 rgba(78, 195, 255, 0.18) inset,
+    0 28px 72px -16px rgba(0, 0, 0, 0.7),
+    0 10px 30px -10px rgba(78, 195, 255, 0.2);
+}
+
+/* Empty-state / interior cards — same treatment but slightly softer
+ * shadow so they sit "below" modals visually. The `.bg-card.rounded-panel`
+ * combination is what kumo's <Empty> emits; targeting the compound
+ * selector avoids hitting the page header (which has its own rule). */
+.bg-card.rounded-panel {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.1) inset,
+    0 14px 40px -16px rgba(10, 18, 38, 0.22),
+    0 4px 12px -6px rgba(10, 18, 38, 0.15);
+}
+
+:root.theme-dark .bg-card.rounded-panel {
+  box-shadow:
+    0 1px 0 0 rgba(78, 195, 255, 0.12) inset,
+    0 18px 48px -16px rgba(0, 0, 0, 0.55),
+    0 4px 14px -6px rgba(78, 195, 255, 0.1);
+}
+
+/* Header — sticky top bar gets its own thin shadow so it visibly floats
+ * above the canvas + radial glow, plus the same cyan-tinted bottom
+ * border to match the rest of the chrome. */
+header.bg-card {
+  box-shadow:
+    0 1px 0 0 rgba(78, 195, 255, 0.12),
+    0 8px 24px -10px rgba(10, 18, 38, 0.15);
+}
+
+:root.theme-dark header.bg-card {
+  box-shadow:
+    0 1px 0 0 rgba(78, 195, 255, 0.18),
+    0 12px 32px -10px rgba(0, 0, 0, 0.45);
+}
+
+/* === Ghost / secondary buttons ==============================================
+ *
+ * Apply the same accent-tinted thin border + soft shadow to non-primary
+ * buttons so the whole UI shares one border vocabulary. Background stays
+ * transparent so they read as "quiet" actions next to the gradient CTA. */
+button[type="button"]:not(.bg-kumo-brand):not([disabled]) {
+  border: 1px solid rgba(78, 195, 255, 0.16);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 2px 6px -2px rgba(10, 18, 38, 0.08);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+button[type="button"]:not(.bg-kumo-brand):not([disabled]):hover {
+  border-color: rgba(78, 195, 255, 0.4);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.08) inset,
+    0 4px 14px -3px rgba(28, 92, 182, 0.18);
+}
+
+:root.theme-dark button[type="button"]:not(.bg-kumo-brand):not([disabled]) {
+  border: 1px solid rgba(78, 195, 255, 0.2);
+  box-shadow:
+    0 1px 0 0 rgba(78, 195, 255, 0.06) inset,
+    0 2px 8px -2px rgba(0, 0, 0, 0.4);
+}
+
+:root.theme-dark
+  button[type="button"]:not(.bg-kumo-brand):not([disabled]):hover {
+  border-color: rgba(78, 195, 255, 0.5);
+  box-shadow:
+    0 1px 0 0 rgba(78, 195, 255, 0.15) inset,
+    0 4px 16px -3px rgba(78, 195, 255, 0.25);
+}
+
 body {
   margin: 0;
 }
