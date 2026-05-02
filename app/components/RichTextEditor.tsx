@@ -4,18 +4,18 @@
 
 import { Button, Tooltip } from "@cloudflare/kumo";
 import {
-	ArrowClockwiseIcon,
-	ArrowCounterClockwiseIcon,
-	LinkBreakIcon,
-	LinkSimpleIcon,
-	ListBulletsIcon,
-	ListNumbersIcon,
-	MinusIcon,
-	QuotesIcon,
-	TextBIcon,
-	TextItalicIcon,
-	TextStrikethroughIcon,
-	TextUnderlineIcon,
+  ArrowClockwiseIcon,
+  ArrowCounterClockwiseIcon,
+  LinkBreakIcon,
+  LinkSimpleIcon,
+  ListBulletsIcon,
+  ListNumbersIcon,
+  MinusIcon,
+  QuotesIcon,
+  TextBIcon,
+  TextItalicIcon,
+  TextStrikethroughIcon,
+  TextUnderlineIcon,
 } from "@phosphor-icons/react";
 import { Color } from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
@@ -29,211 +29,211 @@ import StarterKit from "@tiptap/starter-kit";
 import { useCallback, useEffect } from "react";
 
 interface RichTextEditorProps {
-	value: string;
-	onChange: (value: string) => void;
+  value: string;
+  onChange: (value: string) => void;
 }
 
 export default function RichTextEditor({
-	value,
-	onChange,
+  value,
+  onChange,
 }: RichTextEditorProps) {
-	const editor = useEditor({
-		extensions: [
-			StarterKit,
-			Underline,
-			TextAlign.configure({ types: ["heading", "paragraph"] }),
-			LinkExtension.configure({ openOnClick: false }),
-			TiptapImage,
-			TextStyle,
-			Color,
-			Highlight.configure({ multicolor: true }),
-		],
-		content: value,
-		editorProps: {
-			attributes: {
-				class:
-					"prose prose-sm max-w-none focus:outline-none min-h-[180px] p-3 text-sm [&_blockquote]:border-l-2 [&_blockquote]:border-kumo-line [&_blockquote]:pl-3 [&_blockquote]:text-kumo-subtle [&_blockquote]:bg-kumo-tint [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:text-xs [&_blockquote]:rounded-r-sm",
-			},
-		},
-		onUpdate: ({ editor }) => {
-			onChange(editor.getHTML());
-		},
-	});
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Underline,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      LinkExtension.configure({ openOnClick: false }),
+      TiptapImage,
+      TextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
+    ],
+    content: value,
+    editorProps: {
+      attributes: {
+        class:
+          "prose prose-sm max-w-none focus:outline-none min-h-[180px] p-3 text-sm [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-text-muted [&_blockquote]:bg-tx-card-hover [&_blockquote]:py-1 [&_blockquote]:my-2 [&_blockquote]:text-xs [&_blockquote]:rounded-r-sm",
+      },
+    },
+    onUpdate: ({ editor }) => {
+      onChange(editor.getHTML());
+    },
+  });
 
-	useEffect(() => {
-		if (editor && !editor.isDestroyed && value !== editor.getHTML()) {
-			editor.commands.setContent(value);
-			// Place cursor at the start of the document (above quoted text)
-			const rafId = requestAnimationFrame(() => {
-				if (!editor.isDestroyed) {
-					editor.commands.focus('start');
-				}
-			});
-			return () => cancelAnimationFrame(rafId);
-		}
-	}, [value, editor]);
+  useEffect(() => {
+    if (editor && !editor.isDestroyed && value !== editor.getHTML()) {
+      editor.commands.setContent(value);
+      // Place cursor at the start of the document (above quoted text)
+      const rafId = requestAnimationFrame(() => {
+        if (!editor.isDestroyed) {
+          editor.commands.focus("start");
+        }
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+  }, [value, editor]);
 
-	const setLink = useCallback(() => {
-		if (!editor) return;
-		const previousUrl = editor.getAttributes("link").href;
-		const url = window.prompt("URL", previousUrl);
-		if (url === null) return;
-		if (url === "") {
-			editor.chain().focus().extendMarkRange("link").unsetLink().run();
-			return;
-		}
-		editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-	}, [editor]);
+  const setLink = useCallback(() => {
+    if (!editor) return;
+    const previousUrl = editor.getAttributes("link").href;
+    const url = window.prompt("URL", previousUrl);
+    if (url === null) return;
+    if (url === "") {
+      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      return;
+    }
+    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+  }, [editor]);
 
-	if (!editor) return null;
+  if (!editor) return null;
 
-	return (
-		<div className="rounded-lg border border-kumo-line overflow-hidden flex flex-col h-full">
-			{/* Toolbar */}
-			<div className="flex flex-wrap items-center gap-0.5 bg-kumo-recessed px-2 py-1.5 border-b border-kumo-line shrink-0">
-				{/* Text formatting */}
-				<Tooltip content="Bold" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("bold") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<TextBIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleBold().run()}
-						aria-label="Bold"
-					/>
-				</Tooltip>
-				<Tooltip content="Italic" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("italic") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<TextItalicIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleItalic().run()}
-						aria-label="Italic"
-					/>
-				</Tooltip>
-				<Tooltip content="Underline" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("underline") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<TextUnderlineIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleUnderline().run()}
-						aria-label="Underline"
-					/>
-				</Tooltip>
-				<Tooltip content="Strikethrough" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("strike") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<TextStrikethroughIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleStrike().run()}
-						aria-label="Strikethrough"
-					/>
-				</Tooltip>
+  return (
+    <div className="rounded-lg border border-border overflow-hidden flex flex-col h-full">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-0.5 bg-bg px-2 py-1.5 border-b border-border shrink-0">
+        {/* Text formatting */}
+        <Tooltip content="Bold" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("bold") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<TextBIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            aria-label="Bold"
+          />
+        </Tooltip>
+        <Tooltip content="Italic" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("italic") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<TextItalicIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            aria-label="Italic"
+          />
+        </Tooltip>
+        <Tooltip content="Underline" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("underline") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<TextUnderlineIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            aria-label="Underline"
+          />
+        </Tooltip>
+        <Tooltip content="Strikethrough" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("strike") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<TextStrikethroughIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+            aria-label="Strikethrough"
+          />
+        </Tooltip>
 
-				<div className="mx-1 h-5 w-px bg-kumo-fill" />
+        <div className="mx-1 h-5 w-px bg-card-light" />
 
-				{/* Lists */}
-				<Tooltip content="Bullet list" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("bulletList") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<ListBulletsIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleBulletList().run()}
-						aria-label="Bullet list"
-					/>
-				</Tooltip>
-				<Tooltip content="Numbered list" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("orderedList") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<ListNumbersIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleOrderedList().run()}
-						aria-label="Numbered list"
-					/>
-				</Tooltip>
+        {/* Lists */}
+        <Tooltip content="Bullet list" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("bulletList") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<ListBulletsIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+            aria-label="Bullet list"
+          />
+        </Tooltip>
+        <Tooltip content="Numbered list" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("orderedList") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<ListNumbersIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+            aria-label="Numbered list"
+          />
+        </Tooltip>
 
-				<div className="mx-1 h-5 w-px bg-kumo-fill" />
+        <div className="mx-1 h-5 w-px bg-card-light" />
 
-				{/* Block formatting */}
-				<Tooltip content="Blockquote" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("blockquote") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<QuotesIcon size={16} />}
-						onClick={() => editor.chain().focus().toggleBlockquote().run()}
-						aria-label="Blockquote"
-					/>
-				</Tooltip>
-				<Tooltip content="Link" side="bottom" asChild>
-					<Button
-						variant={editor.isActive("link") ? "secondary" : "ghost"}
-						shape="square"
-						size="sm"
-						icon={<LinkSimpleIcon size={16} />}
-						onClick={setLink}
-						aria-label="Link"
-					/>
-				</Tooltip>
-				{editor.isActive("link") && (
-					<Tooltip content="Remove link" side="bottom" asChild>
-						<Button
-							variant="ghost"
-							shape="square"
-							size="sm"
-							icon={<LinkBreakIcon size={16} />}
-							onClick={() => editor.chain().focus().unsetLink().run()}
-							aria-label="Remove link"
-						/>
-					</Tooltip>
-				)}
-				<Tooltip content="Horizontal rule" side="bottom" asChild>
-					<Button
-						variant="ghost"
-						shape="square"
-						size="sm"
-						icon={<MinusIcon size={16} />}
-						onClick={() => editor.chain().focus().setHorizontalRule().run()}
-						aria-label="Horizontal rule"
-					/>
-				</Tooltip>
+        {/* Block formatting */}
+        <Tooltip content="Blockquote" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("blockquote") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<QuotesIcon size={16} />}
+            onClick={() => editor.chain().focus().toggleBlockquote().run()}
+            aria-label="Blockquote"
+          />
+        </Tooltip>
+        <Tooltip content="Link" side="bottom" asChild>
+          <Button
+            variant={editor.isActive("link") ? "secondary" : "ghost"}
+            shape="square"
+            size="sm"
+            icon={<LinkSimpleIcon size={16} />}
+            onClick={setLink}
+            aria-label="Link"
+          />
+        </Tooltip>
+        {editor.isActive("link") && (
+          <Tooltip content="Remove link" side="bottom" asChild>
+            <Button
+              variant="ghost"
+              shape="square"
+              size="sm"
+              icon={<LinkBreakIcon size={16} />}
+              onClick={() => editor.chain().focus().unsetLink().run()}
+              aria-label="Remove link"
+            />
+          </Tooltip>
+        )}
+        <Tooltip content="Horizontal rule" side="bottom" asChild>
+          <Button
+            variant="ghost"
+            shape="square"
+            size="sm"
+            icon={<MinusIcon size={16} />}
+            onClick={() => editor.chain().focus().setHorizontalRule().run()}
+            aria-label="Horizontal rule"
+          />
+        </Tooltip>
 
-				<div className="mx-1 h-5 w-px bg-kumo-fill" />
+        <div className="mx-1 h-5 w-px bg-card-light" />
 
-				{/* Undo/Redo */}
-				<Tooltip content="Undo" side="bottom" asChild>
-					<Button
-						variant="ghost"
-						shape="square"
-						size="sm"
-						icon={<ArrowCounterClockwiseIcon size={16} />}
-						onClick={() => editor.chain().focus().undo().run()}
-						disabled={!editor.can().undo()}
-						aria-label="Undo"
-					/>
-				</Tooltip>
-				<Tooltip content="Redo" side="bottom" asChild>
-					<Button
-						variant="ghost"
-						shape="square"
-						size="sm"
-						icon={<ArrowClockwiseIcon size={16} />}
-						onClick={() => editor.chain().focus().redo().run()}
-						disabled={!editor.can().redo()}
-						aria-label="Redo"
-					/>
-				</Tooltip>
-			</div>
+        {/* Undo/Redo */}
+        <Tooltip content="Undo" side="bottom" asChild>
+          <Button
+            variant="ghost"
+            shape="square"
+            size="sm"
+            icon={<ArrowCounterClockwiseIcon size={16} />}
+            onClick={() => editor.chain().focus().undo().run()}
+            disabled={!editor.can().undo()}
+            aria-label="Undo"
+          />
+        </Tooltip>
+        <Tooltip content="Redo" side="bottom" asChild>
+          <Button
+            variant="ghost"
+            shape="square"
+            size="sm"
+            icon={<ArrowClockwiseIcon size={16} />}
+            onClick={() => editor.chain().focus().redo().run()}
+            disabled={!editor.can().redo()}
+            aria-label="Redo"
+          />
+        </Tooltip>
+      </div>
 
-			{/* Editor content */}
-			<div className="flex-1 overflow-y-auto">
-				<EditorContent editor={editor} />
-			</div>
-		</div>
-	);
+      {/* Editor content */}
+      <div className="flex-1 overflow-y-auto">
+        <EditorContent editor={editor} />
+      </div>
+    </div>
+  );
 }

@@ -8,78 +8,84 @@ import { useEffect, useState } from "react";
 import MCPPanel from "./MCPPanel";
 
 function LazyAgentPanel() {
-	const [AgentChat, setAgentChat] = useState<React.ComponentType | null>(
-		null,
-	);
-	const [loadError, setLoadError] = useState<string | null>(null);
+  const [AgentChat, setAgentChat] = useState<React.ComponentType | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-	useEffect(() => {
-		import("~/components/AgentPanel").then((mod) => {
-			setAgentChat(() => mod.default);
-		}).catch((err) => {
-			console.error("Failed to load AgentPanel:", err);
-			setLoadError("Failed to load agent panel");
-		});
-	}, []);
+  useEffect(() => {
+    import("~/components/AgentPanel")
+      .then((mod) => {
+        setAgentChat(() => mod.default);
+      })
+      .catch((err) => {
+        console.error("Failed to load AgentPanel:", err);
+        setLoadError("Failed to load agent panel");
+      });
+  }, []);
 
-	if (loadError) {
-		return (
-			<div className="flex items-center justify-center h-full">
-				<span className="text-xs text-kumo-error">{loadError}</span>
-			</div>
-		);
-	}
-	if (!AgentChat) {
-		return (
-			<div className="flex flex-col items-center justify-center h-full gap-2">
-				<Loader size="base" />
-				<span className="text-xs text-kumo-subtle">Loading agent...</span>
-			</div>
-		);
-	}
-	return <AgentChat />;
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <span className="text-xs text-red-500">{loadError}</span>
+      </div>
+    );
+  }
+  if (!AgentChat) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2">
+        <Loader size="base" />
+        <span className="text-xs text-text-muted">Loading agent...</span>
+      </div>
+    );
+  }
+  return <AgentChat />;
 }
 
 export default function AgentSidebar() {
-	const [activeTab, setActiveTab] = useState<"agent" | "mcp">("agent");
+  const [activeTab, setActiveTab] = useState<"agent" | "mcp">("agent");
 
-	return (
-		<div className="flex flex-col h-full">
-			{/* Tab bar */}
-			<div className="flex items-center border-b border-kumo-line shrink-0">
-				<button
-					type="button"
-					onClick={() => setActiveTab("agent")}
-					className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 bg-transparent cursor-pointer ${
-						activeTab === "agent"
-							? "border-kumo-brand text-kumo-default"
-							: "border-transparent text-kumo-subtle hover:text-kumo-default"
-					}`}
-				>
-					<RobotIcon size={14} weight={activeTab === "agent" ? "fill" : "regular"} />
-					Agent
-				</button>
-				<button
-					type="button"
-					onClick={() => setActiveTab("mcp")}
-					className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 bg-transparent cursor-pointer ${
-						activeTab === "mcp"
-							? "border-kumo-brand text-kumo-default"
-							: "border-transparent text-kumo-subtle hover:text-kumo-default"
-					}`}
-				>
-					<PlugsIcon size={14} weight={activeTab === "mcp" ? "fill" : "regular"} />
-					MCP
-				</button>
-			</div>
+  return (
+    <div className="flex flex-col h-full">
+      {/* Tab bar */}
+      <div className="flex items-center border-b border-border shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveTab("agent")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 bg-transparent cursor-pointer ${
+            activeTab === "agent"
+              ? "border-blue text-text-bright"
+              : "border-transparent text-text-muted hover:text-text-bright"
+          }`}
+        >
+          <RobotIcon
+            size={14}
+            weight={activeTab === "agent" ? "fill" : "regular"}
+          />
+          Agent
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("mcp")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 bg-transparent cursor-pointer ${
+            activeTab === "mcp"
+              ? "border-blue text-text-bright"
+              : "border-transparent text-text-muted hover:text-text-bright"
+          }`}
+        >
+          <PlugsIcon
+            size={14}
+            weight={activeTab === "mcp" ? "fill" : "regular"}
+          />
+          MCP
+        </button>
+      </div>
 
-			{/* Tab content — keep agent mounted so chat isn't lost */}
-			<div className="flex-1 min-h-0 overflow-hidden">
-				<div className={activeTab === "agent" ? "h-full" : "hidden"}>
-					<LazyAgentPanel />
-				</div>
-				{activeTab === "mcp" && <MCPPanel />}
-			</div>
-		</div>
-	);
+      {/* Tab content — keep agent mounted so chat isn't lost */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <div className={activeTab === "agent" ? "h-full" : "hidden"}>
+          <LazyAgentPanel />
+        </div>
+        {activeTab === "mcp" && <MCPPanel />}
+      </div>
+    </div>
+  );
 }
