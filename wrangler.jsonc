@@ -16,10 +16,15 @@
 		"DOMAINS": "actionnow.ai",
 		"EMAIL_ADDRESSES": []
 	},
+	// EMAIL binding: prod uses real Cloudflare Email Routing automatically.
+	// `remote: true` would proxy outbound mail through prod even in `wrangler dev`,
+	// requiring `wrangler login`. Dropping the flag keeps prod unchanged while
+	// letting local dev run unauthenticated — local sends are no-ops in miniflare.
+	// The /api/__test__/email-ingest endpoint exercises the inbound path directly
+	// via MailboxDO without needing the EMAIL binding for outbound.
 	"send_email": [
 		{
-			"name": "EMAIL",
-			"remote": true
+			"name": "EMAIL"
 		}
 	],
 	"r2_buckets": [

@@ -18,7 +18,7 @@ const testRoutes = new Hono<{
  * uses this to verify bootstrap-owner promotion + group isolation.
  */
 testRoutes.get("/whoami", (c) => {
-  if (!import.meta.env.DEV) {
+  if (!import.meta.env.DEV && !c.env.CF_ACCESS_DEV_MODE) {
     return c.text("Test routes are dev-only", 404);
   }
   return c.json({
@@ -34,7 +34,7 @@ testRoutes.get("/whoami", (c) => {
  * Body: JSON { to: string, from: string, subject: string, body: string }
  */
 testRoutes.post("/email-ingest", async (c) => {
-  if (!import.meta.env.DEV) {
+  if (!import.meta.env.DEV && !c.env.CF_ACCESS_DEV_MODE) {
     return c.text("Test routes are dev-only", 404);
   }
 

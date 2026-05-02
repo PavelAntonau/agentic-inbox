@@ -57,14 +57,19 @@ type AppVariables = {
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // Cloudflare Access JWT validation middleware.
-//   prod                 → real JWT verify, payload on c.var.jwt
-//   dev + DEV_MODE=mock  → synthesized payload on c.var.jwt (same shape)
-//   dev otherwise        → bypass (legacy behavior)
+//   CF_ACCESS_DEV_MODE=mock     → mock-Access shim (synthesized JWT shape)
+//   import.meta.env.DEV (Vite)  → bypass (legacy: react-router dev path)
+//   otherwise                   → real Cloudflare Access JWT verify
+//
+// `CF_ACCESS_DEV_MODE` is the explicit opt-in. It's set ONLY in `.dev.vars`
+// (gitignored), so production deploys never carry it and always take the
+// real-JWT branch. This gate works under both `react-router dev` AND bare
+// `wrangler dev --local` (the latter doesn't set Vite's `import.meta.env.DEV`).
 app.use("*", async (c, next) => {
-  if (import.meta.env.DEV) {
-    if (c.env.CF_ACCESS_DEV_MODE === "mock") {
-      return mockAccessShim()(c, next);
-    }
+  if (c.env.CF_ACCESS_DEV_MODE === "mock") {
+    return mockAccessShim()(c, next);
+  }
+  if (import.meta.env.DEV || c.env.CF_ACCESS_DEV_MODE === "bypass") {
     return next();
   }
 
@@ -128,12 +133,11 @@ app.all("/agents/*", async (c) => {
   return c.text("Agent not found", 404);
 });
 
-// Test-only routes — not mounted in production
-if (import.meta.env.DEV) {
-  const { default: testRoutes } =
-    await import("./routes/__test__/email-ingest");
-  app.route("/api/__test__", testRoutes);
-}
+// Test-only routes. Module-init time has no access to runtime bindings, so
+// we always register them; each handler does its own runtime gate (Vite DEV
+// flag OR CF_ACCESS_DEV_MODE binding present). The handlers 404 in prod.
+const { default: testRoutes } = await import("./routes/__test__/email-ingest");
+app.route("/api/__test__", testRoutes);
 
 // React Router catch-all: serves the SPA for all non-API routes
 app.all("*", (c) => {
