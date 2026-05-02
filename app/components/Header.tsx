@@ -18,6 +18,7 @@ import {
 } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
 import Logo from "~/components/Logo";
+import ThemeToggle from "~/components/ThemeToggle";
 
 export default function Header() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -68,8 +69,8 @@ export default function Header() {
 
   return (
     <header className="flex items-center gap-2 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
-      {/* Logo — always visible */}
-      <Logo height={32} className="shrink-0 mr-1" />
+      {/* Logo — always visible. Height 96 per design direction. */}
+      <Logo height={96} className="shrink-0 mr-2" />
 
       {mailboxId && (
         <>
@@ -151,6 +152,7 @@ export default function Header() {
                 className="hidden lg:inline-flex"
               />
             </Tooltip>
+            <ThemeToggle />
             <Tooltip content="Settings" side="bottom" asChild>
               <Button
                 variant={isSettingsActive ? "secondary" : "ghost"}
@@ -171,10 +173,15 @@ export default function Header() {
       )}
 
       {/* Non-mailbox routes (e.g. the empty home page when the user has no
-          mailboxes yet): no settings button. The route /settings doesn't
-          exist as a top-level — settings are per-mailbox — so showing a
-          gear here would 404 into not-found.tsx. Re-introduce when a
-          global settings page lands. */}
+          mailboxes yet): no settings button — the route /settings doesn't
+          exist as a top-level. The theme toggle is still useful, so it
+          stays here. Re-introduce a settings link when a global settings
+          page lands. */}
+      {!mailboxId && (
+        <div className="flex items-center gap-1 ml-auto shrink-0">
+          <ThemeToggle />
+        </div>
+      )}
     </header>
   );
 }

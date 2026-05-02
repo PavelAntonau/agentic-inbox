@@ -2,8 +2,19 @@
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 
-/* Small World palette — light mode */
-@theme inline {
+/* Class-based dark mode. The boot script in root.tsx sets `.theme-dark`
+ * or `.theme-light` on <html> at first paint based on localStorage
+ * (or system preference if no choice has been saved). Tailwind's `dark:`
+ * utilities key off this class instead of the prefers-color-scheme media
+ * query, so the in-app ThemeToggle has the final say. */
+@custom-variant dark (&:where(.theme-dark, .theme-dark *));
+
+/* Small World palette — light mode. Note: NOT `@theme inline` — we use
+ * `@theme` so Tailwind utilities (bg-bg, text-text, …) emit
+ * `var(--color-*)` references. That lets `:root.theme-dark` rebind the
+ * variables and have every utility flip immediately, instead of being
+ * compiled to literal hex at theme-definition time. */
+@theme {
   --color-bg: #ece8e2;
   --color-bg-alt: #e4e0d9;
   --color-card: #f0ede8;
@@ -28,26 +39,41 @@
   --line-height-normal: 1.4;
 }
 
-/* Small World palette — dark mode overrides */
-@media (prefers-color-scheme: dark) {
-  @theme inline {
-    --color-bg: #1a1a1a;
-    --color-bg-alt: #222222;
-    --color-card: #262626;
-    --color-card-light: #2e2e2e;
-    --color-border: #383838;
-    --color-text: #e0e0e0;
-    --color-text-bright: #fafafa;
-    --color-text-muted: #9e9e9e;
-    --color-green: #4caf50;
-    --color-accent: #4caf50;
-    --color-node-shadow: rgba(76, 175, 80, 0.3);
-    --color-hover-border: #555555;
-    --color-scrollbar: #3e3e3e;
-    --color-overlay-bg: rgba(0, 0, 0, 0.5);
-    --color-tx-card-bg: color-mix(in srgb, #262626 80%, #1a1a1a 20%);
-    --color-tx-card-hover: color-mix(in srgb, #262626 60%, #1a1a1a 40%);
-  }
+/* Small World palette — dark mode overrides. Applied when <html> has
+ * `theme-dark` (set by the boot script + ThemeToggle). The boot script
+ * picks the class based on localStorage and falls back to system pref,
+ * so users who never toggle still see the right theme. */
+:root.theme-dark {
+  --color-bg: #1a1a1a;
+  --color-bg-alt: #222222;
+  --color-card: #262626;
+  --color-card-light: #2e2e2e;
+  --color-border: #383838;
+  --color-text: #e0e0e0;
+  --color-text-bright: #fafafa;
+  --color-text-muted: #9e9e9e;
+  --color-green: #4caf50;
+  --color-accent: #4caf50;
+  --color-node-shadow: rgba(76, 175, 80, 0.3);
+  --color-hover-border: #555555;
+  --color-scrollbar: #3e3e3e;
+  --color-overlay-bg: rgba(0, 0, 0, 0.5);
+  --color-tx-card-bg: color-mix(in srgb, #262626 80%, #1a1a1a 20%);
+  --color-tx-card-hover: color-mix(in srgb, #262626 60%, #1a1a1a 40%);
+  color-scheme: dark;
+}
+
+:root.theme-light {
+  color-scheme: light;
+}
+
+/* Override kumo's "brand" colour (bright Cloudflare blue by default) with
+ * the Small World accent so primary CTAs match the rest of the design.
+ * `light-dark()` resolves against the root `color-scheme` we set above. */
+:root {
+  --color-kumo-brand: light-dark(#1b7a28, #4caf50);
+  --color-kumo-brand-hover: light-dark(#155c1e, #43a047);
+  --text-color-kumo-brand: light-dark(#155c1e, #4caf50);
 }
 
 body {

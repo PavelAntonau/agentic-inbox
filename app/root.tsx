@@ -98,6 +98,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
         />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Agentic Inbox</title>
+        {/* Apply theme class on <html> BEFORE first paint to avoid the
+         * flash-of-wrong-theme. Reads localStorage["anai-theme"]; falls
+         * back to system preference. The ThemeToggle in the header
+         * mutates this class + the same localStorage key. */}
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted boot script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var s=localStorage.getItem('anai-theme');if(s!=='light'&&s!=='dark'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.classList.add('theme-'+s);}catch(e){}})();`,
+          }}
+        />
         <Meta />
         <Links />
       </head>

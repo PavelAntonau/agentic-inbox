@@ -4,9 +4,10 @@
 import { Link } from "react-router";
 import lightLogoUrl from "~/assets/branding/anai-mail-logo-light.png?url";
 import darkLogoUrl from "~/assets/branding/anai-mail-logo-dark.png?url";
+import { useTheme } from "~/hooks/useTheme";
 
 type LogoProps = {
-  /** Pixel height of the logo. Default 40. */
+  /** Pixel height of the logo. Default 96. */
   height?: number;
   /** Where to navigate when clicked. Default `/`. Pass null to render
    *  the logo as a plain image with no link wrapper. */
@@ -15,21 +16,18 @@ type LogoProps = {
   className?: string;
 };
 
-export default function Logo({ height = 40, to = "/", className }: LogoProps) {
-  // Native <picture> swap on prefers-color-scheme. Browser picks the right
-  // asset; no JS, no flash-of-wrong-logo.
+export default function Logo({ height = 96, to = "/", className }: LogoProps) {
+  const { theme } = useTheme();
+  const src = theme === "dark" ? darkLogoUrl : lightLogoUrl;
   const img = (
-    <picture>
-      <source srcSet={darkLogoUrl} media="(prefers-color-scheme: dark)" />
-      <img
-        src={lightLogoUrl}
-        alt="ActionNow.AI — Trusted Agent Inbox"
-        height={height}
-        style={{ height, width: "auto" }}
-        className={`block select-none ${className ?? ""}`.trim()}
-        draggable={false}
-      />
-    </picture>
+    <img
+      src={src}
+      alt="ActionNow.AI — Trusted Agent Inbox"
+      height={height}
+      style={{ height, width: "auto" }}
+      className={`block select-none ${className ?? ""}`.trim()}
+      draggable={false}
+    />
   );
   if (to === null) return img;
   return (
