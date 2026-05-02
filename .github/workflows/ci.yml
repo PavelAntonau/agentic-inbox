@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, setup/actionnow-ai]
+  push:
+    branches: [main, setup/actionnow-ai]
+
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: forGroup bypass lint
+        run: bash scripts/lint/forgroup-bypass.sh
