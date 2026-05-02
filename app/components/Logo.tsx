@@ -2,7 +2,8 @@
 // Licensed under the Apache 2.0 license
 
 import { Link } from "react-router";
-import logoUrl from "~/assets/branding/anai-mail-logo.png?url";
+import lightLogoUrl from "~/assets/branding/anai-mail-logo-light.png?url";
+import darkLogoUrl from "~/assets/branding/anai-mail-logo-dark.png?url";
 
 type LogoProps = {
   /** Pixel height of the logo. Default 40. */
@@ -15,15 +16,20 @@ type LogoProps = {
 };
 
 export default function Logo({ height = 40, to = "/", className }: LogoProps) {
+  // Native <picture> swap on prefers-color-scheme. Browser picks the right
+  // asset; no JS, no flash-of-wrong-logo.
   const img = (
-    <img
-      src={logoUrl}
-      alt="ActionNow.AI — Trusted Agent Inbox"
-      height={height}
-      style={{ height, width: "auto" }}
-      className={`block select-none dark:brightness-110 dark:contrast-95 ${className ?? ""}`.trim()}
-      draggable={false}
-    />
+    <picture>
+      <source srcSet={darkLogoUrl} media="(prefers-color-scheme: dark)" />
+      <img
+        src={lightLogoUrl}
+        alt="ActionNow.AI — Trusted Agent Inbox"
+        height={height}
+        style={{ height, width: "auto" }}
+        className={`block select-none ${className ?? ""}`.trim()}
+        draggable={false}
+      />
+    </picture>
   );
   if (to === null) return img;
   return (

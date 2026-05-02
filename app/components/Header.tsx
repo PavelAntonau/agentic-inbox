@@ -170,20 +170,11 @@ export default function Header() {
         </>
       )}
 
-      {/* Non-mailbox routes: just a settings icon pointing to "/" */}
-      {!mailboxId && (
-        <div className="flex items-center gap-1 ml-auto shrink-0">
-          <Tooltip content="Settings" side="bottom" asChild>
-            <Button
-              variant={isSettingsActive ? "secondary" : "ghost"}
-              shape="square"
-              icon={<GearSixIcon size={20} />}
-              onClick={() => navigate("/settings")}
-              aria-label="Settings"
-            />
-          </Tooltip>
-        </div>
-      )}
+      {/* Non-mailbox routes (e.g. the empty home page when the user has no
+          mailboxes yet): no settings button. The route /settings doesn't
+          exist as a top-level — settings are per-mailbox — so showing a
+          gear here would 404 into not-found.tsx. Re-introduce when a
+          global settings page lands. */}
     </header>
   );
 }

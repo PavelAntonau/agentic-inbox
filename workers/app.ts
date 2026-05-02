@@ -215,9 +215,10 @@ app.all("*", (c) => {
  * Render the dev-mode `/login` mock-identity picker.
  *
  * Server-rendered as a single HTML template — no React, no client JS, no
- * dependency on the SSR runner-worker. The page references two static
- * assets (`/anai-mail-login-hero.png`, `/anai-mail-logo.png`) that live in
- * `public/` and are served by the static-assets binding.
+ * dependency on the SSR runner-worker. The page references the hero asset
+ * (`/anai-mail-login-hero-{light,dark}.png`) that lives in `public/` and is
+ * served by the static-assets binding. A `<picture>` element switches on
+ * `prefers-color-scheme` so the right variant loads with no flash.
  *
  * Reads SW palette tokens via inline CSS so the picker looks branded even
  * when the React Router bundle hasn't loaded yet.
@@ -399,7 +400,10 @@ function renderDevLoginPicker(env: Env, errorMessage?: string): string {
 </head>
 <body>
 <main>
-  <img class="hero" src="/anai-mail-login-hero.png" alt="" aria-hidden="true" />
+  <picture>
+    <source srcset="/anai-mail-login-hero-dark.png" media="(prefers-color-scheme: dark)" />
+    <img class="hero" src="/anai-mail-login-hero-light.png" alt="" aria-hidden="true" />
+  </picture>
   <h1>ActionNow.AI</h1>
   <p class="tagline">Trusted Agent Inbox</p>
   <form method="post" action="/login" autocomplete="off" novalidate>
