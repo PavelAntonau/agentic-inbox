@@ -31,6 +31,12 @@ export type MockAccessClaims = JwtClaims & {
  * Synthesizes a JWT-shaped claim object in dev when CF_ACCESS_DEV_MODE='mock'.
  * Stored on c.var.jwt for the (Phase 2) authzContext middleware to consume.
  *
+ * Identity is resolved in this order:
+ *   1. `X-Mock-User-Email` request header (e.g. set by automated tests)
+ *   2. `x-mock-user-email` cookie (set by the dev `/login` picker via POST)
+ *   3. `BOOTSTRAP_DEV_EMAIL` env var (`.dev.vars`)
+ *   4. `BOOTSTRAP_OWNER_EMAIL` env var (`.dev.vars`)
+ *
  * Uses a deterministic uuid derived from the email address so multiple
  * requests from the same mock user produce a stable `sub` — important for
  * the BOOTSTRAP_OWNER_EMAIL first-login-promotion flow in Phase 2.
@@ -42,12 +48,13 @@ export function mockAccessShim(): MiddlewareHandler<{
   return async (c, next) => {
     const email =
       c.req.header("x-mock-user-email") ??
+      readCookie(c.req.header("cookie"), "x-mock-user-email") ??
       c.env.BOOTSTRAP_DEV_EMAIL ??
       c.env.BOOTSTRAP_OWNER_EMAIL;
 
     if (!email) {
       return c.text(
-        "Mock-Access shim requires X-Mock-User-Email header or BOOTSTRAP_DEV_EMAIL env var",
+        "Mock-Access shim requires X-Mock-User-Email header, x-mock-user-email cookie, or BOOTSTRAP_DEV_EMAIL env var",
         500,
       );
     }
@@ -60,6 +67,27 @@ export function mockAccessShim(): MiddlewareHandler<{
     });
     return next();
   };
+}
+
+/** Read one cookie's value out of a `Cookie:` header. Returns null when
+ *  the header is missing or the cookie isn't present. URL-decodes the
+ *  value so `bob%40actionnow.ai` becomes `bob@actionnow.ai`. */
+function readCookie(header: string | undefined, name: string): string | null {
+  if (!header) return null;
+  const lowerName = name.toLowerCase();
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const k = part.slice(0, eq).trim().toLowerCase();
+    if (k !== lowerName) continue;
+    const v = part.slice(eq + 1).trim();
+    try {
+      return decodeURIComponent(v);
+    } catch {
+      return v;
+    }
+  }
+  return null;
 }
 
 /** Stable, deterministic v5-shaped UUID derived from email — pure function. */

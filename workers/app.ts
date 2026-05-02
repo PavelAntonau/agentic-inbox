@@ -56,6 +56,71 @@ type AppVariables = {
 // Main app that wraps the API and adds React Router fallback
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+// `/login` and `/logout` are public — they MUST run before the auth
+// middleware below or no-one could reach them without already being
+// authenticated. In dev (`CF_ACCESS_DEV_MODE=mock`) `/login` serves a
+// branded mock-identity picker; in prod it 302s to Cloudflare Access.
+app.get("/login", (c) => {
+  if (c.env.CF_ACCESS_DEV_MODE === "mock") {
+    return c.html(renderDevLoginPicker(c.env), 200, {
+      "Cache-Control": "no-store",
+    });
+  }
+  if (c.env.TEAM_DOMAIN && c.env.POLICY_AUD) {
+    const url = new URL(c.env.TEAM_DOMAIN);
+    return c.redirect(
+      `${url.origin}/cdn-cgi/access/login/${c.env.POLICY_AUD}`,
+      302,
+    );
+  }
+  return c.text("Login is unavailable: Cloudflare Access not configured.", 500);
+});
+
+app.post("/login", async (c) => {
+  if (c.env.CF_ACCESS_DEV_MODE !== "mock") {
+    // Production has no POST flow — the real Cloudflare Access page handles
+    // credentials at the edge, not here.
+    return c.redirect("/login", 303);
+  }
+  const form = await c.req.formData();
+  const choice = (form.get("identity") ?? "").toString().trim();
+  const customRaw = (form.get("custom_email") ?? "").toString().trim();
+  const email = choice === "custom" ? customRaw : choice;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return c.html(
+      renderDevLoginPicker(
+        c.env,
+        "Please pick a preset or enter a valid email.",
+      ),
+      400,
+    );
+  }
+  const cookie = `x-mock-user-email=${encodeURIComponent(email)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
+  return new Response(null, {
+    status: 303,
+    headers: {
+      Location: "/",
+      "Set-Cookie": cookie,
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
+app.get("/logout", (c) => {
+  // Clear the mock-identity cookie regardless of mode; in prod this is a
+  // no-op since the cookie wouldn't be set, but we still send Max-Age=0
+  // for hygiene and 302 to /login (which itself redirects to Access).
+  return new Response(null, {
+    status: 303,
+    headers: {
+      Location: "/login",
+      "Set-Cookie":
+        "x-mock-user-email=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
 // Cloudflare Access JWT validation middleware.
 //   CF_ACCESS_DEV_MODE=mock     → mock-Access shim (synthesized JWT shape)
 //   import.meta.env.DEV (Vite)  → bypass (legacy: react-router dev path)
@@ -145,6 +210,238 @@ app.all("*", (c) => {
     cloudflare: { env: c.env, ctx: c.executionCtx as ExecutionContext },
   });
 });
+
+/**
+ * Render the dev-mode `/login` mock-identity picker.
+ *
+ * Server-rendered as a single HTML template — no React, no client JS, no
+ * dependency on the SSR runner-worker. The page references two static
+ * assets (`/anai-mail-login-hero.png`, `/anai-mail-logo.png`) that live in
+ * `public/` and are served by the static-assets binding.
+ *
+ * Reads SW palette tokens via inline CSS so the picker looks branded even
+ * when the React Router bundle hasn't loaded yet.
+ *
+ * Pure function — used by both GET (clean render) and POST (re-render with
+ * an error message when the form submission was invalid).
+ */
+function renderDevLoginPicker(env: Env, errorMessage?: string): string {
+  const presetA = "alice@actionnow.ai";
+  const presetB = "bob@actionnow.ai";
+  const owner = env.BOOTSTRAP_OWNER_EMAIL || presetA;
+  const errorBanner = errorMessage
+    ? `<p class="error">${escapeHtml(errorMessage)}</p>`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in — ActionNow.AI</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<style>
+  :root {
+    color-scheme: light dark;
+    --color-bg: #ece8e2;
+    --color-card: #f0ede8;
+    --color-border: #d4d0c8;
+    --color-text: #2c2a26;
+    --color-text-bright: #141310;
+    --color-text-muted: #6b665c;
+    --color-green: #1b7a28;
+    --color-error: #c62828;
+    --radius-panel: 17px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-bg: #1a1a1a;
+      --color-card: #262626;
+      --color-border: #383838;
+      --color-text: #e0e0e0;
+      --color-text-bright: #fafafa;
+      --color-text-muted: #9e9e9e;
+      --color-green: #4caf50;
+      --color-error: #ef5350;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    background: var(--color-bg);
+    color: var(--color-text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+  main {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+  .hero {
+    width: 280px;
+    height: 280px;
+    object-fit: contain;
+    user-select: none;
+    pointer-events: none;
+  }
+  h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--color-text-bright);
+  }
+  .tagline {
+    margin: -16px 0 0 0;
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+  form {
+    width: 100%;
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-panel);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  fieldset {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  legend {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  label.choice {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: border-color 0.12s;
+    color: var(--color-text-bright);
+  }
+  label.choice:hover { border-color: var(--color-green); }
+  label.choice input[type="radio"] { accent-color: var(--color-green); }
+  label.choice .meta {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+  .custom-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    color: var(--color-text-bright);
+  }
+  .custom-row input[type="email"] {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--color-text-bright);
+  }
+  button.primary {
+    background: var(--color-green);
+    color: #fff;
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: filter 0.12s;
+  }
+  button.primary:hover { filter: brightness(1.06); }
+  button.primary:active { filter: brightness(0.94); }
+  .footnote {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    text-align: center;
+    margin: 0;
+  }
+  .error {
+    margin: 0;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-error) 15%, transparent);
+    color: var(--color-error);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <img class="hero" src="/anai-mail-login-hero.png" alt="" aria-hidden="true" />
+  <h1>ActionNow.AI</h1>
+  <p class="tagline">Trusted Agent Inbox</p>
+  <form method="post" action="/login" autocomplete="off" novalidate>
+    ${errorBanner}
+    <fieldset>
+      <legend>Sign in as</legend>
+      <label class="choice">
+        <input type="radio" name="identity" value="${escapeHtml(owner)}" checked />
+        <span><strong>${escapeHtml(owner)}</strong></span>
+        <span class="meta">global owner</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="identity" value="${escapeHtml(presetB)}" />
+        <span><strong>${escapeHtml(presetB)}</strong></span>
+        <span class="meta">user · group: marketing</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="identity" value="custom" />
+        <span><strong>Custom email</strong></span>
+      </label>
+      <div class="custom-row">
+        <span class="meta">@</span>
+        <input type="email" name="custom_email" placeholder="someone@actionnow.ai" />
+      </div>
+    </fieldset>
+    <button class="primary" type="submit">Continue</button>
+    <p class="footnote">Local development only — production uses Cloudflare Access.</p>
+  </form>
+</main>
+</body>
+</html>`;
+}
+
+/** Minimal HTML escape for inline string interpolation. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 // Export the Hono app as the default export with an email handler
 export default {
