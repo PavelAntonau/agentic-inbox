@@ -6,7 +6,6 @@ import { useEffect, useRef } from "react";
 import { Outlet, useParams } from "react-router";
 import AgentSidebar from "~/components/AgentSidebar";
 import ComposeEmail from "~/components/ComposeEmail";
-import Header from "~/components/Header";
 import Sidebar from "~/components/Sidebar";
 import { useMailbox } from "~/queries/mailboxes";
 import { useUIStore } from "~/hooks/useUIStore";
@@ -61,9 +60,9 @@ export default function MailboxRoute() {
         <Sidebar />
       </div>
 
-      {/* Main content */}
+      {/* Main content — Header is rendered globally in root.tsx Layout
+          (Phase 1 Session A) so it appears on every authenticated route. */}
       <div className="flex-1 flex flex-col min-w-0 bg-card">
-        <Header />
         <main className="flex-1 overflow-hidden">
           <Outlet />
         </main>
