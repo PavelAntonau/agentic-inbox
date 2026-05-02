@@ -2,6 +2,54 @@
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 
+/* Small World palette — light mode */
+@theme inline {
+  --color-bg: #ece8e2;
+  --color-bg-alt: #e4e0d9;
+  --color-card: #f0ede8;
+  --color-card-light: #f5f3ee;
+  --color-border: #d4d0c8;
+  --color-text: #2c2a26;
+  --color-text-bright: #141310;
+  --color-text-muted: #6b665c;
+  --color-green: #1b7a28;
+  --color-blue: #1565c0;
+  --color-red: #c62828;
+  --color-accent: #1b7a28;
+  --color-node-shadow: rgba(27, 122, 40, 0.3);
+  --color-hover-border: #b5b0a4;
+  --color-scrollbar: #ccc8bc;
+  --color-overlay-bg: rgba(0, 0, 0, 0.25);
+  --color-tx-card-bg: color-mix(in srgb, #f0ede8 70%, #ece8e2 30%);
+  --color-tx-card-hover: color-mix(in srgb, #f0ede8 50%, #ece8e2 50%);
+  --radius-panel: 17px;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --line-height-normal: 1.4;
+}
+
+/* Small World palette — dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  @theme inline {
+    --color-bg: #1a1a1a;
+    --color-bg-alt: #222222;
+    --color-card: #262626;
+    --color-card-light: #2e2e2e;
+    --color-border: #383838;
+    --color-text: #e0e0e0;
+    --color-text-bright: #fafafa;
+    --color-text-muted: #9e9e9e;
+    --color-green: #4caf50;
+    --color-accent: #4caf50;
+    --color-node-shadow: rgba(76, 175, 80, 0.3);
+    --color-hover-border: #555555;
+    --color-scrollbar: #3e3e3e;
+    --color-overlay-bg: rgba(0, 0, 0, 0.5);
+    --color-tx-card-bg: color-mix(in srgb, #262626 80%, #1a1a1a 20%);
+    --color-tx-card-hover: color-mix(in srgb, #262626 60%, #1a1a1a 40%);
+  }
+}
+
 body {
   margin: 0;
 }
