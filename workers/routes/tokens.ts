@@ -280,9 +280,10 @@ router.post("/:tokenId/revoke", async (c) => {
   const cfServiceTokenId = token.cf_service_token_id;
   const now = Date.now();
 
-  // Step 1: RevocationCache — local revoke FIRST (prevents race-window misses)
+  // Step 1: RevocationCache — local revoke FIRST (prevents race-window misses).
+  // Keyed by issued_to_user (D-V2U-7) so each user's revoked-set is isolated.
   if (cfClientId) {
-    const cacheId = c.env.REVOCATION_CACHE.idFromName(`account`);
+    const cacheId = c.env.REVOCATION_CACHE.idFromName(token.issued_to_user);
     const cacheStub = c.env.REVOCATION_CACHE.get(cacheId);
     await cacheStub.fetch(
       new Request("http://do/revoke", {

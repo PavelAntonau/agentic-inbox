@@ -76,28 +76,44 @@ router.get("/active-sessions", async (c) => {
 
   const db = drizzle(c.env.DB, { schema });
 
-  // Get all non-revoked tokens so we can query their limiters
+  // Get all tokens (with issued_to_user) so we can query their limiters
+  // AND aggregate per-user RevocationCache snapshots (D-V2U-7).
   const tokens = await db
     .select({
       id: schema.agent_tokens.id,
       cf_client_id: schema.agent_tokens.cf_client_id,
+      issued_to_user: schema.agent_tokens.issued_to_user,
     })
     .from(schema.agent_tokens)
     .where(isNull(schema.agent_tokens.revoked_at))
     .all();
 
-  // RevocationCache snapshot (single account-level DO)
-  const cacheId = c.env.REVOCATION_CACHE.idFromName("account");
-  const cacheStub = c.env.REVOCATION_CACHE.get(cacheId);
+  // RevocationCache snapshot — one DO per user (D-V2U-7).
+  // Multi-tenancy ceiling: per-user, not per-account; future accounts table
+  // will let us promote to account_id-keyed DOs. Cross-user leakage is
+  // eliminated by keying — the global_owner who reads this aggregate sees
+  // every user's revoked client IDs deliberately.
+  const distinctUsers = Array.from(
+    new Set(tokens.map((t) => t.issued_to_user)),
+  );
   let revoked_cf_client_ids: string[] = [];
-  try {
-    const res = await cacheStub.fetch(
-      new Request("http://do/snapshot", { method: "GET" }),
-    );
-    revoked_cf_client_ids = (await res.json()) as string[];
-  } catch {
-    // Non-fatal — return empty if DO unreachable
-  }
+  await Promise.all(
+    distinctUsers.map(async (userId) => {
+      const cacheId = c.env.REVOCATION_CACHE.idFromName(userId);
+      const cacheStub = c.env.REVOCATION_CACHE.get(cacheId);
+      try {
+        const res = await cacheStub.fetch(
+          new Request("http://do/snapshot", { method: "GET" }),
+        );
+        const ids = (await res.json()) as string[];
+        revoked_cf_client_ids.push(...ids);
+      } catch {
+        // Non-fatal — skip unreachable per-user DOs
+      }
+    }),
+  );
+  // Deduplicate in case a client_id somehow appears in multiple per-user DOs.
+  revoked_cf_client_ids = Array.from(new Set(revoked_cf_client_ids));
 
   // AgentTokenLimiter snapshots (one DO per token)
   const active_token_entries: ActiveSessionsPayload["active_token_entries"] =

@@ -53,9 +53,12 @@ export function authzContext(): MiddlewareHandler<Ctx> {
       if (!token) return c.text("Unknown service token", 401);
       if (token.revoked_at) return c.text("Token revoked", 401);
 
-      // Step 2: RevocationCache hot-path check (faster than DB for in-flight revocations)
+      // Step 2: RevocationCache hot-path check (faster than DB for in-flight revocations).
+      // Keyed by issued_to_user so each user's revoked-set is isolated (D-V2U-7).
+      // Multi-tenancy ceiling: this is per-user, not per-account; a future
+      // accounts table will let us promote the key to account_id.
       try {
-        const cacheId = c.env.REVOCATION_CACHE.idFromName("account");
+        const cacheId = c.env.REVOCATION_CACHE.idFromName(token.issued_to_user);
         const cacheStub = c.env.REVOCATION_CACHE.get(cacheId);
         const cacheRes = await cacheStub.fetch(
           new Request("http://do/is-revoked", {
