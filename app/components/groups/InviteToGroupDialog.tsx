@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ActionNow.AI
 // Licensed under the Apache 2.0 license
 
-import { Button, Dialog, Input, Text } from "~/ui";
+import { Button, Dialog, Input } from "~/ui";
 import { useToastManager } from "~/ui/toast";
 import { useState } from "react";
 
@@ -110,12 +110,12 @@ export default function InviteToGroupDialog({
 
           <div className="flex flex-col gap-4 px-6 py-4">
             <div className="flex flex-col gap-1.5">
-              <Text size="sm" className="font-medium text-text-bright">
+              <p className="text-sm font-medium text-text-bright">
                 Email address{" "}
                 <span aria-hidden="true" className="text-kumo-danger">
                   *
                 </span>
-              </Text>
+              </p>
               <Input
                 type="email"
                 inputMode="email"
@@ -131,26 +131,31 @@ export default function InviteToGroupDialog({
                 autoFocus
               />
               {emailError && (
-                <Text size="sm" className="text-kumo-danger">
-                  {emailError}
-                </Text>
+                <p className="text-sm text-kumo-danger">{emailError}</p>
               )}
             </div>
 
             <div className="rounded-[12px] bg-kumo-fill/40 px-4 py-3">
-              <Text size="sm" className="text-text-muted">
+              <p className="text-sm text-text-muted">
                 The invitation response will always be "Invitation sent"
                 regardless of whether the address is already in the workspace.
-              </Text>
+              </p>
             </div>
           </div>
 
           <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
-            <Dialog.Close asChild>
-              <Button variant="ghost" disabled={submitting} type="button">
-                Cancel
-              </Button>
-            </Dialog.Close>
+            <Dialog.Close
+              render={(props) => (
+                <Button
+                  {...props}
+                  variant="ghost"
+                  disabled={submitting}
+                  type="button"
+                >
+                  Cancel
+                </Button>
+              )}
+            />
             <Button variant="primary" disabled={submitting} type="submit">
               {submitting ? "Sending…" : "Send invitation"}
             </Button>

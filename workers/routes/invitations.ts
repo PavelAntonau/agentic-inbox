@@ -235,13 +235,11 @@ router.post("/", async (c) => {
         workspaceHost: host,
       });
       await c.env.EMAIL.send({
-        to: [{ email: rawEmail }],
-        from: { email: `noreply@${host}` },
+        to: rawEmail,
+        from: { name: "ActionNow.AI", email: `noreply@${host}` },
         subject: `You've been invited to join ${group.name} on ActionNow.AI`,
-        content: [
-          { type: "text/plain", value: textBody },
-          { type: "text/html", value: htmlBody },
-        ],
+        text: textBody,
+        html: htmlBody,
       });
     }
   } catch {

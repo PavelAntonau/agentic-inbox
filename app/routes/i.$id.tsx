@@ -59,8 +59,11 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       valid = await crypto.subtle.verify(
         "HMAC",
         cryptoKey,
-        tokenBytes,
-        enc.encode(id),
+        tokenBytes.buffer.slice(
+          tokenBytes.byteOffset,
+          tokenBytes.byteOffset + tokenBytes.byteLength,
+        ) as ArrayBuffer,
+        enc.encode(id).buffer.slice(0) as ArrayBuffer,
       );
     }
   } catch {
