@@ -202,6 +202,14 @@ const { default: adminSettingsRouter } =
 app.route("/api/admin/users", adminUsersRouter);
 app.route("/api/admin/settings", adminSettingsRouter);
 
+// Groups + Invitations + Notifications routers (Phase 3)
+const { default: groupsRouter } = await import("./routes/groups");
+const { default: invitationsRouter } = await import("./routes/invitations");
+const { default: notificationsRouter } = await import("./routes/notifications");
+app.route("/api/groups", groupsRouter);
+app.route("/api/invitations", invitationsRouter);
+app.route("/api/notifications", notificationsRouter);
+
 // Mount the API routes
 app.route("/", apiApp);
 
