@@ -10,7 +10,6 @@
 // The trigger is hidden when no items would be shown so we never render an
 // empty popover.
 
-import { Tooltip } from "~/ui";
 import { Menu } from "@base-ui/react/menu";
 import {
   ChartLineIcon,
@@ -23,6 +22,16 @@ import {
 import type { ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import { cn } from "~/ui/lib/cn";
+
+// Frosted-glass surface style for popovers. The plain `.bg-card` Tailwind
+// utility resolves to ~62 % opacity in dark mode (see app/index.css), which
+// the user found too washed-out — bumped to ~92 % via inline color-mix so
+// the popup reads as solid glass with a strong backdrop blur.
+const FROSTED_SURFACE_STYLE: React.CSSProperties = {
+  backgroundColor: "color-mix(in oklab, var(--color-card) 92%, transparent)",
+  backdropFilter: "blur(24px) saturate(180%)",
+  WebkitBackdropFilter: "blur(24px) saturate(180%)",
+};
 
 interface SettingsMenuProps {
   mailboxId: string | undefined;
@@ -100,7 +109,7 @@ export default function SettingsMenu({
 
   const triggerClassName = cn(
     "inline-flex h-9 w-9 items-center justify-center rounded-lg",
-    "text-text-bright hover:bg-kumo-tint",
+    "text-text-bright hover:bg-kumo-tint shadow-sm",
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-kumo-ring",
     "cursor-pointer transition-colors",
     isSettingsActive && "bg-kumo-base",
@@ -108,18 +117,21 @@ export default function SettingsMenu({
 
   return (
     <Menu.Root>
-      <Tooltip content="Settings" side="bottom" asChild>
-        <Menu.Trigger className={triggerClassName} aria-label="Settings">
-          <GearSixIcon size={20} />
-        </Menu.Trigger>
-      </Tooltip>
+      <Menu.Trigger
+        className={triggerClassName}
+        aria-label="Settings"
+        title="Settings"
+      >
+        <GearSixIcon size={20} />
+      </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner sideOffset={8} align="end">
           <Menu.Popup
             className={cn(
-              "min-w-56 origin-top-right rounded-xl border border-border bg-card p-1.5",
-              "shadow-lg outline-none",
+              "min-w-56 origin-top-right rounded-xl border-2 border-border p-1.5",
+              "shadow-2xl outline-none",
             )}
+            style={FROSTED_SURFACE_STYLE}
           >
             {groups.map((group, gi) => (
               <div key={group.label ?? gi}>

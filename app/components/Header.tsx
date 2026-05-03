@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ActionNow.AI
 // Licensed under the Apache 2.0 license
 
-import { Button, Input, Tooltip } from "~/ui";
+import { Button, Input } from "~/ui";
 import {
   CaretRightIcon,
   ListIcon,
@@ -33,6 +33,12 @@ interface MeResponse {
   // Future: avatar_url, account_type, company.
   avatar_url?: string | null;
 }
+
+// Phase 3d: every ghost icon button in the bar gets a slight shadow + the
+// dark-mode-aware bright text colour, so they read consistently in both
+// themes. The user explicitly called this out alongside the avatar (which
+// gets its own slightly stronger shadow inside ProfileMenu).
+const HEADER_GHOST_BTN_CLASS = "text-text-bright shadow-sm";
 
 export default function Header() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -103,6 +109,44 @@ export default function Header() {
 
   const isSettingsActive = location.pathname.includes("/settings");
 
+  // Phase 3d: shared right-cluster order is
+  //   Avatar  →  Robot panel  →  Bell  →  Theme  →  Settings
+  // The user asked for "user first, then notifications, then the theme
+  // switcher" — avatar moves all the way left in the cluster, robot stays
+  // adjacent (lg-only), and the gear stays at the right edge.
+  const rightCluster = (
+    <div className="flex items-center gap-1.5 ml-auto shrink-0">
+      {me && (
+        <ProfileMenu
+          userId={me.id}
+          displayName={me.display_name}
+          email={me.email}
+          avatarUrl={me.avatar_url}
+        />
+      )}
+      {mailboxId && (
+        <Button
+          variant={isAgentPanelOpen ? "secondary" : "ghost"}
+          shape="square"
+          icon={<RobotIcon size={20} />}
+          onClick={toggleAgentPanel}
+          aria-label={
+            isAgentPanelOpen ? "Hide agent panel" : "Show agent panel"
+          }
+          title={isAgentPanelOpen ? "Hide agent panel" : "Show agent panel"}
+          className={`hidden lg:inline-flex ${HEADER_GHOST_BTN_CLASS}`}
+        />
+      )}
+      <NotificationBell />
+      <ThemeToggle />
+      <SettingsMenu
+        mailboxId={mailboxId}
+        isAdmin={isAdmin}
+        isSettingsActive={isSettingsActive}
+      />
+    </div>
+  );
+
   return (
     <header className="flex items-center gap-2 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
       {/* Logo — always visible. Height 77 (~20 % smaller than the 96 px
@@ -134,7 +178,8 @@ export default function Header() {
             icon={<ListIcon size={20} />}
             onClick={toggleSidebar}
             aria-label="Toggle sidebar"
-            className="md:hidden shrink-0 text-text-bright"
+            title="Toggle sidebar"
+            className={`md:hidden shrink-0 ${HEADER_GHOST_BTN_CLASS}`}
           />
 
           {/* Search - full on desktop, collapsible on mobile */}
@@ -158,21 +203,21 @@ export default function Header() {
                   onClick={clearSearch}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-muted hover:text-text-bright hover:bg-tx-card-hover transition-colors"
                   aria-label="Clear search"
+                  title="Clear search"
                 >
                   <XIcon size={14} />
                 </button>
               )}
             </div>
-            <Tooltip content="Search" side="bottom" asChild>
-              <Button
-                variant="ghost"
-                shape="square"
-                icon={<MagnifyingGlassIcon size={20} />}
-                onClick={performSearch}
-                aria-label="Search"
-                className="text-text-bright"
-              />
-            </Tooltip>
+            <Button
+              variant="ghost"
+              shape="square"
+              icon={<MagnifyingGlassIcon size={20} />}
+              onClick={performSearch}
+              aria-label="Search"
+              title="Search"
+              className={HEADER_GHOST_BTN_CLASS}
+            />
           </div>
 
           {/* Search toggle button - mobile only, hidden when search is expanded */}
@@ -184,69 +229,16 @@ export default function Header() {
               icon={<MagnifyingGlassIcon size={20} />}
               onClick={() => setIsSearchExpanded(true)}
               aria-label="Search"
-              className="md:hidden shrink-0 text-text-bright"
+              title="Search"
+              className={`md:hidden shrink-0 ${HEADER_GHOST_BTN_CLASS}`}
             />
           )}
 
-          <div className="flex items-center gap-1 ml-auto shrink-0">
-            <Tooltip
-              content={
-                isAgentPanelOpen ? "Hide agent panel" : "Show agent panel"
-              }
-              side="bottom"
-              asChild
-            >
-              <Button
-                variant={isAgentPanelOpen ? "secondary" : "ghost"}
-                shape="square"
-                icon={<RobotIcon size={20} />}
-                onClick={toggleAgentPanel}
-                aria-label="Toggle agent panel"
-                className="hidden lg:inline-flex text-text-bright"
-              />
-            </Tooltip>
-            <NotificationBell />
-            <ThemeToggle />
-            <SettingsMenu
-              mailboxId={mailboxId}
-              isAdmin={isAdmin}
-              isSettingsActive={isSettingsActive}
-            />
-            {me && (
-              <ProfileMenu
-                userId={me.id}
-                displayName={me.display_name}
-                email={me.email}
-                avatarUrl={me.avatar_url}
-              />
-            )}
-          </div>
+          {rightCluster}
         </>
       )}
 
-      {/* Non-mailbox routes (e.g. the empty home page when the user has no
-          mailboxes yet). SettingsMenu hides itself when there is nothing to
-          show, so non-admin users without a mailbox simply see the avatar +
-          notifications + theme toggle. */}
-      {!mailboxId && (
-        <div className="flex items-center gap-1 ml-auto shrink-0">
-          <NotificationBell />
-          <ThemeToggle />
-          <SettingsMenu
-            mailboxId={mailboxId}
-            isAdmin={isAdmin}
-            isSettingsActive={isSettingsActive}
-          />
-          {me && (
-            <ProfileMenu
-              userId={me.id}
-              displayName={me.display_name}
-              email={me.email}
-              avatarUrl={me.avatar_url}
-            />
-          )}
-        </div>
-      )}
+      {!mailboxId && rightCluster}
     </header>
   );
 }

@@ -10,22 +10,26 @@
 //
 // Data is fetched from GET /api/mailboxes/tree via React Query.
 // The actor identity is fetched from GET /api/admin/me (already wired in Header).
+//
+// Phase 3d layout: title row at top with the "+ New mailbox" CTA directly
+// underneath; bottom-of-rail CTA removed; empty state collapsed to a single
+// italic "No mailboxes yet" line (the duplicate logo was visually redundant
+// with the header logo).
 
 import { Loader, Button } from "~/ui";
 import {
-  LockIcon,
-  EnvelopeIcon,
-  PlusIcon,
   EyeIcon,
+  LockIcon,
+  MailboxIcon,
+  PlusIcon,
 } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { NavLink } from "react-router";
 import GroupSection from "~/components/shell/GroupSection";
 import MailboxNode from "~/components/shell/MailboxNode";
 import CreateMailboxDialog from "~/components/mailbox/CreateMailboxDialog";
 import type { MailboxTreePayload } from "~/routes/_app/api.tree";
-import logoUrl from "~/assets/branding/anai-mail-logo.png?url";
 
 const TREE_QUERY_KEY = ["mailbox-tree"] as const;
 
@@ -81,27 +85,45 @@ export default function MailboxTreeRail() {
   const groups = tree?.groups ?? [];
   const privateMailboxes = tree?.private ?? [];
   const followedMailboxes = tree?.followed ?? [];
+  const isEmpty =
+    groups.length === 0 &&
+    privateMailboxes.length === 0 &&
+    followedMailboxes.length === 0;
 
   return (
     <nav
       aria-label="Mailbox tree"
       className="flex flex-col gap-1 p-2 h-full overflow-y-auto"
     >
-      {/* Home link */}
+      {/* Title row — bigger than before, with the duotone mailbox icon. */}
       <NavLink
         to="/"
         end
         className={({ isActive }) =>
-          `flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm transition-colors ${
+          `flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-base font-semibold transition-colors ${
             isActive
-              ? "bg-tx-card-bg font-semibold text-text-bright"
-              : "text-text hover:bg-tx-card-hover"
+              ? "bg-tx-card-bg text-text-bright"
+              : "text-text-bright hover:bg-tx-card-hover"
           }`
         }
       >
-        <EnvelopeIcon size={16} className="shrink-0" />
+        <MailboxIcon size={22} weight="duotone" className="shrink-0" />
         All Mailboxes
       </NavLink>
+
+      {/* + New mailbox — moved up directly under the title. The bottom-of-rail
+          CTA has been removed; this is the single primary action. */}
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={<PlusIcon size={14} />}
+        onClick={() => setCreateOpen(true)}
+        className="w-full justify-start text-text-muted px-3"
+        aria-label="Create new mailbox"
+        title="Create new mailbox"
+      >
+        New mailbox
+      </Button>
 
       <div className="border-t border-border my-1" />
 
@@ -163,35 +185,13 @@ export default function MailboxTreeRail() {
         </div>
       )}
 
-      {/* Empty state */}
-      {groups.length === 0 &&
-        privateMailboxes.length === 0 &&
-        followedMailboxes.length === 0 && (
-          <div className="flex flex-col items-center gap-3 px-3 py-6">
-            <img
-              src={logoUrl}
-              alt=""
-              className="h-20 w-auto opacity-70"
-              draggable={false}
-            />
-            <p className="text-sm text-text-muted text-center">
-              No mailboxes yet
-            </p>
-          </div>
-        )}
-
-      {/* Create mailbox button */}
-      <div className="mt-auto pt-2 border-t border-border">
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<PlusIcon size={14} />}
-          onClick={() => setCreateOpen(true)}
-          className="w-full justify-start text-text-muted"
-        >
-          New mailbox
-        </Button>
-      </div>
+      {/* Empty state — italic single line. The duplicate ActionNow logo and
+          the bottom "+ New mailbox" button are both gone (Phase 3d). */}
+      {isEmpty && (
+        <p className="px-3 py-4 text-sm italic text-text-muted text-center">
+          No mailboxes yet
+        </p>
+      )}
 
       {createOpen && (
         <CreateMailboxDialog
