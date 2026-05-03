@@ -208,7 +208,28 @@ export const settings = sqliteTable("settings", {
   updated_by: text("updated_by").references(() => users.id),
 });
 
-// 11. audit_log — append-only
+// 11. mailbox_acls — per-mailbox per-user access level (Phase 4: owner=admin only; explicit overrides in Phase 6)
+export const mailbox_acls = sqliteTable(
+  "mailbox_acls",
+  {
+    mailbox_id: text("mailbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    level: text("level", { enum: ["read", "write", "admin"] })
+      .notNull()
+      .default("write"),
+    granted_at: integer("granted_at").notNull(),
+    granted_by: text("granted_by").references(() => users.id),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.mailbox_id, t.user_id] }),
+  }),
+);
+
+// 12. audit_log — append-only
 export const audit_log = sqliteTable(
   "audit_log",
   {

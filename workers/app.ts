@@ -210,6 +210,10 @@ app.route("/api/groups", groupsRouter);
 app.route("/api/invitations", invitationsRouter);
 app.route("/api/notifications", notificationsRouter);
 
+// Mailbox CRUD + share/transfer router (Phase 4 — D1-backed, distinct from /api/v1/mailboxes)
+const { default: mailboxesRouter } = await import("./routes/mailboxes");
+app.route("/api/mailboxes", mailboxesRouter);
+
 // Mount the API routes
 app.route("/", apiApp);
 

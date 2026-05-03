@@ -137,8 +137,12 @@ export default function App() {
       <LinkProvider component={KumoLink}>
         <TooltipProvider>
           <Toasty>
-            <Header />
-            <Outlet />
+            {/* flex flex-col h-screen so child routes using flex-1 fill
+                the space below the sticky Header correctly. */}
+            <div className="flex flex-col h-screen overflow-hidden">
+              <Header />
+              <Outlet />
+            </div>
           </Toasty>
         </TooltipProvider>
       </LinkProvider>
