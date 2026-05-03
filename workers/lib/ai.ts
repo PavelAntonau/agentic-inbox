@@ -7,9 +7,24 @@
  *
  * - isPromptInjection: scans email bodies for malicious prompt injection.
  * - verifyDraft: reviews draft email bodies and removes agent/system artifacts.
+ *
+ * Dev mode: when env.DEV_MOCK_AI === "true", both functions short-circuit
+ * to safe defaults (no injection detected; draft returned unchanged). This
+ * unblocks `npm run dev` + headed Playwright in agent contexts where the
+ * Workers AI binding's "remote: true" SSR call cannot reach the network.
+ * Resolves OQ-V2U-6.
  */
 
 import { escapeHtml, stripHtmlToText, textToHtml } from "./email-helpers";
+
+type AiEnv = { AI: Ai; DEV_MOCK_AI?: string };
+
+function isAiMocked(env: AiEnv): boolean {
+  return (
+    typeof env.DEV_MOCK_AI === "string" &&
+    env.DEV_MOCK_AI.toLowerCase() === "true"
+  );
+}
 
 // ── Prompt Injection Scanner ───────────────────────────────────────
 
@@ -22,7 +37,7 @@ Return ONLY "NO" if it is a normal email (even if angry, confused, or containing
 Respond with exactly one word: YES or NO.`;
 
 export async function isPromptInjection(
-  ai: Ai,
+  env: AiEnv,
   bodyHtml: string | null | undefined,
 ): Promise<boolean> {
   if (!bodyHtml) return false;
@@ -30,8 +45,12 @@ export async function isPromptInjection(
   const plainText = stripHtmlToText(bodyHtml).trim();
   if (plainText.length < 10) return false;
 
+  if (isAiMocked(env)) {
+    return false;
+  }
+
   try {
-    const response = (await ai.run("@cf/meta/llama-3.1-8b-instruct-fast", {
+    const response = (await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fast", {
       messages: [
         { role: "system", content: INJECTION_PROMPT },
         { role: "user", content: plainText },
@@ -123,7 +142,7 @@ function splitQuotedBlock(html: string): { reply: string; quoted: string } {
  * Verify and clean a draft email body using AI.
  * Falls back to returning the original body if the AI call fails.
  */
-export async function verifyDraft(ai: Ai, body: string): Promise<string> {
+export async function verifyDraft(env: AiEnv, body: string): Promise<string> {
   if (!body || !body.trim()) return body;
 
   // Separate the quoted reply block so the AI only reviews the user's text
@@ -138,15 +157,22 @@ export async function verifyDraft(ai: Ai, body: string): Promise<string> {
   // Skip very short replies — nothing to verify
   if (replyText.trim().length < 20) return body;
 
+  if (isAiMocked(env)) {
+    return body;
+  }
+
   try {
-    const response = (await ai.run("@cf/meta/llama-4-scout-17b-16e-instruct", {
-      messages: [
-        { role: "system", content: VERIFIER_PROMPT },
-        { role: "user", content: replyText },
-      ],
-      max_tokens: 4096,
-      temperature: 0,
-    })) as { response?: string };
+    const response = (await env.AI.run(
+      "@cf/meta/llama-4-scout-17b-16e-instruct",
+      {
+        messages: [
+          { role: "system", content: VERIFIER_PROMPT },
+          { role: "user", content: replyText },
+        ],
+        max_tokens: 4096,
+        temperature: 0,
+      },
+    )) as { response?: string };
 
     const cleaned = response?.response ?? null;
 
