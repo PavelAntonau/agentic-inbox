@@ -12,11 +12,12 @@ import {
   Text,
   useToastManager,
 } from "~/ui";
-import { EnvelopeIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router";
 import api from "~/services/api";
+import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
 import {
   useCreateMailbox,
   useDeleteMailbox,
@@ -215,11 +216,12 @@ export default function HomeRoute() {
         ) : (
           <div className="rounded-panel border border-border bg-card py-16 px-6">
             <div className="flex flex-col items-center text-center">
-              <div className="mb-4">
-                <EnvelopeIcon
-                  size={48}
-                  weight="thin"
-                  className="text-text-muted"
+              <div className="mb-6">
+                <img
+                  src={heroUrl}
+                  alt=""
+                  className="h-48 w-auto"
+                  draggable={false}
                 />
               </div>
               <h3 className="text-base font-semibold text-text-bright mb-1.5">

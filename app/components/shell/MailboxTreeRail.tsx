@@ -25,6 +25,7 @@ import GroupSection from "~/components/shell/GroupSection";
 import MailboxNode from "~/components/shell/MailboxNode";
 import CreateMailboxDialog from "~/components/mailbox/CreateMailboxDialog";
 import type { MailboxTreePayload } from "~/routes/_app/api.tree";
+import logoUrl from "~/assets/branding/anai-mail-logo.png?url";
 
 const TREE_QUERY_KEY = ["mailbox-tree"] as const;
 
@@ -166,9 +167,17 @@ export default function MailboxTreeRail() {
       {groups.length === 0 &&
         privateMailboxes.length === 0 &&
         followedMailboxes.length === 0 && (
-          <p className="px-3 py-4 text-sm text-text-muted text-center">
-            No mailboxes yet
-          </p>
+          <div className="flex flex-col items-center gap-3 px-3 py-6">
+            <img
+              src={logoUrl}
+              alt=""
+              className="h-20 w-auto opacity-70"
+              draggable={false}
+            />
+            <p className="text-sm text-text-muted text-center">
+              No mailboxes yet
+            </p>
+          </div>
         )}
 
       {/* Create mailbox button */}

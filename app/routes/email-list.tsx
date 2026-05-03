@@ -14,8 +14,8 @@ import {
   PencilSimpleIcon,
   StarIcon,
   TrashIcon,
-  TrayIcon,
 } from "@phosphor-icons/react";
+import logoUrl from "~/assets/branding/anai-mail-logo.png?url";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -46,10 +46,12 @@ const FOLDER_EMPTY_STATES: Record<
   }
 > = {
   [Folders.INBOX]: {
-    icon: <TrayIcon size={48} weight="thin" className="text-text-muted" />,
-    title: "Your inbox is empty",
+    icon: (
+      <img src={logoUrl} alt="" className="h-24 w-auto" draggable={false} />
+    ),
+    title: "Inbox zero!",
     description:
-      "New emails will appear here when they arrive. Send an email to get the conversation started.",
+      "Nothing in your inbox right now. New emails will land here when they arrive.",
     showCompose: true,
   },
   [Folders.SENT]: {
