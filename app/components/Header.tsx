@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ActionNow.AI
 // Licensed under the Apache 2.0 license
 
-import { Button, Input, Tooltip } from "@cloudflare/kumo";
+import { Button, Input } from "~/ui";
+import { Tooltip } from "@cloudflare/kumo";
 import {
   GearSixIcon,
   ListIcon,

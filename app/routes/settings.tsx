@@ -2,13 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import {
-  Badge,
-  Button,
-  Input,
-  Loader,
-  useKumoToastManager,
-} from "@cloudflare/kumo";
+import { Badge, Button, Input, Loader } from "~/ui";
+import { useKumoToastManager } from "@cloudflare/kumo";
 import { RobotIcon, ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";

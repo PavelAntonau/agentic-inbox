@@ -2,14 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import {
-  Button,
-  Empty,
-  LinkProvider,
-  Loader,
-  Toasty,
-  TooltipProvider,
-} from "@cloudflare/kumo";
+import { Button, Loader } from "~/ui";
+import { Empty, LinkProvider, Toasty, TooltipProvider } from "@cloudflare/kumo";
 import { WarningIcon } from "@phosphor-icons/react";
 import {
   MutationCache,

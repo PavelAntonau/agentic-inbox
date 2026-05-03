@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ActionNow.AI
 // Licensed under the Apache 2.0 license
 
-import { Button, Tooltip } from "@cloudflare/kumo";
+import { Button } from "~/ui";
+import { Tooltip } from "@cloudflare/kumo";
 import { MoonIcon, SunIcon } from "@phosphor-icons/react";
 import { useTheme } from "~/hooks/useTheme";
 
