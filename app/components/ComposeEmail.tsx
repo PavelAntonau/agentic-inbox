@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Button, Dialog, Input, Text } from "~/ui";
-import { Banner } from "@cloudflare/kumo";
+import { Banner, Button, Dialog, Input, Text } from "~/ui";
 import { FloppyDiskIcon, PaperPlaneTiltIcon } from "@phosphor-icons/react";
 import { useParams } from "react-router";
 import { useComposeForm } from "~/hooks/useComposeForm";

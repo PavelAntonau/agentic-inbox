@@ -144,3 +144,17 @@ export type {
   KumoEmptySize,
   KumoEmptyVariantsProps,
 } from "./empty";
+
+export {
+  Banner,
+  bannerVariants,
+  BannerVariant,
+  KUMO_BANNER_BASE_STYLES,
+  KUMO_BANNER_VARIANTS,
+  KUMO_BANNER_DEFAULT_VARIANTS,
+} from "./banner";
+export type {
+  BannerProps,
+  KumoBannerVariant,
+  KumoBannerVariantsProps,
+} from "./banner";
