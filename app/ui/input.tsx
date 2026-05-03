@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Ported from @cloudflare/kumo Input (shadcn pattern — source in app/ui/).
+// Ported from kumo Input (shadcn pattern — source in app/ui/).
 // Preserves exact public API, prop names, and class names from kumo's input chunk.
 // Uses @base-ui/react Input as the underlying primitive (same as kumo).
 

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Ported from @cloudflare/kumo Button (shadcn pattern — source in app/ui/).
+// Ported from kumo Button (shadcn pattern — source in app/ui/).
 // Preserves the exact public API: prop names, types, defaults, DOM structure,
 // and Tailwind utility classes so consumer files need only an import-path change.
 

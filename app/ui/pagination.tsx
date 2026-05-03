@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Ported from @cloudflare/kumo Pagination (shadcn pattern — source in app/ui/).
+// Ported from kumo Pagination (shadcn pattern — source in app/ui/).
 // Preserves the convenience-form public API used by all current consumers:
 // `<Pagination page setPage perPage totalCount text? controls? className? />`.
 // Compound subcomponents (.Info / .PageSize / .Controls / .Separator) are

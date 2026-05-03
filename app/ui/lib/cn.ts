@@ -5,7 +5,7 @@
 // cn — class name helper (clsx + tailwind-merge).
 // Mirrors kumo's internal cn utility which merges Tailwind classes without
 // conflicts. Both clsx and tailwind-merge are already in node_modules as
-// transitive dependencies of @cloudflare/kumo; no new packages are added.
+// transitive dependencies of kumo; no new packages are added.
 
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";

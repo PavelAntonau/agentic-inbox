@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* === Inlined kumo design tokens (replaces @import "@cloudflare/kumo/styles/tailwind") ===
+/* === Inlined kumo design tokens (replaces @import "kumo/styles/tailwind") ===
  *
  * All --color-kumo-* and --text-color-kumo-* variables are inlined here using
  * @theme inline so Tailwind v4 bakes the values directly into generated utilities
@@ -70,7 +70,7 @@
 }
 
 /* === Kumo animation keyframes + plain CSS utilities ========================
- * Preserved from @cloudflare/kumo/dist/styles/kumo.css so that
+ * Preserved from kumo/dist/styles/kumo.css so that
  * animate-refresh (RefreshButton), animate-bounce-in (Empty success icon),
  * and no-scrollbar (scrollable labels) continue to work after the import removal.
  */

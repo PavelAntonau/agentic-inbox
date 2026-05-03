@@ -169,3 +169,16 @@ export type {
   PaginationTextRenderArgs,
   KumoPaginationControls,
 } from "./pagination";
+
+export {
+  Select,
+  selectVariants,
+  KUMO_SELECT_VARIANTS,
+  KUMO_SELECT_DEFAULT_VARIANTS,
+} from "./select";
+export type {
+  SelectProps,
+  SelectOptionProps,
+  KumoSelectSize,
+  KumoSelectVariantsProps,
+} from "./select";

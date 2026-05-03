@@ -8,10 +8,10 @@ import {
   Empty,
   Input,
   Loader,
+  Select,
   Text,
   useToastManager,
 } from "~/ui";
-import { Select } from "@cloudflare/kumo";
 import { EnvelopeIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
