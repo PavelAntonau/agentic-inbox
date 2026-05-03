@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Badge, Button, Input, Loader } from "~/ui";
-import { useKumoToastManager } from "@cloudflare/kumo";
+import { Badge, Button, Input, Loader, useToastManager } from "~/ui";
 import { RobotIcon, ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
@@ -15,7 +14,7 @@ const PROMPT_PLACEHOLDER = `You are an email assistant that helps manage this in
 
 export default function SettingsRoute() {
   const { mailboxId } = useParams<{ mailboxId: string }>();
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
   const { data: mailbox } = useMailbox(mailboxId);
   const updateMailboxMutation = useUpdateMailbox();
 

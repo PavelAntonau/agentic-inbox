@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { useKumoToastManager } from "@cloudflare/kumo";
+import { useToastManager } from "~/ui/toast";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { Folders } from "shared/folders";
@@ -70,7 +70,7 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
     data?: Mailbox;
   };
   const { closePanel, startCompose } = useUIStore();
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
   const [isSending, setIsSending] = useState(false);
   const [sourceViewEmail, setSourceViewEmail] = useState<Email | null>(null);
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(

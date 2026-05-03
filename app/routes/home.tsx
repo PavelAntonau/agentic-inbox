@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Button, Dialog, Input, Loader, Text } from "~/ui";
-import { Empty, Select, useKumoToastManager } from "@cloudflare/kumo";
+import { Button, Dialog, Input, Loader, Text, useToastManager } from "~/ui";
+import { Empty, Select } from "@cloudflare/kumo";
 import { EnvelopeIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
@@ -21,7 +21,7 @@ export function meta() {
 }
 
 export default function HomeRoute() {
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
   const {
     data: mailboxes = [],
     refetch: refetchMailboxes,
