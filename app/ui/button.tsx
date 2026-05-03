@@ -238,7 +238,7 @@ export function RefreshButton({
 // LinkButton (context-aware anchor styled as a button)
 // ---------------------------------------------------------------------------
 
-import { useLinkComponent } from "~/ui/lib/link-provider";
+import { useLinkComponent } from "~/ui/link-provider";
 
 export type LinkButtonProps = React.AnchorHTMLAttributes<HTMLAnchorElement> &
   KumoButtonVariantsProps & {

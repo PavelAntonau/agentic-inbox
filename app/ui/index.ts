@@ -88,6 +88,13 @@ export type {
   KumoTooltipVariantsProps,
 } from "./tooltip";
 
+export { LinkProvider, useLinkComponent } from "./link-provider";
+export type {
+  LinkProviderProps,
+  LinkProps,
+  LinkComponentType,
+} from "./link-provider";
+
 export {
   Toasty,
   ToastProvider,
