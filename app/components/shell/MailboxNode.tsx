@@ -9,10 +9,11 @@
 import { Badge } from "~/ui";
 import {
   EnvelopeIcon,
+  KeyIcon,
   ShareNetworkIcon,
   UserIcon,
 } from "@phosphor-icons/react";
-import { NavLink } from "react-router";
+import { NavLink, useNavigate } from "react-router";
 import { useState, useRef } from "react";
 import type { MailboxNode as MailboxNodeData } from "~/routes/_app/api.tree";
 import AddToGroupDialog from "~/components/mailbox/AddToGroupDialog";
@@ -46,6 +47,7 @@ export default function MailboxNode({
   actorRole,
   onMutated,
 }: MailboxNodeProps) {
+  const navigate = useNavigate();
   const [menu, setMenu] = useState<ContextMenu>(null);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -57,6 +59,11 @@ export default function MailboxNode({
   const canUnshare = (isOwner || isGlobal) && inGroup;
   const canTransfer = isOwner || isGlobal;
   const canDelete = isOwner || isGlobal;
+  // Phase 6 carve-out: client-side mirror of `canIssueToken` from
+  // workers/lib/mailbox-token-permissions.ts (mailbox owner OR global).
+  // TODO(phase-7): consolidate this predicate into a shared module so the
+  // workers and the rail render from the same source of truth.
+  const canTokens = isOwner || isGlobal;
 
   const displayName =
     mailbox.display_name || mailbox.address.split("@")[0] || mailbox.address;
@@ -154,6 +161,19 @@ export default function MailboxNode({
               >
                 <UserIcon size={14} />
                 Transfer ownership
+              </button>
+            )}
+            {canTokens && (
+              <button
+                type="button"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text hover:bg-tx-card-hover transition-colors"
+                onClick={() => {
+                  closeMenu();
+                  navigate(`/mailbox/${mailbox.id}/tokens`);
+                }}
+              >
+                <KeyIcon size={14} />
+                Tokens
               </button>
             )}
             {canDelete && (

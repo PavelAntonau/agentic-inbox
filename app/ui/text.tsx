@@ -134,10 +134,16 @@ export interface TextProps {
 // Text component (generic, uses forwardRef)
 // ---------------------------------------------------------------------------
 
+// Phase 6 carve-out: `forwardRef` render functions must accept exactly two
+// parameters (props, ref). The previous signature destructured `ref` from
+// `props`, leaving the actual second arg unused — React 19 flags that with
+// `forwardRef render functions accept exactly two parameters: props and ref.
+// Did you forget to use the ref parameter?`. Switching to the canonical
+// (props, ref) signature silences the warning while preserving the cast at
+// the export site.
 function TextInner<Variant extends TextVariant = "body">(
-  props: TextPropsInternal<Variant> & {
-    ref?: ForwardedRef<ElementRef<"span">>;
-  },
+  props: TextPropsInternal<Variant>,
+  ref: ForwardedRef<ElementRef<"span">>,
 ) {
   const {
     variant = "body" as Variant,
@@ -147,10 +153,8 @@ function TextInner<Variant extends TextVariant = "body">(
     DANGEROUS_className,
     DANGEROUS_style,
     as,
-    ref,
     ...rest
   } = props as TextPropsInternal<"body"> & {
-    ref?: ForwardedRef<ElementRef<"span">>;
     variant?: TextVariant;
     bold?: boolean;
     size?: TextSize;
