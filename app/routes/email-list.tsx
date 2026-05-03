@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Button, Tooltip } from "~/ui";
-import { Pagination } from "@cloudflare/kumo";
+import { Button, Pagination, Tooltip } from "~/ui";
 import {
   ArchiveIcon,
   ArrowBendUpLeftIcon,

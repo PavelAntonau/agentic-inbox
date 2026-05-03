@@ -158,3 +158,14 @@ export type {
   KumoBannerVariant,
   KumoBannerVariantsProps,
 } from "./banner";
+
+export {
+  Pagination,
+  KUMO_PAGINATION_DEFAULTS,
+  KUMO_PAGINATION_PAGE_SIZE_OPTIONS,
+} from "./pagination";
+export type {
+  PaginationProps,
+  PaginationTextRenderArgs,
+  KumoPaginationControls,
+} from "./pagination";
