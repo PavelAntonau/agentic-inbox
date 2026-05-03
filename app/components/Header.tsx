@@ -21,8 +21,19 @@ import {
 import { useUIStore } from "~/hooks/useUIStore";
 import { useMailbox } from "~/queries/mailboxes";
 import Logo from "~/components/Logo";
+import Avatar from "~/components/Avatar";
 import NotificationBell from "~/components/notifications/NotificationBell";
 import ThemeToggle from "~/components/ThemeToggle";
+
+interface MeResponse {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: string;
+  visibility: "everyone" | "contacts" | "nobody";
+  // Future: avatar_url, account_type, company.
+  avatar_url?: string | null;
+}
 
 export default function Header() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -36,22 +47,38 @@ export default function Header() {
   const [searchParams] = useSearchParams();
   const { toggleSidebar, toggleAgentPanel, isAgentPanelOpen } = useUIStore();
 
-  // Fetch the current user's role so we can conditionally show the Admin link.
-  // The server enforces the actual auth — this is only for hide/show in the nav.
-  const [adminRole, setAdminRole] = useState<string | null>(null);
+  // Fetch the current user. Drives the Admin link, the avatar identity, and
+  // (future) avatar uploads. The server enforces the actual auth — this is
+  // only for hide/show in the nav and avatar rendering.
+  const [me, setMe] = useState<MeResponse | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/admin/me")
-      .then((r) => (r.ok ? (r.json() as Promise<{ role?: string }>) : null))
+    fetch("/api/users/me")
+      .then((r) => (r.ok ? (r.json() as Promise<MeResponse>) : null))
       .then((data) => {
-        if (!cancelled && data?.role) setAdminRole(data.role);
+        if (!cancelled && data) setMe(data);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+  const adminRole = me?.role ?? null;
   const isAdmin = adminRole === "global_owner" || adminRole === "global_admin";
+
+  const openSettings = () => {
+    if (mailboxId) {
+      navigate(
+        isSettingsActive
+          ? `/mailbox/${mailboxId}/emails/inbox`
+          : `/mailbox/${mailboxId}/settings`,
+      );
+    } else if (isAdmin) {
+      navigate("/admin/settings");
+    }
+    // Non-mailbox + non-admin: no destination yet; avatar/gear are a no-op
+    // until the global profile route lands (Phase 3b).
+  };
 
   // Sync search input with URL query param so it stays populated
   const urlQuery = searchParams.get("q") || "";
@@ -93,8 +120,9 @@ export default function Header() {
 
   return (
     <header className="flex items-center gap-2 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
-      {/* Logo — always visible. Height 96 — bigger left-side presence. */}
-      <Logo height={96} className="shrink-0 mr-2" />
+      {/* Logo — always visible. Height 77 (~20 % smaller than the 96 px
+          Phase 1 size — top bar was looking too tall). */}
+      <Logo height={77} className="shrink-0 mr-2" />
 
       {/* Breadcrumb — shows current mailbox context on desktop.
           The left rail owns full mailbox-tree navigation; the breadcrumb
@@ -206,25 +234,29 @@ export default function Header() {
                 variant={isSettingsActive ? "secondary" : "ghost"}
                 shape="square"
                 icon={<GearSixIcon size={20} />}
-                onClick={() =>
-                  navigate(
-                    isSettingsActive
-                      ? `/mailbox/${mailboxId}/emails/inbox`
-                      : `/mailbox/${mailboxId}/settings`,
-                  )
-                }
+                onClick={openSettings}
                 aria-label="Settings"
               />
             </Tooltip>
+            {me && (
+              <Avatar
+                userId={me.id}
+                displayName={me.display_name}
+                email={me.email}
+                avatarUrl={me.avatar_url}
+                size={32}
+                onClick={openSettings}
+                className="ml-1"
+              />
+            )}
           </div>
         </>
       )}
 
       {/* Non-mailbox routes (e.g. the empty home page when the user has no
-          mailboxes yet): no settings button — the route /settings doesn't
-          exist as a top-level. The theme toggle is still useful, so it
-          stays here. Re-introduce a settings link when a global settings
-          page lands. */}
+          mailboxes yet). The gear is shown only when there is a settings
+          target (admin/settings for admins). The avatar always renders so
+          the user has a stable identity affordance. */}
       {!mailboxId && (
         <div className="flex items-center gap-1 ml-auto shrink-0">
           {isAdmin && (
@@ -237,6 +269,28 @@ export default function Header() {
           )}
           <NotificationBell />
           <ThemeToggle />
+          {isAdmin && (
+            <Tooltip content="Admin settings" side="bottom" asChild>
+              <Button
+                variant="ghost"
+                shape="square"
+                icon={<GearSixIcon size={20} />}
+                onClick={openSettings}
+                aria-label="Admin settings"
+              />
+            </Tooltip>
+          )}
+          {me && (
+            <Avatar
+              userId={me.id}
+              displayName={me.display_name}
+              email={me.email}
+              avatarUrl={me.avatar_url}
+              size={32}
+              onClick={isAdmin ? openSettings : undefined}
+              className="ml-1"
+            />
+          )}
         </div>
       )}
     </header>
