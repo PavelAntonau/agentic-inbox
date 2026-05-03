@@ -188,6 +188,13 @@ app.all("/mcp/*", async (c) => {
   return mcpHandler.fetch(c.req.raw, c.env, c.executionCtx as ExecutionContext);
 });
 
+// Admin API routes — require global_owner or global_admin (enforced inside each router)
+const { default: adminUsersRouter } = await import("./routes/admin/users");
+const { default: adminSettingsRouter } =
+  await import("./routes/admin/settings");
+app.route("/api/admin/users", adminUsersRouter);
+app.route("/api/admin/settings", adminSettingsRouter);
+
 // Mount the API routes
 app.route("/", apiApp);
 
