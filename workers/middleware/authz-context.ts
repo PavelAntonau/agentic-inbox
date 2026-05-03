@@ -11,6 +11,7 @@ import type { JwtClaims } from "../lib/mock-access";
 import { isServiceToken, jwtEmail, serviceTokenClientId } from "../lib/auth";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 import { bootstrapOwner } from "../lib/bootstrap-owner";
+import { getSettings } from "../lib/settings-cache";
 
 type Ctx = {
   Bindings: Env;
@@ -43,13 +44,73 @@ export function authzContext(): MiddlewareHandler<Ctx> {
       if (!clientId)
         return c.text("Service-token JWT missing common_name", 403);
 
+      // Step 1: D1 lookup — reject if missing or revoked in DB
       const token = await orm
         .select()
         .from(schema.agent_tokens)
         .where(eq(schema.agent_tokens.cf_client_id, clientId))
         .get();
-      if (!token) return c.text("Unknown service token", 403);
-      if (token.revoked_at) return c.text("Token revoked", 403);
+      if (!token) return c.text("Unknown service token", 401);
+      if (token.revoked_at) return c.text("Token revoked", 401);
+
+      // Step 2: RevocationCache hot-path check (faster than DB for in-flight revocations)
+      try {
+        const cacheId = c.env.REVOCATION_CACHE.idFromName("account");
+        const cacheStub = c.env.REVOCATION_CACHE.get(cacheId);
+        const cacheRes = await cacheStub.fetch(
+          new Request("http://do/is-revoked", {
+            method: "POST",
+            body: JSON.stringify({ cf_client_id: clientId }),
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+        if (cacheRes.ok) {
+          const { revoked } = (await cacheRes.json()) as { revoked: boolean };
+          if (revoked) return c.text("Token revoked", 401);
+        }
+      } catch {
+        // RevocationCache unavailable — fall through to DB state (already checked above)
+      }
+
+      // Step 3: AgentTokenLimiter — enforce max_instances cap
+      const fingerprint =
+        c.req.header("x-agent-fingerprint") ??
+        // Synthesize from IP + UA when header absent
+        `${c.req.header("cf-connecting-ip") ?? "unknown"}:${c.req.header("user-agent") ?? ""}`;
+
+      try {
+        const settingsRows = await getSettings(c.env.DB);
+        const idleSetting = settingsRows.find(
+          (r) => r.key === "agent_token_idle_prune_minutes",
+        );
+        const idleMinutes = Number(idleSetting?.value ?? "60");
+        const idlePruneMs = idleMinutes * 60_000;
+
+        const limiterId = c.env.AGENT_TOKEN_LIMITER.idFromName(token.id);
+        const limiterStub = c.env.AGENT_TOKEN_LIMITER.get(limiterId);
+        const limiterRes = await limiterStub.fetch(
+          new Request("http://do/register", {
+            method: "POST",
+            body: JSON.stringify({
+              fingerprint,
+              max_instances: token.max_instances,
+              idle_prune_ms: idlePruneMs,
+            }),
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+        if (limiterRes.ok) {
+          const result = (await limiterRes.json()) as { accepted: boolean };
+          if (!result.accepted) {
+            return c.text(
+              `Max instances (${token.max_instances}) reached for this token`,
+              429,
+            );
+          }
+        }
+      } catch {
+        // Limiter unavailable — allow through (fail-open for availability)
+      }
 
       // Resolve the user the token was issued to.
       const user = await orm
@@ -60,18 +121,11 @@ export function authzContext(): MiddlewareHandler<Ctx> {
       if (!user || user.status !== "active")
         return c.text("Token user inactive", 403);
 
-      // Service tokens are scoped to ONE mailbox; group_ids is the set of
-      // groups that mailbox belongs to.
-      const links = await orm
-        .select()
-        .from(schema.mailbox_groups)
-        .where(eq(schema.mailbox_groups.mailbox_id, token.mailbox_id))
-        .all();
-
+      // Service tokens are scoped to ONE mailbox; group_ids = []
       c.set("authzContext", {
         user_id: user.id,
         role: user.role,
-        group_ids: links.map((l) => l.group_id),
+        group_ids: [],
         authorized_mailbox_ids: [token.mailbox_id],
         agent_token_id: token.id,
       });
