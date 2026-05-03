@@ -19,6 +19,7 @@ import {
 } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
 import Logo from "~/components/Logo";
+import NotificationBell from "~/components/notifications/NotificationBell";
 import ThemeToggle from "~/components/ThemeToggle";
 
 export default function Header() {
@@ -178,6 +179,7 @@ export default function Header() {
                 Admin
               </RouterLink>
             )}
+            <NotificationBell />
             <ThemeToggle />
             <Tooltip content="Settings" side="bottom" asChild>
               <Button
@@ -213,6 +215,7 @@ export default function Header() {
               Admin
             </RouterLink>
           )}
+          <NotificationBell />
           <ThemeToggle />
         </div>
       )}
