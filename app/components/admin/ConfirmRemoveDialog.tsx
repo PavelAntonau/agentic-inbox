@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license
 
 import { Button, Dialog } from "~/ui";
-import { useKumoToastManager } from "@cloudflare/kumo";
+import { useToastManager } from "~/ui/toast";
 import { useState } from "react";
 import type { AdminUser } from "~/routes/admin/users";
 
@@ -21,7 +21,7 @@ export default function ConfirmRemoveDialog({
   bootstrapOwnerEmail,
   onRemoved,
 }: ConfirmRemoveDialogProps) {
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
   const [isRemoving, setIsRemoving] = useState(false);
 
   if (!user) return null;

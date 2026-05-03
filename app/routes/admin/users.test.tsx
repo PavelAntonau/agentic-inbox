@@ -8,14 +8,17 @@ import AdminLayout from "./_layout";
 import AdminUsersRoute from "./users";
 
 // Mock toast manager since happy-dom doesn't have the real provider
-vi.mock("@cloudflare/kumo", async () => {
+vi.mock("~/ui/toast", async () => {
   const actual =
-    await vi.importActual<typeof import("@cloudflare/kumo")>(
-      "@cloudflare/kumo",
-    );
+    await vi.importActual<typeof import("~/ui/toast")>("~/ui/toast");
   return {
     ...actual,
-    useKumoToastManager: () => ({ add: vi.fn() }),
+    useToastManager: () => ({
+      add: vi.fn(),
+      toast: vi.fn(),
+      dismiss: vi.fn(),
+      dismissAll: vi.fn(),
+    }),
   };
 });
 

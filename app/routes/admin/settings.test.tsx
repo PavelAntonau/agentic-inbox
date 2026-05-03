@@ -6,14 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import AdminSettingsRoute from "./settings";
 
-vi.mock("@cloudflare/kumo", async () => {
+vi.mock("~/ui/toast", async () => {
   const actual =
-    await vi.importActual<typeof import("@cloudflare/kumo")>(
-      "@cloudflare/kumo",
-    );
+    await vi.importActual<typeof import("~/ui/toast")>("~/ui/toast");
   return {
     ...actual,
-    useKumoToastManager: () => ({ add: vi.fn() }),
+    useToastManager: () => ({
+      add: vi.fn(),
+      toast: vi.fn(),
+      dismiss: vi.fn(),
+      dismissAll: vi.fn(),
+    }),
   };
 });
 

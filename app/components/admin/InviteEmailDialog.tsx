@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license
 
 import { Button, Dialog, Input } from "~/ui";
-import { useKumoToastManager } from "@cloudflare/kumo";
+import { useToastManager } from "~/ui/toast";
 import { useState, type FormEvent } from "react";
 
 interface InviteEmailDialogProps {
@@ -16,7 +16,7 @@ export default function InviteEmailDialog({
   onOpenChange,
   onInvited,
 }: InviteEmailDialogProps) {
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

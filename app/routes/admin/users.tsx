@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license
 
 import { Badge, Button, Loader } from "~/ui";
-import { useKumoToastManager } from "@cloudflare/kumo";
+import { useToastManager } from "~/ui/toast";
 import { PlusIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import ConfirmRemoveDialog from "~/components/admin/ConfirmRemoveDialog";
@@ -40,7 +40,7 @@ export function meta() {
 // ---------------------------------------------------------------------------
 
 export default function AdminUsersRoute() {
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);

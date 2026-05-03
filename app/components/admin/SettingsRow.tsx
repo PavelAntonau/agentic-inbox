@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license
 
 import { Input } from "~/ui";
-import { useKumoToastManager } from "@cloudflare/kumo";
+import { useToastManager } from "~/ui/toast";
 import { useEffect, useRef, useState } from "react";
 
 export interface SettingRowData {
@@ -68,7 +68,7 @@ interface SettingsRowProps {
 }
 
 export default function SettingsRow({ setting, onSaved }: SettingsRowProps) {
-  const toastManager = useKumoToastManager();
+  const toastManager = useToastManager();
   const [localValue, setLocalValue] = useState(setting.value);
   const [isSaving, setIsSaving] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
