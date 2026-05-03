@@ -16,6 +16,8 @@ import type { Env } from "./types";
 export { MailboxDO } from "./durableObject";
 export { EmailAgent } from "./agent";
 export { EmailMCP } from "./mcp";
+export { AgentTokenLimiter } from "./durableObject/AgentTokenLimiter";
+export { RevocationCache } from "./durableObject/RevocationCache";
 
 declare module "react-router" {
   export interface AppLoadContext {

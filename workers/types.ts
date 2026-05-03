@@ -20,4 +20,6 @@ export interface Env extends Cloudflare.Env {
   CF_POLICY_ID?: string;
   /** Cloudflare API token with Access: Apps and Policies Write scope. */
   CF_ACCESS_API_TOKEN?: string;
+  /** HMAC pepper for agent token secret hashing. Set via wrangler secret put. */
+  TOKEN_PEPPER?: string;
 }

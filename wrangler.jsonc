@@ -58,6 +58,14 @@
 			{
 				"name": "EMAIL_MCP",
 				"class_name": "EmailMCP"
+			},
+			{
+				"name": "AGENT_TOKEN_LIMITER",
+				"class_name": "AgentTokenLimiter"
+			},
+			{
+				"name": "REVOCATION_CACHE",
+				"class_name": "RevocationCache"
 			}
 		]
 	},
@@ -78,6 +86,13 @@
 			"tag": "v3",
 			"new_sqlite_classes": [
 				"EmailMCP"
+			]
+		},
+		{
+			"tag": "v4",
+			"new_classes": [
+				"AgentTokenLimiter",
+				"RevocationCache"
 			]
 		}
 	]

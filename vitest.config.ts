@@ -7,6 +7,16 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  resolve: {
+    alias: {
+      // Stub the CF runtime module so Durable Object classes can be unit-tested
+      // in the happy-dom environment without a real Workers runtime.
+      "cloudflare:workers": new URL(
+        "./test/stubs/cloudflare-workers.ts",
+        import.meta.url,
+      ).pathname,
+    },
+  },
   test: {
     environment: "happy-dom",
     globals: true,
