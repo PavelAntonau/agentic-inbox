@@ -93,8 +93,8 @@ export default function Header() {
 
   return (
     <header className="flex items-center gap-2 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
-      {/* Logo — always visible. Height 64 (~2× the original 32). */}
-      <Logo height={64} className="shrink-0 mr-2" />
+      {/* Logo — always visible. Height 96 — bigger left-side presence. */}
+      <Logo height={96} className="shrink-0 mr-2" />
 
       {/* Breadcrumb — shows current mailbox context on desktop.
           The left rail owns full mailbox-tree navigation; the breadcrumb
