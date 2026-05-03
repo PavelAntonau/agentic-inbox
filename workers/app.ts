@@ -216,6 +216,10 @@ app.route("/api/notifications", notificationsRouter);
 const { default: mailboxesRouter } = await import("./routes/mailboxes");
 app.route("/api/mailboxes", mailboxesRouter);
 
+// Agent token management router (Phase 5 — issue/list/revoke)
+const { default: tokensRouter } = await import("./routes/tokens");
+app.route("/api/tokens", tokensRouter);
+
 // Mount the API routes
 app.route("/", apiApp);
 
