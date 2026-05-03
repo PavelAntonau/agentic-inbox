@@ -38,7 +38,7 @@
 		{
 			"binding": "DB",
 			"database_name": "agentic-inbox-control-plane",
-			"database_id": "00000000-0000-0000-0000-000000000000",
+			"database_id": "d3d6fb15-bd66-41e0-9e05-78df2c840489",
 			"migrations_dir": "./workers/db/control-plane/migrations"
 		}
 	],
@@ -90,7 +90,7 @@
 		},
 		{
 			"tag": "v4",
-			"new_classes": [
+			"new_sqlite_classes": [
 				"AgentTokenLimiter",
 				"RevocationCache"
 			]
