@@ -184,16 +184,41 @@
   color-scheme: light;
 }
 
-/* Subtle radial glow for the dark theme so the canvas doesn't feel
- * like flat charcoal. Anchored top-left so the logo lockup sits on a
- * slight cyan halo. */
-:root.theme-dark body {
-  background-image: radial-gradient(
-    ellipse 80% 60% at 12% 0%,
-    rgba(45, 110, 200, 0.18) 0%,
-    transparent 60%
-  );
+/* Phase 3f: top + bottom radial gradients on the body — subtle cyan halo
+ * up top (matching the border accent), darker fall-off at the bottom
+ * (matching the panel-shadow vocabulary). Centered, fading to the sides
+ * so the chrome at the edges stays clean. Light theme uses gentler
+ * values; dark theme cranks the dark-bottom + cyan-top contrast. */
+body {
+  background-image:
+    radial-gradient(
+      ellipse 90% 35% at 50% 0%,
+      rgba(78, 195, 255, 0.1) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 90% 35% at 50% 100%,
+      rgba(10, 18, 38, 0.12) 0%,
+      transparent 70%
+    );
   background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+:root.theme-dark body {
+  background-image:
+    radial-gradient(
+      ellipse 95% 40% at 50% 0%,
+      rgba(78, 195, 255, 0.18) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 95% 40% at 50% 100%,
+      rgba(0, 0, 0, 0.55) 0%,
+      transparent 70%
+    );
+  background-attachment: fixed;
+  background-repeat: no-repeat;
 }
 
 /* === Primary CTA — shimmering navy → cyan gradient =========================
@@ -246,13 +271,27 @@ a.bg-kumo-brand {
 
 button.bg-kumo-brand:hover:not(:disabled),
 a.bg-kumo-brand:hover {
-  background-position: 100% 50%;
+  /* Phase 3f: continuous wave instead of a one-shot sweep. Background
+   * position oscillates 0% -> 100% -> 0% so the cyan highlight rolls
+   * gently back and forth across the gradient while the cursor is over
+   * the button. 3s ease-in-out reads as "wave", not "strobe". */
+  animation: shimmer-wave 3s ease-in-out infinite;
   border-color: rgba(78, 195, 255, 0.7);
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.28) inset,
     0 0 0 1px rgba(78, 195, 255, 0.25) inset,
     0 10px 28px -4px rgba(78, 195, 255, 0.55),
     0 4px 10px -2px rgba(10, 29, 68, 0.55);
+}
+
+@keyframes shimmer-wave {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
 }
 
 button.bg-kumo-brand:active:not(:disabled),
@@ -291,30 +330,24 @@ button.bg-kumo-brand:disabled {
     0 4px 12px -2px rgba(0, 0, 0, 0.55);
 }
 
-/* === Glass panels ===========================================================
+/* === Solid panels ===========================================================
  *
- * Every Tailwind `bg-card` surface (empty-state cards, modals via kumo's
- * `bg-kumo-base`, the agent sidebar, the header itself) gets a frosted-
- * glass treatment: the underlying surface is alpha-mixed against the
- * canvas, a backdrop-filter blurs whatever's behind, and a thin cyan-
- * tinted border (matching the gradient CTA's accent) ties the whole
- * design language together.
- *
- * Borders stay 1 px. Shadows are layered — soft outer for depth, inner
- * highlight for a subtle bevel.
+ * Phase 3f: the previous frosted-glass treatment (alpha-mixed surface +
+ * backdrop blur) was rejected by the user as too "ghostly". All bg-card
+ * surfaces — popups, dialogs, sidebar, header, empty-state cards — now
+ * render fully opaque. Borders + layered shadows still tie the design
+ * language together; the cyan-tinted border accents stay.
  */
 .bg-card,
 .bg-kumo-base,
 [role="dialog"] {
-  background-color: color-mix(in oklab, var(--color-card) 68%, transparent);
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  background-color: var(--color-card);
 }
 
 :root.theme-dark .bg-card,
 :root.theme-dark .bg-kumo-base,
 :root.theme-dark [role="dialog"] {
-  background-color: color-mix(in oklab, var(--color-card) 62%, transparent);
+  background-color: var(--color-card);
 }
 
 /* Borders on cards / modals / surfaces — thin, tinted with the accent
@@ -373,19 +406,37 @@ button.bg-kumo-brand:disabled {
     0 4px 14px -6px rgba(78, 195, 255, 0.1);
 }
 
-/* Header — sticky top bar gets its own thin shadow so it visibly floats
- * above the canvas + radial glow, plus the same cyan-tinted bottom
- * border to match the rest of the chrome. */
+/* Header — sticky top bar. Phase 3f: shadow toned down (was reading too
+ * heavy in the screenshot the user shared); the cyan-tinted bottom-border
+ * accent is preserved so the bar still floats off the canvas. */
 header.bg-card {
   box-shadow:
-    0 1px 0 0 rgba(78, 195, 255, 0.12),
-    0 8px 24px -10px rgba(10, 18, 38, 0.15);
+    0 1px 0 0 rgba(78, 195, 255, 0.1),
+    0 4px 10px -8px rgba(10, 18, 38, 0.1);
 }
 
 :root.theme-dark header.bg-card {
   box-shadow:
-    0 1px 0 0 rgba(78, 195, 255, 0.18),
-    0 12px 32px -10px rgba(0, 0, 0, 0.45);
+    0 1px 0 0 rgba(78, 195, 255, 0.14),
+    0 4px 12px -8px rgba(0, 0, 0, 0.25);
+}
+
+/* Sidebar (left rail) — Phase 3f: deeper, more pronounced shadow than the
+ * header so the rail visibly floats above the main canvas. The selector
+ * targets the rail container in app/routes/_app.tsx (.bg-card with the
+ * data-sidebar marker). */
+[data-shell-sidebar].bg-card {
+  box-shadow:
+    1px 0 0 0 rgba(78, 195, 255, 0.1),
+    8px 0 24px -12px rgba(10, 18, 38, 0.18),
+    2px 0 6px -3px rgba(10, 18, 38, 0.1);
+}
+
+:root.theme-dark [data-shell-sidebar].bg-card {
+  box-shadow:
+    1px 0 0 0 rgba(78, 195, 255, 0.16),
+    14px 0 36px -10px rgba(0, 0, 0, 0.55),
+    4px 0 10px -3px rgba(78, 195, 255, 0.1);
 }
 
 /* === Ghost / secondary buttons ==============================================

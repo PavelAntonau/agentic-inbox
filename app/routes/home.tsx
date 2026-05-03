@@ -203,31 +203,36 @@ export default function HomeRoute() {
         ) : (
           <div className="rounded-panel border border-border bg-card py-20 px-10 md:px-12">
             <div className="flex flex-col items-center text-center">
-              <div className="mb-6">
+              {/* Hero image — bigger again per Phase 3f. */}
+              <div className="mb-8">
                 <img
                   src={heroUrl}
                   alt=""
-                  className="h-64 w-auto"
+                  className="h-80 w-auto"
                   draggable={false}
                 />
               </div>
+              {/* Phase 3f order: Create button is the focal CTA right
+                  under the hero, then the supporting copy beneath it. */}
+              {!isConfigured && (
+                <div className="mb-6">
+                  <Button
+                    variant="primary"
+                    icon={<PlusIcon size={16} />}
+                    onClick={() => setIsCreateOpen(true)}
+                  >
+                    Create Mailbox
+                  </Button>
+                </div>
+              )}
               <h3 className="text-lg font-semibold text-text-bright mb-1.5">
                 No mailboxes yet
               </h3>
-              <p className="italic text-sm text-text-muted max-w-md mb-5">
+              <p className="italic text-sm text-text-muted max-w-md">
                 {isConfigured
                   ? "Your email routing is configured but no mailboxes have been created yet. They will appear here automatically."
                   : "Create a mailbox to start sending and receiving emails with your domain."}
               </p>
-              {!isConfigured && (
-                <Button
-                  variant="primary"
-                  icon={<PlusIcon size={16} />}
-                  onClick={() => setIsCreateOpen(true)}
-                >
-                  Create Mailbox
-                </Button>
-              )}
             </div>
           </div>
         )}

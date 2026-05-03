@@ -21,12 +21,8 @@ import { Link as RouterLink } from "react-router";
 import Avatar from "~/components/Avatar";
 import { cn } from "~/ui/lib/cn";
 
-// Near-solid glass surface — see SettingsMenu for the 97 % rationale.
-const FROSTED_SURFACE_STYLE: React.CSSProperties = {
-  backgroundColor: "color-mix(in oklab, var(--color-card) 97%, transparent)",
-  backdropFilter: "blur(14px) saturate(160%)",
-  WebkitBackdropFilter: "blur(14px) saturate(160%)",
-};
+// Phase 3f: bg-card is solid globally now (see app/index.css). No inline
+// surface override needed.
 
 // Avatar styling — Phase 3e: ~30 % bigger plus a clearly visible cyan
 // border and a deeper shadow (user wanted the avatar to "stand out", with
@@ -79,10 +75,9 @@ export default function ProfileMenu({
         <Menu.Positioner sideOffset={8} align="end">
           <Menu.Popup
             className={cn(
-              "min-w-64 origin-top-right rounded-xl border-2 border-border p-1.5",
+              "min-w-64 origin-top-right rounded-xl border-2 border-border bg-card p-1.5",
               "shadow-2xl outline-none",
             )}
-            style={FROSTED_SURFACE_STYLE}
           >
             {/* Identity header — not focusable, not a Menu.Item so keyboard
                 navigation skips it. */}

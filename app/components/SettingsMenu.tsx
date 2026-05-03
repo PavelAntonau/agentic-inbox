@@ -23,15 +23,9 @@ import type { ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import { cn } from "~/ui/lib/cn";
 
-// Near-solid glass surface for popovers. The user explicitly asked for
-// "barely noticeable" translucency — Phase 3d's 92 % was still too see-
-// through, so 97 % gives a hint of frost without ghosting. Lighter blur
-// since aggressive blur is wasted on a mostly-opaque element.
-const FROSTED_SURFACE_STYLE: React.CSSProperties = {
-  backgroundColor: "color-mix(in oklab, var(--color-card) 97%, transparent)",
-  backdropFilter: "blur(14px) saturate(160%)",
-  WebkitBackdropFilter: "blur(14px) saturate(160%)",
-};
+// Phase 3f: popups are fully opaque now. The previous 92 %/97 % alpha-
+// mixed surface was rejected by the user as "ghost-like" — bg-card was
+// switched to solid in app/index.css globally. No inline override needed.
 
 interface SettingsMenuProps {
   mailboxId: string | undefined;
@@ -128,10 +122,9 @@ export default function SettingsMenu({
         <Menu.Positioner sideOffset={8} align="end">
           <Menu.Popup
             className={cn(
-              "min-w-56 origin-top-right rounded-xl border-2 border-border p-1.5",
+              "min-w-56 origin-top-right rounded-xl border-2 border-border bg-card p-1.5",
               "shadow-2xl outline-none",
             )}
-            style={FROSTED_SURFACE_STYLE}
           >
             {groups.map((group, gi) => (
               <div key={group.label ?? gi}>

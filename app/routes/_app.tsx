@@ -23,8 +23,13 @@ export default function AppShell() {
     // flex-1 fills remaining height below the global Header rendered in root.tsx.
     // overflow-hidden prevents double scrollbars; inner panes scroll independently.
     <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left rail — always visible on desktop */}
-      <div className="hidden md:flex w-[240px] shrink-0 border-r border-border flex-col bg-card overflow-y-auto">
+      {/* Left rail — always visible on desktop. data-shell-sidebar marks
+          the surface so the dedicated multi-layer shadow rule in
+          app/index.css can target it (Phase 3f). */}
+      <div
+        data-shell-sidebar
+        className="hidden md:flex w-[240px] shrink-0 border-r border-border flex-col bg-card overflow-y-auto relative z-10"
+      >
         <MailboxTreeRail />
       </div>
 
