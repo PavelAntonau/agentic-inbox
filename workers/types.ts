@@ -14,4 +14,10 @@
 export interface Env extends Cloudflare.Env {
   POLICY_AUD: string;
   TEAM_DOMAIN: string;
+  /** Cloudflare account ID — required for real Access policy mutations. */
+  CF_ACCOUNT_ID?: string;
+  /** Cloudflare Access policy ID for the workspace include-list. */
+  CF_POLICY_ID?: string;
+  /** Cloudflare API token with Access: Apps and Policies Write scope. */
+  CF_ACCESS_API_TOKEN?: string;
 }
