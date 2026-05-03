@@ -121,11 +121,11 @@ describe("filterVisibleUsers — Phase 3 defaults", () => {
 });
 
 // ---------------------------------------------------------------------------
-// filterVisibleUsers — Phase 6 enforcement stub
+// filterVisibleUsers — Phase 6 full enforcement
 // ---------------------------------------------------------------------------
 
-describe("filterVisibleUsers — Phase 6 enforcement (stub)", () => {
-  it("excludes 'nobody' users who are NOT co-members", () => {
+describe("filterVisibleUsers — Phase 6 full enforcement", () => {
+  it("excludes 'nobody' users who are NOT co-members (E15)", () => {
     const result = filterVisibleUsers({
       actor: actorAlice,
       users: [alice, dave],
@@ -136,15 +136,27 @@ describe("filterVisibleUsers — Phase 6 enforcement (stub)", () => {
     expect(result.map((u) => u.id)).not.toContain("u-dave");
   });
 
-  it("excludes 'contacts' users who are NOT co-members", () => {
+  it("excludes 'contacts' users who are NOT co-members and NOT accepted contacts", () => {
     const result = filterVisibleUsers({
       actor: actorAlice,
       users: [alice, carol],
       groupMembers,
       enforceContactsAndNobody: true,
     });
-    // Carol has contacts visibility and is NOT a co-member of alice
+    // Carol has contacts visibility and is NOT a co-member of alice, not in contacts
     expect(result.map((u) => u.id)).not.toContain("u-carol");
+  });
+
+  it("includes 'contacts' users who ARE in actor's accepted contacts list", () => {
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [alice, carol],
+      groupMembers,
+      acceptedContactIds: new Set(["u-carol"]),
+      enforceContactsAndNobody: true,
+    });
+    // Carol is an accepted contact so should be visible
+    expect(result.map((u) => u.id)).toContain("u-carol");
   });
 
   it("still includes 'nobody' co-members in Phase 6", () => {
@@ -159,6 +171,59 @@ describe("filterVisibleUsers — Phase 6 enforcement (stub)", () => {
       enforceContactsAndNobody: true,
     });
     expect(result.map((u) => u.id)).toContain("u-dave");
+  });
+
+  it("excludes blocked users even if they have visibility='everyone'", () => {
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [alice, bob],
+      groupMembers,
+      blockedUserIds: new Set(["u-bob"]),
+      enforceContactsAndNobody: true,
+    });
+    // Bob is blocked — should not appear even though visibility='everyone'
+    expect(result.map((u) => u.id)).not.toContain("u-bob");
+  });
+
+  it("excludes users who blocked the actor", () => {
+    // 'blockedUserIds' carries BOTH directions: actor blocked them OR they blocked actor
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [alice, carol],
+      groupMembers,
+      blockedUserIds: new Set(["u-carol"]), // carol blocked alice
+      enforceContactsAndNobody: true,
+    });
+    expect(result.map((u) => u.id)).not.toContain("u-carol");
+  });
+
+  it("includes 'everyone' users regardless of contact status", () => {
+    const eve: UserRef = {
+      id: "u-eve",
+      email: "eve@actionnow.ai",
+      display_name: "Eve",
+      visibility: "everyone",
+      status: "active",
+    };
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [alice, eve],
+      groupMembers,
+      enforceContactsAndNobody: true,
+    });
+    expect(result.map((u) => u.id)).toContain("u-eve");
+  });
+
+  it("always includes self regardless of block or visibility", () => {
+    const aliceNobody: UserRef = { ...alice, visibility: "nobody" };
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [aliceNobody],
+      groupMembers,
+      blockedUserIds: new Set(["u-alice"]), // self blocked somehow — still included
+      enforceContactsAndNobody: true,
+    });
+    expect(result.map((u) => u.id)).toContain("u-alice");
   });
 });
 

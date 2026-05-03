@@ -220,6 +220,14 @@ app.route("/api/mailboxes", mailboxesRouter);
 const { default: tokensRouter } = await import("./routes/tokens");
 app.route("/api/tokens", tokensRouter);
 
+// Observability router (Phase 6 — admin obs panels)
+const { default: observabilityRouter } = await import("./routes/observability");
+app.route("/api/admin/obs", observabilityRouter);
+
+// Contacts router (Phase 6 — request/accept/decline/block)
+const { default: contactsRouter } = await import("./routes/contacts");
+app.route("/api/contacts", contactsRouter);
+
 // Mount the API routes
 app.route("/", apiApp);
 

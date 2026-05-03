@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license
 
 import { Hono } from "hono";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, or } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import { forGroup, type AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
@@ -13,6 +13,12 @@ import {
   groupInvitationHtml,
   groupInvitationText,
 } from "../lib/email-templates";
+import {
+  filterVisibleUsers,
+  sortByRelevance,
+  type UserRef,
+  type GroupMemberRef,
+} from "../lib/visibility-filter";
 
 type AppVariables = {
   authzContext?: AuthzContext;
@@ -443,6 +449,115 @@ router.post("/:id/cancel", async (c) => {
   );
 
   return c.json({ ok: true });
+});
+
+// -----------------------------------------------------------------------
+// GET /api/invitations/autocomplete?q=&groupId= — visibility-filtered user search
+// Used by InviteToGroupDialog to suggest workspace members for autocomplete.
+// -----------------------------------------------------------------------
+
+router.get("/autocomplete", async (c) => {
+  const ctx = c.var.authzContext!;
+  const q = (c.req.query("q") ?? "").trim().toLowerCase();
+  const { db } = forGroup(c.env.DB, ctx);
+
+  // Load all active users
+  const allUsers = await db
+    .select({
+      id: schema.users.id,
+      email: schema.users.email,
+      display_name: schema.users.display_name,
+      visibility: schema.users.visibility,
+      status: schema.users.status,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.status, "active"))
+    .all();
+
+  // Load group memberships for co-member calculation
+  const groupMembers: GroupMemberRef[] = await db
+    .select({
+      user_id: schema.group_members.user_id,
+      group_id: schema.group_members.group_id,
+    })
+    .from(schema.group_members)
+    .all();
+
+  // Load accepted contacts
+  const contactRows = await db
+    .select({ contact_user_id: schema.contacts.contact_user_id })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.owner_user_id, ctx.user_id),
+        eq(schema.contacts.status, "accepted"),
+      ),
+    )
+    .all();
+  const acceptedContactIds = new Set(contactRows.map((r) => r.contact_user_id));
+
+  // Load blocked users (both directions)
+  const blockedRows = await db
+    .select({
+      owner_user_id: schema.contacts.owner_user_id,
+      contact_user_id: schema.contacts.contact_user_id,
+    })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.status, "blocked"),
+        or(
+          eq(schema.contacts.owner_user_id, ctx.user_id),
+          eq(schema.contacts.contact_user_id, ctx.user_id),
+        ),
+      ),
+    )
+    .all();
+  const blockedUserIds = new Set<string>();
+  for (const row of blockedRows) {
+    if (row.owner_user_id === ctx.user_id)
+      blockedUserIds.add(row.contact_user_id);
+    else blockedUserIds.add(row.owner_user_id);
+  }
+
+  const userRefs: UserRef[] = allUsers.map((u) => ({
+    id: u.id,
+    email: u.email,
+    display_name: u.display_name,
+    visibility: u.visibility as UserRef["visibility"],
+    status: u.status as UserRef["status"],
+  }));
+
+  const actorGroupSet = new Set(ctx.group_ids);
+  const coMemberIds = new Set<string>(
+    groupMembers
+      .filter(
+        (gm) => actorGroupSet.has(gm.group_id) && gm.user_id !== ctx.user_id,
+      )
+      .map((gm) => gm.user_id),
+  );
+
+  const filtered = filterVisibleUsers({
+    actor: { user_id: ctx.user_id, group_ids: ctx.group_ids },
+    users: userRefs,
+    groupMembers,
+    acceptedContactIds,
+    blockedUserIds,
+    enforceContactsAndNobody: true,
+  });
+
+  // Filter by query string
+  const matched = q
+    ? filtered.filter(
+        (u) =>
+          u.email.toLowerCase().includes(q) ||
+          (u.display_name ?? "").toLowerCase().includes(q),
+      )
+    : filtered;
+
+  const sorted = sortByRelevance(matched, q, coMemberIds);
+
+  return c.json({ users: sorted.slice(0, 20) });
 });
 
 export default router;

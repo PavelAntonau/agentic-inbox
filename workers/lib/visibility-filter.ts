@@ -5,11 +5,15 @@
  * Visibility filter for user autocomplete in invitation flows.
  *
  * Phase 3 implementation — honors `everyone` + self + co-members.
- * Phase 6 will extend with `contacts` and `nobody` enforcement.
+ * Phase 6 extends with full `contacts` and `nobody` enforcement.
  *
- * Decision D-V2U-VIS: In Phase 3, only `everyone` visibility is exercised
- * because the visibility setting UI ships in Phase 6. All users effectively
- * behave as `everyone` until Phase 6 adds the override controls.
+ * Decision D-V2U-VIS: Full rule set active from Phase 6:
+ *   1. Always include self.
+ *   2. Always include co-members (regardless of visibility).
+ *   3. Always include actor's accepted contacts.
+ *   4. Include users with visibility='everyone' AND status='active'.
+ *   5. Exclude blocked users (either direction).
+ *   6. Exclude visibility='nobody' for non-actor / non-co-member viewers (E15).
  */
 
 export type VisibilityValue = "everyone" | "contacts" | "nobody";
@@ -33,11 +37,26 @@ export interface GroupMemberRef {
   group_id: string;
 }
 
+export interface ContactRef {
+  /** The contact's user id (already filtered to accepted status) */
+  contact_user_id: string;
+}
+
 export interface VisibilityFilterOptions {
   actor: ActorRef;
   users: UserRef[];
   /** All group_members rows (used to determine co-membership) */
   groupMembers: GroupMemberRef[];
+  /**
+   * Phase 6+: accepted contacts of the actor.
+   * When provided, users with visibility='contacts' who are in this list are included.
+   */
+  acceptedContactIds?: Set<string>;
+  /**
+   * Phase 6+: set of user IDs that are blocked in either direction
+   * (actor blocked them OR they blocked actor).
+   */
+  blockedUserIds?: Set<string>;
   /**
    * Phase 6+ only: when true, enforce `contacts` and `nobody` rules.
    * In Phase 3 this is always false — kept here so Phase 6 can flip it.
@@ -53,12 +72,23 @@ export interface VisibilityFilterOptions {
  *   2. Include any user whose visibility = 'everyone'.
  *   3. Include co-members (share at least one group with the actor).
  *
- * Phase 6+ rules (enforceContactsAndNobody = true) — stub:
- *   4. Exclude users with visibility = 'nobody' (unless co-member).
- *   5. For 'contacts': only include if in actor's contacts list.
+ * Phase 6+ rules (enforceContactsAndNobody = true):
+ *   1. Always include self.
+ *   2. Always include co-members (regardless of visibility).
+ *   3. Always include actor's accepted contacts.
+ *   4. Include users with visibility='everyone' AND status='active'.
+ *   5. Exclude blocked users (either direction).
+ *   6. Exclude visibility='nobody' for non-actor / non-co-member viewers (E15).
  */
 export function filterVisibleUsers(opts: VisibilityFilterOptions): UserRef[] {
-  const { actor, users, groupMembers, enforceContactsAndNobody = false } = opts;
+  const {
+    actor,
+    users,
+    groupMembers,
+    acceptedContactIds = new Set(),
+    blockedUserIds = new Set(),
+    enforceContactsAndNobody = false,
+  } = opts;
 
   // Build a set of user IDs that share at least one group with the actor
   const actorGroupSet = new Set(actor.group_ids);
@@ -77,27 +107,34 @@ export function filterVisibleUsers(opts: VisibilityFilterOptions): UserRef[] {
     // Always include self
     if (u.id === actor.user_id) return true;
 
-    // Always include co-members (regardless of visibility)
-    if (coMemberIds.has(u.id)) return true;
+    if (enforceContactsAndNobody) {
+      // Phase 6: Exclude blocked users (either direction)
+      if (blockedUserIds.has(u.id)) return false;
 
-    if (!enforceContactsAndNobody) {
-      // Phase 3: include everyone whose visibility is 'everyone'
-      // (contacts / nobody are treated as everyone until Phase 6)
+      // Always include co-members (regardless of visibility)
+      if (coMemberIds.has(u.id)) return true;
+
+      // Always include actor's accepted contacts
+      if (acceptedContactIds.has(u.id)) return true;
+
+      // Apply visibility rules
+      switch (u.visibility) {
+        case "everyone":
+          return true;
+        case "contacts":
+          // Only visible to actor's contacts — already handled above
+          return false;
+        case "nobody":
+          // E15: never visible to non-co-member / non-self viewers
+          return false;
+        default:
+          return false;
+      }
+    } else {
+      // Phase 3: include all active users (enforcement deferred)
+      // Always include co-members (regardless of visibility)
+      if (coMemberIds.has(u.id)) return true;
       return true;
-    }
-
-    // Phase 6+ enforcement (stub — not active in Phase 3)
-    switch (u.visibility) {
-      case "everyone":
-        return true;
-      case "contacts":
-        // Phase 6: check contacts table; for now exclude non-contacts
-        return false;
-      case "nobody":
-        // Nobody === not visible even in autocomplete (co-members already returned above)
-        return false;
-      default:
-        return false;
     }
   });
 }
