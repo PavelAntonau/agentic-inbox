@@ -4,7 +4,6 @@
 import { Button, Input, Tooltip } from "~/ui";
 import {
   CaretRightIcon,
-  GearSixIcon,
   ListIcon,
   MagnifyingGlassIcon,
   RobotIcon,
@@ -12,7 +11,6 @@ import {
 } from "@phosphor-icons/react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 import {
-  Link as RouterLink,
   useLocation,
   useNavigate,
   useParams,
@@ -21,8 +19,9 @@ import {
 import { useUIStore } from "~/hooks/useUIStore";
 import { useMailbox } from "~/queries/mailboxes";
 import Logo from "~/components/Logo";
-import Avatar from "~/components/Avatar";
 import NotificationBell from "~/components/notifications/NotificationBell";
+import ProfileMenu from "~/components/ProfileMenu";
+import SettingsMenu from "~/components/SettingsMenu";
 import ThemeToggle from "~/components/ThemeToggle";
 
 interface MeResponse {
@@ -47,9 +46,9 @@ export default function Header() {
   const [searchParams] = useSearchParams();
   const { toggleSidebar, toggleAgentPanel, isAgentPanelOpen } = useUIStore();
 
-  // Fetch the current user. Drives the Admin link, the avatar identity, and
-  // (future) avatar uploads. The server enforces the actual auth — this is
-  // only for hide/show in the nav and avatar rendering.
+  // Fetch the current user. Drives the SettingsMenu admin grouping, the
+  // avatar identity, and (future) avatar uploads. Server enforces the actual
+  // auth — this is only for hide/show in the nav and avatar rendering.
   const [me, setMe] = useState<MeResponse | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -65,20 +64,6 @@ export default function Header() {
   }, []);
   const adminRole = me?.role ?? null;
   const isAdmin = adminRole === "global_owner" || adminRole === "global_admin";
-
-  const openSettings = () => {
-    if (mailboxId) {
-      navigate(
-        isSettingsActive
-          ? `/mailbox/${mailboxId}/emails/inbox`
-          : `/mailbox/${mailboxId}/settings`,
-      );
-    } else if (isAdmin) {
-      navigate("/admin/settings");
-    }
-    // Non-mailbox + non-admin: no destination yet; avatar/gear are a no-op
-    // until the global profile route lands (Phase 3b).
-  };
 
   // Sync search input with URL query param so it stays populated
   const urlQuery = searchParams.get("q") || "";
@@ -149,7 +134,7 @@ export default function Header() {
             icon={<ListIcon size={20} />}
             onClick={toggleSidebar}
             aria-label="Toggle sidebar"
-            className="md:hidden shrink-0"
+            className="md:hidden shrink-0 text-text-bright"
           />
 
           {/* Search - full on desktop, collapsible on mobile */}
@@ -185,6 +170,7 @@ export default function Header() {
                 icon={<MagnifyingGlassIcon size={20} />}
                 onClick={performSearch}
                 aria-label="Search"
+                className="text-text-bright"
               />
             </Tooltip>
           </div>
@@ -198,7 +184,7 @@ export default function Header() {
               icon={<MagnifyingGlassIcon size={20} />}
               onClick={() => setIsSearchExpanded(true)}
               aria-label="Search"
-              className="md:hidden shrink-0"
+              className="md:hidden shrink-0 text-text-bright"
             />
           )}
 
@@ -216,37 +202,22 @@ export default function Header() {
                 icon={<RobotIcon size={20} />}
                 onClick={toggleAgentPanel}
                 aria-label="Toggle agent panel"
-                className="hidden lg:inline-flex"
+                className="hidden lg:inline-flex text-text-bright"
               />
             </Tooltip>
-            {isAdmin && (
-              <RouterLink
-                to="/admin/users"
-                className="text-sm font-medium text-text-bright hover:text-kumo-brand px-2 py-1 rounded hover:bg-tx-card-hover transition-colors"
-              >
-                Admin
-              </RouterLink>
-            )}
             <NotificationBell />
             <ThemeToggle />
-            <Tooltip content="Settings" side="bottom" asChild>
-              <Button
-                variant={isSettingsActive ? "secondary" : "ghost"}
-                shape="square"
-                icon={<GearSixIcon size={20} />}
-                onClick={openSettings}
-                aria-label="Settings"
-              />
-            </Tooltip>
+            <SettingsMenu
+              mailboxId={mailboxId}
+              isAdmin={isAdmin}
+              isSettingsActive={isSettingsActive}
+            />
             {me && (
-              <Avatar
+              <ProfileMenu
                 userId={me.id}
                 displayName={me.display_name}
                 email={me.email}
                 avatarUrl={me.avatar_url}
-                size={32}
-                onClick={openSettings}
-                className="ml-1"
               />
             )}
           </div>
@@ -254,41 +225,24 @@ export default function Header() {
       )}
 
       {/* Non-mailbox routes (e.g. the empty home page when the user has no
-          mailboxes yet). The gear is shown only when there is a settings
-          target (admin/settings for admins). The avatar always renders so
-          the user has a stable identity affordance. */}
+          mailboxes yet). SettingsMenu hides itself when there is nothing to
+          show, so non-admin users without a mailbox simply see the avatar +
+          notifications + theme toggle. */}
       {!mailboxId && (
         <div className="flex items-center gap-1 ml-auto shrink-0">
-          {isAdmin && (
-            <RouterLink
-              to="/admin/users"
-              className="text-sm font-medium text-text-bright hover:text-kumo-brand px-2 py-1 rounded hover:bg-tx-card-hover transition-colors"
-            >
-              Admin
-            </RouterLink>
-          )}
           <NotificationBell />
           <ThemeToggle />
-          {isAdmin && (
-            <Tooltip content="Admin settings" side="bottom" asChild>
-              <Button
-                variant="ghost"
-                shape="square"
-                icon={<GearSixIcon size={20} />}
-                onClick={openSettings}
-                aria-label="Admin settings"
-              />
-            </Tooltip>
-          )}
+          <SettingsMenu
+            mailboxId={mailboxId}
+            isAdmin={isAdmin}
+            isSettingsActive={isSettingsActive}
+          />
           {me && (
-            <Avatar
+            <ProfileMenu
               userId={me.id}
               displayName={me.display_name}
               email={me.email}
               avatarUrl={me.avatar_url}
-              size={32}
-              onClick={isAdmin ? openSettings : undefined}
-              className="ml-1"
             />
           )}
         </div>
