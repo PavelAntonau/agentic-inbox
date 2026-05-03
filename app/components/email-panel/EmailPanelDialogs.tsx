@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Button } from "~/ui";
-import { Dialog } from "@cloudflare/kumo";
+import { Button, Dialog } from "~/ui";
 import { downloadFile } from "~/lib/utils";
 import type { Email } from "~/types";
 

@@ -74,3 +74,26 @@ export type {
   KumoTextSize,
   KumoTextVariantsProps,
 } from "./text";
+
+export {
+  Dialog,
+  DialogRoot,
+  DialogTrigger,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  dialogVariants,
+  KUMO_DIALOG_VARIANTS,
+  KUMO_DIALOG_DEFAULT_VARIANTS,
+} from "./dialog";
+export type {
+  DialogProps,
+  DialogRootProps,
+  DialogTriggerProps,
+  DialogTitleProps,
+  DialogDescriptionProps,
+  DialogCloseProps,
+  KumoDialogSize,
+  KumoDialogRole,
+  KumoDialogVariantsProps,
+} from "./dialog";
