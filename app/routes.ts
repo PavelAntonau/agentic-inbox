@@ -16,5 +16,11 @@ export default [
     route("users", "routes/admin/users.tsx"),
     route("settings", "routes/admin/settings.tsx"),
   ]),
+  route("groups", "routes/groups/_layout.tsx", [
+    index("routes/groups/index.tsx"),
+    route(":groupId", "routes/groups/$groupId.tsx"),
+    route(":groupId/members", "routes/groups/$groupId/members.tsx"),
+  ]),
+  route("i/:id", "routes/i.$id.tsx"),
   route("*", "routes/not-found.tsx"),
 ] satisfies RouteConfig;
