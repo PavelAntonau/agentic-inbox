@@ -1,11 +1,20 @@
 // Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+//
+// Sidebar — compose-actions rail only (Phase 4 repurpose, OQ-V2U-2 default).
+//
+// Navigation was subsumed by MailboxTreeRail in Phase 4.
+// This component is kept (not deleted) to preserve compose-action affordances
+// accessible from mobile (hamburger toggle) and any surface that still
+// needs a "Compose" entry point in a slot-based layout.
+//
+// Retained: Compose button + folder links for the current mailbox.
+// Removed: "back to mailboxes" navigation (rail owns that).
 
 import { Badge, Button, Dialog, Input, Tooltip } from "~/ui";
 import {
   ArchiveIcon,
-  CaretLeftIcon,
   FileIcon,
   FolderIcon,
   PaperPlaneTiltIcon,
@@ -15,10 +24,9 @@ import {
   TrayIcon,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
-import { NavLink, useNavigate, useParams } from "react-router";
+import { NavLink, useParams } from "react-router";
 import { Folders, SYSTEM_FOLDER_IDS } from "shared/folders";
 import { useCreateFolder, useFolders } from "~/queries/folders";
-import { useMailbox } from "~/queries/mailboxes";
 import { useUIStore } from "~/hooks/useUIStore";
 
 const FOLDER_ICONS: Record<string, React.ReactNode> = {
@@ -75,11 +83,9 @@ function FolderLink({
 
 export default function Sidebar() {
   const { mailboxId } = useParams<{ mailboxId: string }>();
-  const navigate = useNavigate();
   const { data: folders = [] } = useFolders(mailboxId);
   const createFolderMutation = useCreateFolder();
   const { startCompose, closeSidebar } = useUIStore();
-  const { data: currentMailbox } = useMailbox(mailboxId);
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
 
@@ -105,50 +111,14 @@ export default function Sidebar() {
     }
   };
 
-  const displayName = useMemo(() => {
-    if (!currentMailbox) return mailboxId?.split("@")[0] || "Mailbox";
-    // Prefer settings.fromName > name > local part of email
-    if (currentMailbox.settings?.fromName) {
-      return currentMailbox.settings.fromName;
-    }
-    if (currentMailbox.name && currentMailbox.name !== currentMailbox.email) {
-      return currentMailbox.name;
-    }
-    return currentMailbox.email.split("@")[0] || currentMailbox.name;
-  }, [currentMailbox, mailboxId]);
-
   const handleNavClick = () => {
-    // Close mobile sidebar on navigation
     closeSidebar();
   };
 
   return (
     <aside className="h-full w-64 bg-card flex flex-col shrink-0 border-r border-border">
-      {/* Back + identity */}
-      <div className="px-4 pt-4 pb-1">
-        <button
-          type="button"
-          onClick={() => {
-            navigate("/");
-            closeSidebar();
-          }}
-          className="flex items-center gap-1.5 text-text-muted text-sm hover:text-text-bright transition-colors mb-2.5 cursor-pointer bg-transparent border-0 p-0"
-        >
-          <CaretLeftIcon size={14} />
-          <span>Mailboxes</span>
-        </button>
-        <div className="px-1">
-          <div className="text-base font-semibold text-text-bright truncate">
-            {displayName}
-          </div>
-          <div className="text-sm text-text-muted truncate mt-0.5">
-            {currentMailbox?.email || mailboxId}
-          </div>
-        </div>
-      </div>
-
-      {/* Compose */}
-      <div className="px-3 py-3">
+      {/* Compose — primary action */}
+      <div className="px-3 py-3 pt-4">
         <Button
           variant="primary"
           icon={<PencilSimpleIcon size={16} />}
@@ -159,7 +129,7 @@ export default function Sidebar() {
         </Button>
       </div>
 
-      {/* Navigation */}
+      {/* Folder navigation for current mailbox */}
       <nav className="flex-1 overflow-y-auto px-2 space-y-0.5">
         {SYSTEM_FOLDER_LINKS.map((folder) => (
           <FolderLink
@@ -173,56 +143,33 @@ export default function Sidebar() {
         ))}
 
         {/* Custom folders */}
-        {customFolders.length > 0 && (
-          <div className="pt-5">
-            <div className="flex items-center justify-between px-3 mb-1.5">
-              <span className="text-xs uppercase tracking-wider font-semibold text-text-muted">
-                Folders
-              </span>
-              <Tooltip content="New folder" asChild>
-                <Button
-                  variant="ghost"
-                  shape="square"
-                  size="sm"
-                  icon={<PlusIcon size={16} />}
-                  onClick={() => setIsCreateFolderOpen(true)}
-                  aria-label="Create new folder"
-                />
-              </Tooltip>
-            </div>
-            {customFolders.map((folder) => (
-              <FolderLink
-                key={folder.id}
-                to={`/mailbox/${mailboxId}/emails/${folder.id}`}
-                icon={<FolderIcon size={18} />}
-                label={folder.name}
-                unreadCount={folder.unreadCount}
-                onClick={handleNavClick}
+        <div className="pt-5">
+          <div className="flex items-center justify-between px-3 mb-1.5">
+            <span className="text-xs uppercase tracking-wider font-semibold text-text-muted">
+              Folders
+            </span>
+            <Tooltip content="New folder" asChild>
+              <Button
+                variant="ghost"
+                shape="square"
+                size="sm"
+                icon={<PlusIcon size={16} />}
+                onClick={() => setIsCreateFolderOpen(true)}
+                aria-label="Create new folder"
               />
-            ))}
+            </Tooltip>
           </div>
-        )}
-
-        {/* Add folder button when no custom folders */}
-        {customFolders.length === 0 && (
-          <div className="pt-5">
-            <div className="flex items-center justify-between px-3 mb-1.5">
-              <span className="text-xs uppercase tracking-wider font-semibold text-text-muted">
-                Folders
-              </span>
-              <Tooltip content="New folder" asChild>
-                <Button
-                  variant="ghost"
-                  shape="square"
-                  size="sm"
-                  icon={<PlusIcon size={16} />}
-                  onClick={() => setIsCreateFolderOpen(true)}
-                  aria-label="Create new folder"
-                />
-              </Tooltip>
-            </div>
-          </div>
-        )}
+          {customFolders.map((folder) => (
+            <FolderLink
+              key={folder.id}
+              to={`/mailbox/${mailboxId}/emails/${folder.id}`}
+              icon={<FolderIcon size={18} />}
+              label={folder.name}
+              unreadCount={folder.unreadCount}
+              onClick={handleNavClick}
+            />
+          ))}
+        </div>
       </nav>
 
       {/* Create folder dialog */}

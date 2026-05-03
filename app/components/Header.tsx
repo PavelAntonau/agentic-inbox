@@ -3,6 +3,7 @@
 
 import { Button, Input, Tooltip } from "~/ui";
 import {
+  CaretRightIcon,
   GearSixIcon,
   ListIcon,
   MagnifyingGlassIcon,
@@ -18,6 +19,7 @@ import {
   useSearchParams,
 } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
+import { useMailbox } from "~/queries/mailboxes";
 import Logo from "~/components/Logo";
 import NotificationBell from "~/components/notifications/NotificationBell";
 import ThemeToggle from "~/components/ThemeToggle";
@@ -27,6 +29,9 @@ export default function Header() {
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const { mailboxId } = useParams<{ mailboxId: string }>();
   const navigate = useNavigate();
+  // Breadcrumb: resolve mailbox display name so header shows context
+  // even though the rail now owns full mailbox identity on desktop.
+  const { data: currentMailbox } = useMailbox(mailboxId);
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { toggleSidebar, toggleAgentPanel, isAgentPanelOpen } = useUIStore();
@@ -90,6 +95,21 @@ export default function Header() {
     <header className="flex items-center gap-2 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
       {/* Logo — always visible. Height 64 (~2× the original 32). */}
       <Logo height={64} className="shrink-0 mr-2" />
+
+      {/* Breadcrumb — shows current mailbox context on desktop.
+          The left rail owns full mailbox-tree navigation; the breadcrumb
+          here gives a compact identity reminder in the header bar. */}
+      {mailboxId && currentMailbox && (
+        <div className="hidden md:flex items-center gap-1 text-sm text-text-muted shrink-0">
+          <CaretRightIcon size={12} aria-hidden />
+          <span className="font-medium text-text-bright max-w-[180px] truncate">
+            {currentMailbox.settings?.fromName ||
+              (currentMailbox.name !== currentMailbox.email
+                ? currentMailbox.name
+                : currentMailbox.email.split("@")[0])}
+          </span>
+        </div>
+      )}
 
       {mailboxId && (
         <>
