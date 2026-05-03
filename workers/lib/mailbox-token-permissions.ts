@@ -3,84 +3,56 @@
 //
 // mailbox-token-permissions.ts — permission predicates for agent-token operations.
 //
-// Mirrors the Phase-4 mailbox-permissions.ts pattern:
-//   - Pure exported functions (no side-effects, no DB calls)
-//   - All predicates return PermResult { ok: boolean; reason?: string }
-//   - ONLY place that encodes token ACL logic — endpoints MUST import from here
+// `canIssueToken` and `canRevokeToken` live in shared/permissions/agent-tokens.ts
+// (Phase 7 T7.7) so the client (MailboxNode rail) and the worker enforce the
+// same rule. `canListTokens` stays here — it depends on the worker-only
+// `authorized_mailbox_ids` set.
 
 import type { AuthzContext } from "../db/control-plane/forGroup";
+import {
+  canIssueToken as sharedCanIssueToken,
+  canRevokeToken as sharedCanRevokeToken,
+  isGlobalRole,
+  type AgentTokenRow,
+  type MailboxRow,
+  type PermResult,
+} from "shared/permissions/agent-tokens";
 
-export interface PermResult {
-  ok: boolean;
-  reason?: string;
-}
-
-export interface MailboxRow {
-  id: string;
-  owner_user_id: string;
-}
-
-export interface AgentTokenRow {
-  id: string;
-  mailbox_id: string;
-  issued_to_user: string;
-  revoked_at: number | null;
-}
-
-function isGlobal(role: AuthzContext["role"]): boolean {
-  return role === "global_owner" || role === "global_admin";
-}
+export type { PermResult, MailboxRow, AgentTokenRow };
 
 /**
- * canIssueToken — actor can create an agent token for a given mailbox.
- *
- * Allowed: mailbox owner OR global admin/owner.
+ * canIssueToken — re-export of the shared predicate. AuthzContext
+ * structurally satisfies ActorIdentity ({ user_id, role }).
  */
-export function canIssueToken(
+export const canIssueToken = (
   actor: AuthzContext,
   mailbox: MailboxRow,
-): PermResult {
-  if (isGlobal(actor.role)) return { ok: true };
-  if (mailbox.owner_user_id === actor.user_id) return { ok: true };
-  return {
-    ok: false,
-    reason: "Only the mailbox owner or a global admin can issue tokens.",
-  };
-}
+): PermResult => sharedCanIssueToken(actor, mailbox);
+
+/**
+ * canRevokeToken — re-export of the shared predicate.
+ */
+export const canRevokeToken = (
+  actor: AuthzContext,
+  mailbox: MailboxRow,
+  token: AgentTokenRow,
+): PermResult => sharedCanRevokeToken(actor, mailbox, token);
 
 /**
  * canListTokens — actor can view the token list for a given mailbox.
  *
- * Allowed: mailbox owner, any authorized group member, OR global.
+ * Allowed: mailbox owner, any authorized group member, OR global. Worker-only
+ * because authorized_mailbox_ids is a server-resolved set.
  */
 export function canListTokens(
   actor: AuthzContext,
   mailbox: MailboxRow,
 ): PermResult {
-  if (isGlobal(actor.role)) return { ok: true };
+  if (isGlobalRole(actor.role)) return { ok: true };
   if (mailbox.owner_user_id === actor.user_id) return { ok: true };
   if (actor.authorized_mailbox_ids.includes(mailbox.id)) return { ok: true };
   return {
     ok: false,
     reason: "You do not have access to this mailbox.",
-  };
-}
-
-/**
- * canRevokeToken — actor can revoke a specific agent token.
- *
- * Allowed: the user the token was issued to, mailbox owner, OR global.
- */
-export function canRevokeToken(
-  actor: AuthzContext,
-  mailbox: MailboxRow,
-  token: AgentTokenRow,
-): PermResult {
-  if (isGlobal(actor.role)) return { ok: true };
-  if (mailbox.owner_user_id === actor.user_id) return { ok: true };
-  if (token.issued_to_user === actor.user_id) return { ok: true };
-  return {
-    ok: false,
-    reason: "Only the mailbox owner or the token's owner can revoke it.",
   };
 }

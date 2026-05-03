@@ -3,56 +3,60 @@
 //
 // Phase 7 T7.8 — route-registration sanity check.
 //
-// Phase 6 lesson: two route files (admin/observability + _app/contacts) shipped
-// without being registered in app/routes.ts, then needed a follow-up commit
-// (8058aff fix(shell,ui): MailboxNode Tokens nav…) to wire them in. This test
-// fails fast at vitest time so the gap is caught before merge.
+// Phase 6 lesson: two route files (admin/observability + _app/contacts)
+// shipped without being registered in app/routes.ts and needed a follow-up
+// commit (8058aff fix(shell,ui): MailboxNode Tokens nav…) to wire them in.
+// This vitest fails fast so the gap is caught before merge.
 //
-// Method: parse app/routes.ts as text (the @react-router/dev/routes API uses
-// string-literal file paths, so a regex over the source is reliable). Compare
-// against globbed `app/routes/**/*.tsx` minus test files and a documented
-// exemption list.
+// Method: pull every app/routes/**/*.{ts,tsx} via Vite's `import.meta.glob`
+// and compare against the string literals in app/routes.ts (the
+// @react-router/dev/routes API takes string paths). Cloudflare tsconfig
+// doesn't expose `node:fs`, so we use the Vite-native glob — already typed
+// via `vite/client`.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
 import { describe, expect, test } from "vitest";
 
-const APP_DIR = join(__dirname, "..");
-const ROUTES_DIR = __dirname;
-const ROUTES_TS = join(APP_DIR, "routes.ts");
+// All sibling .tsx/.ts files under app/routes/ — keys are paths relative
+// to THIS file (./_app/contacts.tsx etc.). Test files are excluded so the
+// "every file is registered" assertion only sees real routes.
+const onDiskGlob = import.meta.glob("./**/*.{ts,tsx}", {
+  query: "?url",
+  import: "default",
+});
+
+// app/routes.ts source as raw text — regex over it is reliable because the
+// router API uses string literals for paths.
+const routesSourceGlob = import.meta.glob("../routes.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
 
 /**
  * Files under app/routes/ that are intentionally NOT referenced from
- * app/routes.ts. Add an entry here (with a one-line reason) before adding a
- * file you don't intend to register.
+ * app/routes.ts. Add an entry here (with a one-line reason) before adding
+ * a file you don't intend to register.
  */
 const EXEMPT_FROM_REGISTRATION: ReadonlySet<string> = new Set<string>([
   // (none today — every .tsx file under app/routes/ is registered)
 ]);
 
-function listRouteFiles(dir: string, acc: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      listRouteFiles(full, acc);
-      continue;
-    }
-    if (!entry.endsWith(".tsx") && !entry.endsWith(".ts")) continue;
-    if (entry.endsWith(".test.tsx") || entry.endsWith(".test.ts")) continue;
-    // Path relative to app/, e.g. "routes/admin/users.tsx" — matches the
-    // string literals used in app/routes.ts.
-    acc.push(relative(APP_DIR, full));
-  }
-  return acc;
+function normalizeRouteRelative(relPath: string): string {
+  // glob keys look like "./admin/users.tsx" — strip the leading "./" and
+  // prefix with "routes/" to match how routes.ts references them.
+  return "routes/" + relPath.replace(/^\.\//, "");
+}
+
+function listRouteFiles(): string[] {
+  return Object.keys(onDiskGlob)
+    .filter((p) => !p.endsWith(".test.ts") && !p.endsWith(".test.tsx"))
+    .filter((p) => !p.startsWith("./__")) // skip this test (it starts with __)
+    .map(normalizeRouteRelative);
 }
 
 function extractRegisteredPaths(source: string): Set<string> {
-  // routes.ts entries look like: route("admin", "routes/admin/_layout.tsx", [...])
-  //                              index("routes/home.tsx")
-  //                              layout("routes/_app.tsx", [...])
-  // The path is always the FIRST or SECOND string literal in the call. Match
-  // any quoted string starting with "routes/" — that's the file-path slot.
+  // Match any quoted string starting with "routes/" — that's the file-path
+  // slot in route()/index()/layout() calls.
   const matches = source.matchAll(
     /["']routes\/[A-Za-z0-9_$./-]+\.(?:tsx|ts)["']/g,
   );
@@ -64,11 +68,18 @@ function extractRegisteredPaths(source: string): Set<string> {
 }
 
 describe("Phase 7 T7.8 — route-registration sanity", () => {
-  test("every app/routes/**/*.tsx file is referenced from app/routes.ts", () => {
-    const onDisk = listRouteFiles(ROUTES_DIR).filter(
+  const routesSource = Object.values(routesSourceGlob)[0];
+  if (!routesSource) {
+    throw new Error(
+      "import.meta.glob('../routes.ts') returned no entries — vitest config drift?",
+    );
+  }
+  const registered = extractRegisteredPaths(routesSource);
+
+  test("every app/routes/**/*.{ts,tsx} file is registered in app/routes.ts", () => {
+    const onDisk = listRouteFiles().filter(
       (p) => !EXEMPT_FROM_REGISTRATION.has(p),
     );
-    const registered = extractRegisteredPaths(readFileSync(ROUTES_TS, "utf8"));
     const missing = onDisk.filter((p) => !registered.has(p));
 
     if (missing.length > 0) {
@@ -84,13 +95,12 @@ describe("Phase 7 T7.8 — route-registration sanity", () => {
   });
 
   test("every routes.ts file reference points to an existing file", () => {
-    const onDisk = new Set(listRouteFiles(ROUTES_DIR));
-    const registered = extractRegisteredPaths(readFileSync(ROUTES_TS, "utf8"));
+    const onDisk = new Set(listRouteFiles());
     const missing = Array.from(registered).filter((p) => !onDisk.has(p));
 
     if (missing.length > 0) {
       throw new Error(
-        `app/routes.ts references files that don't exist:\n` +
+        `app/routes.ts references files that don't exist on disk:\n` +
           missing.map((m) => `  - ${m}`).join("\n"),
       );
     }

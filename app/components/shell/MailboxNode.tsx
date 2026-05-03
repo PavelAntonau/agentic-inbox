@@ -16,6 +16,7 @@ import {
 import { NavLink, useNavigate } from "react-router";
 import { useState, useRef } from "react";
 import type { MailboxNode as MailboxNodeData } from "~/routes/_app/api.tree";
+import { canIssueToken } from "shared/permissions/agent-tokens";
 import AddToGroupDialog from "~/components/mailbox/AddToGroupDialog";
 import RemoveFromGroupDialog from "~/components/mailbox/RemoveFromGroupDialog";
 import TransferMailboxOwnershipDialog from "~/components/mailbox/TransferMailboxOwnershipDialog";
@@ -59,11 +60,11 @@ export default function MailboxNode({
   const canUnshare = (isOwner || isGlobal) && inGroup;
   const canTransfer = isOwner || isGlobal;
   const canDelete = isOwner || isGlobal;
-  // Phase 6 carve-out: client-side mirror of `canIssueToken` from
-  // workers/lib/mailbox-token-permissions.ts (mailbox owner OR global).
-  // TODO(phase-7): consolidate this predicate into a shared module so the
-  // workers and the rail render from the same source of truth.
-  const canTokens = isOwner || isGlobal;
+  // Phase 7 T7.7: server + client share one predicate (no more copy-paste drift).
+  const canTokens = canIssueToken(
+    { user_id: actorUserId, role: actorRole },
+    { id: mailbox.id, owner_user_id: mailbox.owner_user_id },
+  ).ok;
 
   const displayName =
     mailbox.display_name || mailbox.address.split("@")[0] || mailbox.address;
