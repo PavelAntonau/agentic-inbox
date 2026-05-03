@@ -34,11 +34,12 @@ interface MeResponse {
   avatar_url?: string | null;
 }
 
-// Phase 3d: every ghost icon button in the bar gets a slight shadow + the
-// dark-mode-aware bright text colour, so they read consistently in both
-// themes. The user explicitly called this out alongside the avatar (which
-// gets its own slightly stronger shadow inside ProfileMenu).
-const HEADER_GHOST_BTN_CLASS = "text-text-bright shadow-sm";
+// Phase 3d/3e: every ghost icon button in the bar gets a slight shadow +
+// the dark-mode-aware bright text colour. We also override `hover:bg-
+// kumo-tint` (baked at the light-mode value, near-white in dark mode —
+// caused the sun-icon-on-dark "white halo" bug) with `hover:bg-card-light`
+// which IS theme-aware. tailwind-merge dedupes the conflicting hover bg.
+const HEADER_GHOST_BTN_CLASS = "text-text-bright shadow-sm hover:bg-card-light";
 
 export default function Header() {
   const [searchQuery, setSearchQuery] = useState("");

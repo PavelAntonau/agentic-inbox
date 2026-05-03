@@ -149,25 +149,12 @@ export default function HomeRoute() {
   const isLoading = !configData;
 
   return (
-    <div className="min-h-screen bg-bg">
-      <div className="mx-auto max-w-2xl px-4 py-8 md:px-6 md:py-16">
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-text-bright">Mailboxes</h1>
-            {!isConfigured && (
-              <Button
-                variant="primary"
-                icon={<PlusIcon size={16} />}
-                onClick={() => setIsCreateOpen(true)}
-              >
-                New Mailbox
-              </Button>
-            )}
-          </div>
-          {domains.length > 0 && (
-            <p className="text-sm text-text-muted mt-1">{domains.join(", ")}</p>
-          )}
-        </div>
+    <div className="min-h-screen bg-bg flex flex-col items-center justify-center">
+      <div className="mx-auto w-full max-w-3xl px-4 py-8 md:px-6 md:py-16">
+        {/* Heading + actionnow.ai subtitle removed (Phase 3e) — they didn't
+            fit the visual language. The "+ New Mailbox" hero CTA also
+            moved to the sidebar; this page is now just the empty state /
+            account list, centered in the viewport. */}
 
         {isLoading ? (
           <div className="flex justify-center py-20">
@@ -214,20 +201,20 @@ export default function HomeRoute() {
             ))}
           </div>
         ) : (
-          <div className="rounded-panel border border-border bg-card py-16 px-6">
+          <div className="rounded-panel border border-border bg-card py-20 px-10 md:px-12">
             <div className="flex flex-col items-center text-center">
               <div className="mb-6">
                 <img
                   src={heroUrl}
                   alt=""
-                  className="h-48 w-auto"
+                  className="h-64 w-auto"
                   draggable={false}
                 />
               </div>
-              <h3 className="text-base font-semibold text-text-bright mb-1.5">
+              <h3 className="text-lg font-semibold text-text-bright mb-1.5">
                 No mailboxes yet
               </h3>
-              <p className="text-sm text-text-muted max-w-sm mb-5">
+              <p className="italic text-sm text-text-muted max-w-md mb-5">
                 {isConfigured
                   ? "Your email routing is configured but no mailboxes have been created yet. They will appear here automatically."
                   : "Create a mailbox to start sending and receiving emails with your domain."}

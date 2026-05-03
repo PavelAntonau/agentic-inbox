@@ -21,17 +21,18 @@ import { Link as RouterLink } from "react-router";
 import Avatar from "~/components/Avatar";
 import { cn } from "~/ui/lib/cn";
 
+// Near-solid glass surface — see SettingsMenu for the 97 % rationale.
 const FROSTED_SURFACE_STYLE: React.CSSProperties = {
-  backgroundColor: "color-mix(in oklab, var(--color-card) 92%, transparent)",
-  backdropFilter: "blur(24px) saturate(180%)",
-  WebkitBackdropFilter: "blur(24px) saturate(180%)",
+  backgroundColor: "color-mix(in oklab, var(--color-card) 97%, transparent)",
+  backdropFilter: "blur(14px) saturate(160%)",
+  WebkitBackdropFilter: "blur(14px) saturate(160%)",
 };
 
-// Avatar styling — Phase 3d: ~30 % bigger, subtle border, slight shadow
-// (the user explicitly called out the avatar as wanting a more pronounced
-// shadow than the surrounding ghost icons).
+// Avatar styling — Phase 3e: ~30 % bigger plus a clearly visible cyan
+// border and a deeper shadow (user wanted the avatar to "stand out", with
+// the border in turquoise / light blue).
 const AVATAR_SIZE_PX = 42;
-const AVATAR_DECORATIONS = "border-2 border-text-muted/30 shadow-md";
+const AVATAR_DECORATIONS = "border-2 border-cyan-400 shadow-lg";
 
 interface ProfileMenuProps {
   userId: string;

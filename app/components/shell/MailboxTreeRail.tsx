@@ -17,12 +17,7 @@
 // with the header logo).
 
 import { Loader, Button } from "~/ui";
-import {
-  EyeIcon,
-  LockIcon,
-  MailboxIcon,
-  PlusIcon,
-} from "@phosphor-icons/react";
+import { EyeIcon, LockIcon, PlusIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink } from "react-router";
@@ -95,30 +90,32 @@ export default function MailboxTreeRail() {
       aria-label="Mailbox tree"
       className="flex flex-col gap-1 p-2 h-full overflow-y-auto"
     >
-      {/* Title row — bigger than before, with the duotone mailbox icon. */}
+      {/* Title row — plain text, no icon (user dropped the MailboxIcon). */}
       <NavLink
         to="/"
         end
         className={({ isActive }) =>
-          `flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-base font-semibold transition-colors ${
+          `flex items-center px-3 py-2.5 rounded-[10px] text-base font-semibold transition-colors ${
             isActive
               ? "bg-tx-card-bg text-text-bright"
               : "text-text-bright hover:bg-tx-card-hover"
           }`
         }
       >
-        <MailboxIcon size={22} weight="duotone" className="shrink-0" />
         All Mailboxes
       </NavLink>
 
-      {/* + New mailbox — moved up directly under the title. The bottom-of-rail
-          CTA has been removed; this is the single primary action. */}
+      {/* + New mailbox — primary gradient (was ghost). The user moved this
+          one over from the home page's hero CTA, asking for it to be
+          slightly flatter and stretched to fit the rail style: w-full +
+          size="sm" gives the flat-rectangle look while preserving the
+          gradient/glow `bg-kumo-brand` rule from app/index.css. */}
       <Button
-        variant="ghost"
+        variant="primary"
         size="sm"
         icon={<PlusIcon size={14} />}
         onClick={() => setCreateOpen(true)}
-        className="w-full justify-start text-text-muted px-3"
+        className="w-full justify-center"
         aria-label="Create new mailbox"
         title="Create new mailbox"
       >

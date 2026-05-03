@@ -23,14 +23,14 @@ import type { ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import { cn } from "~/ui/lib/cn";
 
-// Frosted-glass surface style for popovers. The plain `.bg-card` Tailwind
-// utility resolves to ~62 % opacity in dark mode (see app/index.css), which
-// the user found too washed-out — bumped to ~92 % via inline color-mix so
-// the popup reads as solid glass with a strong backdrop blur.
+// Near-solid glass surface for popovers. The user explicitly asked for
+// "barely noticeable" translucency — Phase 3d's 92 % was still too see-
+// through, so 97 % gives a hint of frost without ghosting. Lighter blur
+// since aggressive blur is wasted on a mostly-opaque element.
 const FROSTED_SURFACE_STYLE: React.CSSProperties = {
-  backgroundColor: "color-mix(in oklab, var(--color-card) 92%, transparent)",
-  backdropFilter: "blur(24px) saturate(180%)",
-  WebkitBackdropFilter: "blur(24px) saturate(180%)",
+  backgroundColor: "color-mix(in oklab, var(--color-card) 97%, transparent)",
+  backdropFilter: "blur(14px) saturate(160%)",
+  WebkitBackdropFilter: "blur(14px) saturate(160%)",
 };
 
 interface SettingsMenuProps {

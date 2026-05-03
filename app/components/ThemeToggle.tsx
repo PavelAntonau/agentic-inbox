@@ -37,7 +37,7 @@ export default function ThemeToggle({ className }: ThemeToggleProps) {
       onClick={toggle}
       aria-label={label}
       title={label}
-      className={`text-text-bright shadow-sm ${className ?? ""}`.trim()}
+      className={`text-text-bright shadow-sm hover:bg-card-light ${className ?? ""}`.trim()}
     />
   );
 }
