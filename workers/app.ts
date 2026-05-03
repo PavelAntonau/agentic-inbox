@@ -188,6 +188,13 @@ app.all("/mcp/*", async (c) => {
   return mcpHandler.fetch(c.req.raw, c.env, c.executionCtx as ExecutionContext);
 });
 
+// GET /api/admin/me — lightweight "who am I" for the admin UI client-side guard
+app.get("/api/admin/me", (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+  return c.json({ user_id: ctx.user_id, role: ctx.role });
+});
+
 // Admin API routes — require global_owner or global_admin (enforced inside each router)
 const { default: adminUsersRouter } = await import("./routes/admin/users");
 const { default: adminSettingsRouter } =
