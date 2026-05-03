@@ -100,8 +100,10 @@ describe("emptyVariants", () => {
 describe("Empty commandLine copy", () => {
   it("shows copy button that triggers clipboard write", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: { writeText },
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
     });
     render(<Empty title="Empty" commandLine="npm test" />);
     const copyBtn = screen.getByRole("button", { name: "Copy command" });
