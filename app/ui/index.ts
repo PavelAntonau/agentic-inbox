@@ -76,6 +76,19 @@ export type {
 } from "./text";
 
 export {
+  Tooltip,
+  TooltipProvider,
+  tooltipVariants,
+  KUMO_TOOLTIP_VARIANTS,
+  KUMO_TOOLTIP_DEFAULT_VARIANTS,
+} from "./tooltip";
+export type {
+  TooltipProps,
+  KumoTooltipSide,
+  KumoTooltipVariantsProps,
+} from "./tooltip";
+
+export {
   Dialog,
   DialogRoot,
   DialogTrigger,

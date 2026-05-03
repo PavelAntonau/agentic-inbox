@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Badge, Button, Loader } from "~/ui";
-import { Tooltip } from "@cloudflare/kumo";
+import { Badge, Button, Loader, Tooltip } from "~/ui";
 import {
   ArrowUpIcon,
   RobotIcon,
