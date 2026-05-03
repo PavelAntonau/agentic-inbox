@@ -3,10 +3,51 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { Badge, Button, Input, Loader, useToastManager } from "~/ui";
-import { RobotIcon, ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
+import {
+  RobotIcon,
+  ArrowCounterClockwiseIcon,
+  EyeIcon,
+} from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { useMailbox, useUpdateMailbox } from "~/queries/mailboxes";
+
+type Visibility = "everyone" | "contacts" | "nobody";
+
+interface UserMeResponse {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: string;
+  visibility: Visibility;
+}
+
+interface SettingsCatalogResponse {
+  settings: { key: string; value: string }[];
+}
+
+const VISIBILITY_OPTIONS: {
+  value: Visibility;
+  label: string;
+  helper: string;
+}[] = [
+  {
+    value: "everyone",
+    label: "Everyone",
+    helper: "Anyone in the workspace can find and contact you.",
+  },
+  {
+    value: "contacts",
+    label: "Contacts only",
+    helper: "Only your accepted contacts and group co-members can find you.",
+  },
+  {
+    value: "nobody",
+    label: "Nobody",
+    helper:
+      "Nobody outside your groups can find you. People who already know your address can still email you.",
+  },
+];
 
 // Placeholder shown in the textarea when no custom prompt is set.
 // The authoritative default prompt lives in workers/agent/index.ts (DEFAULT_SYSTEM_PROMPT).
@@ -22,12 +63,87 @@ export default function SettingsRoute() {
   const [agentPrompt, setAgentPrompt] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  // Phase 6: per-user visibility setting + global default for context.
+  const [visibility, setVisibility] = useState<Visibility>("everyone");
+  const [defaultUserVisibility, setDefaultUserVisibility] =
+    useState<Visibility>("everyone");
+  const [savingVisibility, setSavingVisibility] = useState(false);
+
   useEffect(() => {
     if (mailbox) {
       setDisplayName(mailbox.settings?.fromName || mailbox.name || "");
       setAgentPrompt(mailbox.settings?.agentSystemPrompt || "");
     }
   }, [mailbox]);
+
+  // Load own visibility + global default
+  useEffect(() => {
+    let cancelled = false;
+    async function loadVisibility() {
+      try {
+        const meRes = await fetch("/api/users/me");
+        if (meRes.ok && !cancelled) {
+          const me = (await meRes.json()) as UserMeResponse;
+          setVisibility(me.visibility);
+        }
+      } catch {
+        // Non-fatal — radio falls back to default
+      }
+      try {
+        const settingsRes = await fetch("/api/admin/settings");
+        // Non-admins get 403 here — that's OK, we just use the default
+        if (settingsRes.ok && !cancelled) {
+          const data = (await settingsRes.json()) as SettingsCatalogResponse;
+          const row = data.settings.find(
+            (s) => s.key === "default_user_visibility",
+          );
+          if (
+            row &&
+            (row.value === "everyone" ||
+              row.value === "contacts" ||
+              row.value === "nobody")
+          ) {
+            setDefaultUserVisibility(row.value as Visibility);
+          }
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+    void loadVisibility();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleVisibilityChange = async (next: Visibility) => {
+    if (next === visibility) return;
+    const previous = visibility;
+    setVisibility(next); // optimistic
+    setSavingVisibility(true);
+    try {
+      const res = await fetch("/api/users/me/visibility", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: next }),
+      });
+      if (!res.ok) {
+        setVisibility(previous);
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        toastManager.add({
+          title: d.error ?? "Failed to update visibility",
+          variant: "error",
+        });
+        return;
+      }
+      toastManager.add({ title: "Visibility updated" });
+    } catch {
+      setVisibility(previous);
+      toastManager.add({ title: "Network error", variant: "error" });
+    } finally {
+      setSavingVisibility(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!mailbox || !mailboxId) return;
@@ -127,6 +243,55 @@ export default function SettingsRoute() {
           <p className="text-xs text-text-muted mt-2">
             The prompt is sent as the system message to the AI model. It
             controls the agent's personality, writing style, and behavior rules.
+          </p>
+        </div>
+
+        {/* Visibility (Phase 6) — per-user setting, persists immediately */}
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <EyeIcon size={16} weight="duotone" className="text-text-muted" />
+            <span className="text-sm font-medium text-text-bright">
+              Visibility
+            </span>
+          </div>
+          <p className="text-xs text-text-muted mb-3">
+            Controls who can find you in autocomplete suggestions when other
+            users send invitations or add contacts.
+          </p>
+          <fieldset className="flex flex-col gap-2" disabled={savingVisibility}>
+            <legend className="sr-only">Visibility</legend>
+            {VISIBILITY_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={[
+                  "flex items-start gap-3 rounded-[10px] border px-3 py-2.5 cursor-pointer transition-colors",
+                  visibility === opt.value
+                    ? "border-kumo-brand bg-kumo-brand/5"
+                    : "border-border hover:border-kumo-ring",
+                ].join(" ")}
+              >
+                <input
+                  type="radio"
+                  name="visibility"
+                  value={opt.value}
+                  checked={visibility === opt.value}
+                  onChange={() => void handleVisibilityChange(opt.value)}
+                  className="mt-0.5 accent-kumo-brand"
+                />
+                <span className="flex-1">
+                  <span className="block text-sm text-text-bright font-medium">
+                    {opt.label}
+                  </span>
+                  <span className="block text-xs text-text-muted mt-0.5">
+                    {opt.helper}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <p className="text-xs text-text-muted mt-3">
+            Default for new users:{" "}
+            <span className="font-medium">{defaultUserVisibility}</span>
           </p>
         </div>
 

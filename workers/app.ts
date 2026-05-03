@@ -197,6 +197,83 @@ app.get("/api/admin/me", (c) => {
   return c.json({ user_id: ctx.user_id, role: ctx.role });
 });
 
+// GET /api/users/me — current user including visibility (Phase 6)
+app.get("/api/users/me", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const orm = drizzle(c.env.DB, { schema });
+  const user = await orm
+    .select({
+      id: schema.users.id,
+      email: schema.users.email,
+      display_name: schema.users.display_name,
+      role: schema.users.role,
+      visibility: schema.users.visibility,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.id, ctx.user_id))
+    .get();
+  if (!user) return c.json({ error: "User not found" }, 404);
+  return c.json(user);
+});
+
+// PATCH /api/users/me/visibility — update own visibility setting (Phase 6)
+app.patch("/api/users/me/visibility", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  let body: { visibility?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const visibility = body.visibility;
+  if (
+    visibility !== "everyone" &&
+    visibility !== "contacts" &&
+    visibility !== "nobody"
+  ) {
+    return c.json(
+      { error: "visibility must be 'everyone' | 'contacts' | 'nobody'" },
+      400,
+    );
+  }
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const { appendAudit } = await import("./lib/audit-log");
+  const orm = drizzle(c.env.DB, { schema });
+
+  // Read current value for audit
+  const current = await orm
+    .select({ visibility: schema.users.visibility })
+    .from(schema.users)
+    .where(eq(schema.users.id, ctx.user_id))
+    .get();
+
+  await orm
+    .update(schema.users)
+    .set({ visibility })
+    .where(eq(schema.users.id, ctx.user_id))
+    .run();
+
+  await appendAudit(
+    c.env.DB,
+    ctx,
+    "visibility.change",
+    { kind: "user", id: ctx.user_id },
+    { from: current?.visibility ?? null, to: visibility },
+  );
+
+  return c.json({ ok: true, visibility });
+});
+
 // Admin API routes — require global_owner or global_admin (enforced inside each router)
 const { default: adminUsersRouter } = await import("./routes/admin/users");
 const { default: adminSettingsRouter } =

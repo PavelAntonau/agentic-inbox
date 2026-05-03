@@ -73,7 +73,9 @@ export default function ActiveSessionsPanel() {
         {data && (
           <div className="flex items-center gap-2">
             <Badge variant="secondary">{totalActive ?? 0} active</Badge>
-            <Badge variant="error">{data.revoked_token_count} revoked</Badge>
+            <Badge variant="destructive">
+              {data.revoked_token_count} revoked
+            </Badge>
           </div>
         )}
       </div>

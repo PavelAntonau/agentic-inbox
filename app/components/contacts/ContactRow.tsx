@@ -28,11 +28,11 @@ interface ContactRowProps {
 
 const STATUS_VARIANTS: Record<
   Contact["status"],
-  "primary" | "secondary" | "error"
+  "primary" | "secondary" | "destructive"
 > = {
   accepted: "primary",
   pending: "secondary",
-  blocked: "error",
+  blocked: "destructive",
 };
 
 export default function ContactRow({

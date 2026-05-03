@@ -18,12 +18,16 @@ export default [
       route("emails/:folder", "routes/email-list.tsx"),
       route("settings", "routes/settings.tsx"),
       route("search", "routes/search-results.tsx"),
+      // Phase 6: per-mailbox token management (route file shipped in Phase 5)
+      route("tokens", "routes/_app/mailbox/$mailboxId/tokens.tsx"),
     ]),
     route("groups", "routes/groups/_layout.tsx", [
       index("routes/groups/index.tsx"),
       route(":groupId", "routes/groups/$groupId.tsx"),
       route(":groupId/members", "routes/groups/$groupId/members.tsx"),
     ]),
+    // Phase 6: contacts page
+    route("contacts", "routes/_app/contacts.tsx"),
     // Rail data loader endpoint (internal, fetched by MailboxTreeRail)
     route("_app/api.tree", "routes/_app/api.tree.ts"),
   ]),
@@ -31,6 +35,10 @@ export default [
   route("admin", "routes/admin/_layout.tsx", [
     route("users", "routes/admin/users.tsx"),
     route("settings", "routes/admin/settings.tsx"),
+    // Phase 5: admin-wide token list (route file shipped in Phase 5)
+    route("tokens", "routes/admin/tokens.tsx"),
+    // Phase 6: observability dashboard
+    route("observability", "routes/admin/observability.tsx"),
   ]),
   route("i/:id", "routes/i.$id.tsx"),
   route("*", "routes/not-found.tsx"),
