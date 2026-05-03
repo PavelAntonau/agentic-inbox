@@ -132,3 +132,15 @@ export type {
   KumoDialogRole,
   KumoDialogVariantsProps,
 } from "./dialog";
+
+export {
+  Empty,
+  emptyVariants,
+  KUMO_EMPTY_VARIANTS,
+  KUMO_EMPTY_DEFAULT_VARIANTS,
+} from "./empty";
+export type {
+  EmptyProps,
+  KumoEmptySize,
+  KumoEmptyVariantsProps,
+} from "./empty";
