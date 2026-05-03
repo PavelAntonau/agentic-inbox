@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 import {
+  Link as RouterLink,
   useLocation,
   useNavigate,
   useParams,
@@ -28,6 +29,23 @@ export default function Header() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { toggleSidebar, toggleAgentPanel, isAgentPanelOpen } = useUIStore();
+
+  // Fetch the current user's role so we can conditionally show the Admin link.
+  // The server enforces the actual auth — this is only for hide/show in the nav.
+  const [adminRole, setAdminRole] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ role?: string }>) : null))
+      .then((data) => {
+        if (!cancelled && data?.role) setAdminRole(data.role);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const isAdmin = adminRole === "global_owner" || adminRole === "global_admin";
 
   // Sync search input with URL query param so it stays populated
   const urlQuery = searchParams.get("q") || "";
@@ -152,6 +170,14 @@ export default function Header() {
                 className="hidden lg:inline-flex"
               />
             </Tooltip>
+            {isAdmin && (
+              <RouterLink
+                to="/admin/users"
+                className="text-sm font-medium text-text-bright hover:text-kumo-brand px-2 py-1 rounded hover:bg-tx-card-hover transition-colors"
+              >
+                Admin
+              </RouterLink>
+            )}
             <ThemeToggle />
             <Tooltip content="Settings" side="bottom" asChild>
               <Button
@@ -179,6 +205,14 @@ export default function Header() {
           page lands. */}
       {!mailboxId && (
         <div className="flex items-center gap-1 ml-auto shrink-0">
+          {isAdmin && (
+            <RouterLink
+              to="/admin/users"
+              className="text-sm font-medium text-text-bright hover:text-kumo-brand px-2 py-1 rounded hover:bg-tx-card-hover transition-colors"
+            >
+              Admin
+            </RouterLink>
+          )}
           <ThemeToggle />
         </div>
       )}

@@ -2,7 +2,9 @@
 # Block PRs whose route handlers query D1 without going through forGroup().
 # Allowlist: workers/lib/bootstrap-owner.ts (intentional unsafe insert during
 # first-login), workers/middleware/authz-context.ts (it IS the authz layer),
-# workers/db/control-plane/forGroup.ts (the helper itself).
+# workers/db/control-plane/forGroup.ts (the helper itself), admin routes +
+# helpers (they operate on GLOBAL tables — users, settings, audit_log — that
+# have no group_id, so forGroup() does not apply).
 
 set -euo pipefail
 
@@ -12,6 +14,10 @@ ALLOWLIST=(
   "workers/lib/bootstrap-owner.ts"
   "workers/middleware/authz-context.ts"
   "workers/db/control-plane/forGroup.ts"
+  "workers/lib/audit-log.ts"
+  "workers/lib/settings-cache.ts"
+  "workers/routes/admin/users.ts"
+  "workers/routes/admin/settings.ts"
 )
 
 # Find handlers that import drizzle/d1 directly — anything under workers/routes
