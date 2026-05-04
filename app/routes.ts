@@ -28,8 +28,10 @@ export default [
     ]),
     // Phase 6: contacts page
     route("contacts", "routes/_app/contacts.tsx"),
-    // Phase 3a: profile + account settings stub (avatar dropdown destination)
+    // Phase 3a: profile (avatar dropdown destination, public-ish identity)
     route("profile", "routes/profile.tsx"),
+    // Phase 4: account (private settings — visibility, sessions, sign-out)
+    route("account", "routes/account.tsx"),
     // Rail data loader endpoint (internal, fetched by MailboxTreeRail)
     route("_app/api.tree", "routes/_app/api.tree.ts"),
   ]),

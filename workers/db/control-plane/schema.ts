@@ -36,6 +36,11 @@ export const users = sqliteTable(
       .notNull()
       .default("everyone"),
     avatar_url: text("avatar_url"),
+    // Phase 4: profile fields surfaced on /profile (vs /account = private settings).
+    account_type: text("account_type", { enum: ["personal", "company"] })
+      .notNull()
+      .default("personal"),
+    company: text("company"),
     created_at: integer("created_at").notNull(),
     last_login_at: integer("last_login_at"),
   },

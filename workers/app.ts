@@ -197,7 +197,8 @@ app.get("/api/admin/me", (c) => {
   return c.json({ user_id: ctx.user_id, role: ctx.role });
 });
 
-// GET /api/users/me — current user including visibility (Phase 6) and avatar (Phase 3b)
+// GET /api/users/me — current user including visibility (Phase 6), avatar (Phase 3b),
+// and profile fields account_type + company (Phase 4).
 app.get("/api/users/me", async (c) => {
   const ctx = c.var.authzContext;
   if (!ctx) return c.json({ error: "Unauthorized" }, 401);
@@ -213,6 +214,8 @@ app.get("/api/users/me", async (c) => {
       role: schema.users.role,
       visibility: schema.users.visibility,
       avatar_url: schema.users.avatar_url,
+      account_type: schema.users.account_type,
+      company: schema.users.company,
     })
     .from(schema.users)
     .where(eq(schema.users.id, ctx.user_id))
@@ -443,6 +446,130 @@ app.patch("/api/users/me/visibility", async (c) => {
   );
 
   return c.json({ ok: true, visibility });
+});
+
+// PATCH /api/users/me/profile — update profile fields (Phase 4)
+//
+// Accepts any subset of: display_name, account_type, company.
+// Each field validated independently; null-clears display_name and company,
+// account_type cannot be cleared (NOT NULL DEFAULT 'personal').
+app.patch("/api/users/me/profile", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  let body: {
+    display_name?: unknown;
+    account_type?: unknown;
+    company?: unknown;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const updates: {
+    display_name?: string | null;
+    account_type?: "personal" | "company";
+    company?: string | null;
+  } = {};
+
+  if ("display_name" in body) {
+    const v = body.display_name;
+    if (v === null) {
+      updates.display_name = null;
+    } else if (typeof v === "string") {
+      const trimmed = v.trim();
+      if (trimmed.length > 100) {
+        return c.json({ error: "display_name too long (max 100)" }, 400);
+      }
+      updates.display_name = trimmed.length === 0 ? null : trimmed;
+    } else {
+      return c.json({ error: "display_name must be string or null" }, 400);
+    }
+  }
+
+  if ("account_type" in body) {
+    const v = body.account_type;
+    if (v !== "personal" && v !== "company") {
+      return c.json(
+        { error: "account_type must be 'personal' or 'company'" },
+        400,
+      );
+    }
+    updates.account_type = v;
+  }
+
+  if ("company" in body) {
+    const v = body.company;
+    if (v === null) {
+      updates.company = null;
+    } else if (typeof v === "string") {
+      const trimmed = v.trim();
+      if (trimmed.length > 200) {
+        return c.json({ error: "company too long (max 200)" }, 400);
+      }
+      updates.company = trimmed.length === 0 ? null : trimmed;
+    } else {
+      return c.json({ error: "company must be string or null" }, 400);
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return c.json({ error: "no fields to update" }, 400);
+  }
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const { appendAudit } = await import("./lib/audit-log");
+  const orm = drizzle(c.env.DB, { schema });
+
+  // Snapshot current values for audit (only the keys being updated).
+  const before = await orm
+    .select({
+      display_name: schema.users.display_name,
+      account_type: schema.users.account_type,
+      company: schema.users.company,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.id, ctx.user_id))
+    .get();
+
+  await orm
+    .update(schema.users)
+    .set(updates)
+    .where(eq(schema.users.id, ctx.user_id))
+    .run();
+
+  const auditMeta: Record<string, { from: unknown; to: unknown }> = {};
+  for (const k of Object.keys(updates) as (keyof typeof updates)[]) {
+    auditMeta[k] = { from: before?.[k] ?? null, to: updates[k] ?? null };
+  }
+  await appendAudit(
+    c.env.DB,
+    ctx,
+    "profile.update",
+    { kind: "user", id: ctx.user_id },
+    auditMeta,
+  );
+
+  // Return the merged updated profile so the client can refresh state in one round-trip.
+  const after = await orm
+    .select({
+      id: schema.users.id,
+      email: schema.users.email,
+      display_name: schema.users.display_name,
+      role: schema.users.role,
+      visibility: schema.users.visibility,
+      account_type: schema.users.account_type,
+      company: schema.users.company,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.id, ctx.user_id))
+    .get();
+
+  return c.json({ ok: true, profile: after });
 });
 
 // Admin API routes — require global_owner or global_admin (enforced inside each router)

@@ -5,10 +5,8 @@
 //
 // Trigger is the round Avatar (initials or uploaded picture). Popup lists:
 //   - Identity header: display name + email (non-interactive)
-//   - Profile          → /profile
-//   - Account settings → /profile (Phase 3b will split into a separate
-//                                  /account route once auth/security
-//                                  controls land)
+//   - Profile          → /profile          (public-ish identity — Phase 4)
+//   - Account settings → /account          (private settings — Phase 4)
 //   - Sign out         → /cdn-cgi/access/logout (Cloudflare Access logout)
 
 import { Menu } from "@base-ui/react/menu";
@@ -113,9 +111,7 @@ export default function ProfileMenu({
             </Menu.Item>
             <Menu.Item
               className={itemClassName}
-              render={
-                <RouterLink to="/profile#account" className="no-underline" />
-              }
+              render={<RouterLink to="/account" className="no-underline" />}
             >
               <span className="text-text-muted">
                 <IdentificationCardIcon size={16} />
