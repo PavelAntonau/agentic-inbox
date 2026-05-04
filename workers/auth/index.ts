@@ -16,7 +16,8 @@
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { emailOTP } from "better-auth/plugins";
+import { emailOTP, jwt } from "better-auth/plugins";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
@@ -190,6 +191,39 @@ export function createAuth(env: Env): ServerAuth {
           // We only use "sign-in" in Phase 6.1.
           await sendOtpEmail(env, email, otp, type);
         },
+      }),
+
+      // JWT plugin: required by oauthProvider for non-opaque access tokens.
+      // Static signing-key wiring lands in T1.4; default behaviour stores a
+      // generated JWK in the `jwks` table so module load + typecheck succeed
+      // before the secret is provisioned.
+      jwt(),
+
+      // OAuth Authorization Server (RFC 6749/7636/8707/9728/8414) for MCP.
+      //
+      // T1.1 finding B (`.scratch/oauth-aud-verify/RESULT.md`): when the
+      // scope set contains `openid`, the plugin auto-pushes
+      // `${baseURL}/oauth2/userinfo` into the `aud` set, breaking the
+      // exact-string aud match the /mcp middleware (T2.2) relies on.
+      // Therefore the master scope list below intentionally OMITS `openid`,
+      // making this an OAuth-only authorization server (no OIDC endpoints,
+      // no userinfo audience injection). Trusted-client seeds (T1.6) inherit
+      // the same constraint.
+      oauthProvider({
+        loginPage: "/login",
+        consentPage: "/consent",
+        scopes: [
+          "mcp:mailbox:read",
+          "mcp:mailbox:write",
+          "mcp:contacts:read",
+          "mcp:contacts:write",
+          "mcp:profile:read",
+        ],
+        validAudiences: ["https://mail.actionnow.ai/mcp"],
+        // We mount `/.well-known/oauth-authorization-server` manually at the
+        // site root in T2.2 because better-auth's basePath is `/api/auth`,
+        // and RFC 8414 §3 places the discovery doc at the issuer root.
+        silenceWarnings: { oauthAuthServerConfig: true },
       }),
     ],
 
