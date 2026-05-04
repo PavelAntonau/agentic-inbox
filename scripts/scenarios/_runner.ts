@@ -298,6 +298,30 @@ class MockControl implements MockControlClient {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Benign console-error allow-list.
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Some browser-side errors are NOT product bugs — they're harmless noise from
+// framework internals colliding with our test driver's hard `browser_navigate`
+// calls. Filter them so they don't falsely red the smoke set.
+//
+// Curate this list narrowly. Each entry MUST cite the symptom + why it's
+// safe to ignore. Anything not on the list is still a hard failure.
+//
+//  1. React Router lazy route-discovery fetch (`/__manifest`) cancellation
+//     when a hard nav happens while the fetch is in flight. The worker logs
+//     show the request returning 200/204; the browser reports `TypeError:
+//     Failed to fetch` because Playwright's hard goto cancelled the
+//     in-flight XHR. F-PHASE3-001.
+const BENIGN_ERROR_PATTERNS: RegExp[] = [
+  /Failed to fetch manifest patches TypeError: Failed to fetch/i,
+];
+
+function isBenignConsoleError(text: string): boolean {
+  return BENIGN_ERROR_PATTERNS.some((p) => p.test(text));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Scenario context — exposed to each scenario's `run(ctx)`.
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -347,7 +371,9 @@ function buildContext(args: {
         | { messages: Array<{ type: string; text: string }> };
       const messages = Array.isArray(result) ? result : (result.messages ?? []);
       const errors = messages.filter(
-        (m) => m.type === "error" || m.type === "exception",
+        (m) =>
+          (m.type === "error" || m.type === "exception") &&
+          !isBenignConsoleError(m.text),
       ).length;
       consoleErrorTotal.value += errors;
       const path = join(artifactsDir, `console-${label}.json`);
