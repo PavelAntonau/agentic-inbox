@@ -9,7 +9,7 @@ import {
   convertToModelMessages,
   stepCountIs,
 } from "ai";
-import { createWorkersAI } from "workers-ai-provider";
+import { getWorkersAiFactory } from "../lib/mocks/workers-ai-binding";
 import { z } from "zod";
 import type { EmailFull, EmailMetadata } from "../lib/schemas";
 import { verifyDraft, isPromptInjection } from "../lib/ai";
@@ -275,7 +275,7 @@ export class EmailAgent extends AIChatAgent<any> {
   async onChatMessage(onFinish: any) {
     const env = this.env as Env;
     const mailboxId = this.name;
-    const workersai = createWorkersAI({ binding: env.AI });
+    const workersai = getWorkersAiFactory(env);
     const tools = createEmailTools(env, mailboxId);
     const systemPrompt = await getSystemPrompt(env, mailboxId);
 
@@ -333,7 +333,7 @@ export class EmailAgent extends AIChatAgent<any> {
     threadId: string;
   }) {
     const env = this.env as Env;
-    const workersai = createWorkersAI({ binding: env.AI });
+    const workersai = getWorkersAiFactory(env);
     const tools = createEmailTools(env, emailData.mailboxId);
     const systemPrompt = await getSystemPrompt(env, emailData.mailboxId);
 
