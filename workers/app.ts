@@ -572,6 +572,222 @@ app.patch("/api/users/me/profile", async (c) => {
   return c.json({ ok: true, profile: after });
 });
 
+// POST /api/users/discover-by-email — Phase 5 / D11
+//
+// Constant-shape email-discovery endpoint. Always returns 200 { ok: true }
+// regardless of whether the email matches a user, whether that user is
+// hidden ('nobody' visibility), or whether the lookup succeeded at all.
+//
+// Three branches with equivalent DB round-trips:
+//   1. match + status='active' + visibility != 'nobody' + not-self
+//      → upsert pending contact request (mirrors /api/contacts/request).
+//   2. match + visibility == 'nobody' (or self / disabled)
+//      → silent no-op; sentinel-target queries still fire.
+//   3. no match
+//      → silent no-op; sentinel-target queries still fire.
+//
+// Sender CANNOT distinguish: same JSON body, same status, same headers, same
+// query pattern (block check + existing-row check always run, even on
+// no-match / hidden, against a sentinel target id). Audit row is always
+// emitted (`contact.discover_attempt`) so write count is constant; the row
+// is admin-only-readable via /api/admin/obs/audit (workers/routes/observability.ts).
+app.post("/api/users/discover-by-email", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  let body: { email?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  // Trivial input validation. The 400 here fires BEFORE any DB lookup so it
+  // cannot leak existence information — same 400 whether the would-have-matched
+  // user existed or not.
+  const raw = typeof body.email === "string" ? body.email.trim() : "";
+  if (!raw || raw.length > 320 || !raw.includes("@")) {
+    return c.json({ error: "valid email required" }, 400);
+  }
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq, and, or, sql } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const { appendAudit } = await import("./lib/audit-log");
+  const orm = drizzle(c.env.DB, { schema });
+
+  // Lookup by case-insensitive email (same path as users_email_nocase index).
+  const target = await orm
+    .select({
+      id: schema.users.id,
+      visibility: schema.users.visibility,
+      status: schema.users.status,
+    })
+    .from(schema.users)
+    .where(sql`lower(${schema.users.email}) = lower(${raw})`)
+    .get();
+
+  const shouldCreate =
+    target !== undefined &&
+    target.status === "active" &&
+    target.visibility !== "nobody" &&
+    target.id !== ctx.user_id;
+
+  // Sentinel target id when no match — keeps subsequent query shapes stable.
+  const targetId = target?.id ?? "00000000-0000-0000-0000-000000000000";
+
+  // Block check (mirrors /api/contacts/request): always runs.
+  await orm
+    .select({
+      owner_user_id: schema.contacts.owner_user_id,
+      contact_user_id: schema.contacts.contact_user_id,
+      status: schema.contacts.status,
+    })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.status, "blocked"),
+        or(
+          and(
+            eq(schema.contacts.owner_user_id, ctx.user_id),
+            eq(schema.contacts.contact_user_id, targetId),
+          ),
+          and(
+            eq(schema.contacts.owner_user_id, targetId),
+            eq(schema.contacts.contact_user_id, ctx.user_id),
+          ),
+        ),
+      ),
+    )
+    .all();
+
+  // Existing-relationship check (mirrors /api/contacts/request): always runs.
+  await orm
+    .select()
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.owner_user_id, ctx.user_id),
+        eq(schema.contacts.contact_user_id, targetId),
+      ),
+    )
+    .get();
+
+  const now = Date.now();
+
+  if (shouldCreate) {
+    await orm
+      .insert(schema.contacts)
+      .values({
+        owner_user_id: ctx.user_id,
+        contact_user_id: targetId,
+        status: "pending",
+        initiated_by: ctx.user_id,
+        created_at: now,
+        accepted_at: null,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.contacts.owner_user_id,
+          schema.contacts.contact_user_id,
+        ],
+        set: { status: "pending", initiated_by: ctx.user_id, created_at: now },
+      })
+      .run();
+  }
+
+  // Always emit audit row — keeps write count constant across branches.
+  await appendAudit(
+    c.env.DB,
+    ctx,
+    "contact.discover_attempt",
+    { kind: "user", id: target?.id ?? "no-match" },
+    { matched: target !== undefined, created: shouldCreate },
+  );
+
+  return c.json({ ok: true });
+});
+
+// GET /api/users/search?q=<prefix> — Phase 5 user search by display_name / email
+//
+// Returns users whose visibility allows discovery by the caller:
+//   - visibility='everyone' → always
+//   - visibility='contacts' → only if caller is in accepted contacts
+//   - visibility='nobody'   → never
+// Excludes self, disabled accounts. Prefix match on lowercase
+// display_name OR email. Returns up to 10 matches.
+app.get("/api/users/search", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  const q = (c.req.query("q") ?? "").trim().toLowerCase();
+  if (q.length < 2) return c.json({ users: [] });
+  if (q.length > 100) return c.json({ error: "query too long" }, 400);
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq, and, or, ne, sql } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const orm = drizzle(c.env.DB, { schema });
+
+  // Set of contact_user_ids the actor has an accepted relationship with.
+  const accepted = await orm
+    .select({ contact_user_id: schema.contacts.contact_user_id })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.owner_user_id, ctx.user_id),
+        eq(schema.contacts.status, "accepted"),
+      ),
+    )
+    .all();
+  const acceptedIds = new Set(accepted.map((r) => r.contact_user_id));
+
+  const prefix = q + "%";
+  const candidates = await orm
+    .select({
+      id: schema.users.id,
+      display_name: schema.users.display_name,
+      email: schema.users.email,
+      visibility: schema.users.visibility,
+      account_type: schema.users.account_type,
+      company: schema.users.company,
+      avatar_url: schema.users.avatar_url,
+    })
+    .from(schema.users)
+    .where(
+      and(
+        eq(schema.users.status, "active"),
+        ne(schema.users.id, ctx.user_id),
+        or(
+          sql`lower(${schema.users.display_name}) LIKE ${prefix}`,
+          sql`lower(${schema.users.email}) LIKE ${prefix}`,
+        ),
+      ),
+    )
+    .limit(50)
+    .all();
+
+  const filtered = candidates
+    .filter((u) => {
+      if (u.visibility === "everyone") return true;
+      if (u.visibility === "contacts") return acceptedIds.has(u.id);
+      return false;
+    })
+    .slice(0, 10)
+    .map((u) => ({
+      id: u.id,
+      display_name: u.display_name,
+      email: u.email,
+      account_type: u.account_type,
+      company: u.company,
+      avatar_url: u.avatar_url
+        ? `/avatars/${u.id}?v=${u.avatar_url.split("/").pop()?.split(".")[0]?.slice(0, 8) ?? "0"}`
+        : null,
+    }));
+
+  return c.json({ users: filtered });
+});
+
 // Admin API routes — require global_owner or global_admin (enforced inside each router)
 const { default: adminUsersRouter } = await import("./routes/admin/users");
 const { default: adminSettingsRouter } =

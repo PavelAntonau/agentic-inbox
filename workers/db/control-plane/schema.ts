@@ -67,6 +67,11 @@ export const contacts = sqliteTable(
       .references(() => users.id),
     created_at: integer("created_at").notNull(),
     accepted_at: integer("accepted_at"),
+    // Phase 5 (D12): set by recipient on decline; row stays status='pending' and
+    // the recipient view filters declined_at IS NOT NULL out. Sender never sees
+    // this column — their view of their outgoing-request row continues to read
+    // 'pending' forever.
+    declined_at: integer("declined_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.owner_user_id, t.contact_user_id] }),

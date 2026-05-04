@@ -18,7 +18,7 @@
 // Block is a one-direction 'blocked' row.
 
 import { Hono } from "hono";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/control-plane/schema";
 import type { AuthzContext } from "../db/control-plane/forGroup";
@@ -63,6 +63,10 @@ router.get("/", async (c) => {
   const ctx = c.var.authzContext!;
   const db = getDb(c.env);
 
+  // D12: hide rows the actor (recipient) declined. Sender-side rows
+  // (owner=actor, declined_at IS NOT NULL on the recipient's mirror row that
+  // doesn't yet exist) remain visible to the sender as-is — their outgoing
+  // request continues to read 'pending' indefinitely.
   const rows = await db
     .select({
       owner_user_id: schema.contacts.owner_user_id,
@@ -79,7 +83,12 @@ router.get("/", async (c) => {
       schema.users,
       eq(schema.contacts.contact_user_id, schema.users.id),
     )
-    .where(eq(schema.contacts.owner_user_id, ctx.user_id))
+    .where(
+      and(
+        eq(schema.contacts.owner_user_id, ctx.user_id),
+        isNull(schema.contacts.declined_at),
+      ),
+    )
     .all();
 
   return c.json({ contacts: rows });
@@ -302,9 +311,17 @@ router.post("/:id/decline", async (c) => {
   const perm = canDeclineContactRequest(ctx, request);
   if (!perm.ok) return c.json({ error: perm.reason }, 403);
 
-  // Remove the original row (no mirror row exists yet)
+  // D12 — sender-blind decline.
+  // The row is NOT deleted and NOT flipped to a visible 'declined' state.
+  // Status stays 'pending'; declined_at is set so the recipient (this actor)
+  // filters the row out of GET /api/contacts. The sender's view of their
+  // outgoing request — which is the same physical row, just queried by
+  // owner_user_id from the sender's session — continues to read 'pending'
+  // forever, with no audit trail visible to the sender (audit-log reads are
+  // gated to global_owner / global_admin only — see workers/routes/observability.ts).
   await db
-    .delete(schema.contacts)
+    .update(schema.contacts)
+    .set({ declined_at: Date.now() })
     .where(
       and(
         eq(schema.contacts.owner_user_id, requesterId),
