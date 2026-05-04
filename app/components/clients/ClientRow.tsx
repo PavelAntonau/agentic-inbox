@@ -15,8 +15,8 @@ import {
   DeviceMobileIcon,
   LaptopIcon,
   SquareIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
+  CaretDownIcon,
+  CaretUpIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Button } from "~/ui";
@@ -134,9 +134,9 @@ function GrantsSummary({ grants }: { grants: ClientGrant[] }) {
         {grants.length} {grants.length === 1 ? "inbox" : "inboxes"}
       </span>
       {expanded ? (
-        <ChevronUpIcon size={12} weight="bold" />
+        <CaretUpIcon size={12} weight="bold" />
       ) : (
-        <ChevronDownIcon size={12} weight="bold" />
+        <CaretDownIcon size={12} weight="bold" />
       )}
       {expanded && (
         <ul className="absolute z-10 mt-1 rounded-md border border-border bg-card p-2 shadow-lg">
