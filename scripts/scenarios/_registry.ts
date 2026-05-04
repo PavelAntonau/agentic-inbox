@@ -13,6 +13,7 @@ import type { Scenario } from "./_types";
 import sAuth1 from "./s-auth-1";
 import sAuth2 from "./s-auth-2";
 import sAuth3 from "./s-auth-3";
+import sAuth4 from "./s-auth-4";
 import sInbox1 from "./s-inbox-1";
 import sInbox2 from "./s-inbox-2";
 import sInbox4 from "./s-inbox-4";
@@ -31,6 +32,7 @@ const ALL: Scenario[] = [
   sAuth1,
   sAuth2,
   sAuth3,
+  sAuth4,
   sInbox1,
   sInbox2,
   sInbox4,
