@@ -7,6 +7,7 @@ import { RobotIcon, ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { useMailbox, useUpdateMailbox } from "~/queries/mailboxes";
+import PolicyCard from "~/components/inbox-policies/PolicyCard";
 
 // Placeholder shown in the textarea when no custom prompt is set.
 // The authoritative default prompt lives in workers/agent/index.ts (DEFAULT_SYSTEM_PROMPT).
@@ -129,6 +130,9 @@ export default function SettingsRoute() {
             controls the agent's personality, writing style, and behavior rules.
           </p>
         </div>
+
+        {/* Inbox Policies — External send / inbound toggles */}
+        {mailboxId && <PolicyCard inboxId={mailboxId} />}
 
         {/* Visibility moved to /account in Phase 4 — per-user setting is no
             longer mailbox-scoped. Cross-link kept so users who land here

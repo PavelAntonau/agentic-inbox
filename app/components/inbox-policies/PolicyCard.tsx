@@ -11,6 +11,11 @@
 // Section 2: Internal inbound
 //   - Select internal_inbound_mode (everyone | contacts_only | none)
 //
+// Section 3: Outbound (TASK-2.5)
+//   - Toggle external_send_enabled
+//   - When off: mailbox can only send to internal mailboxes via the short-circuit path
+//   - When on: sends externally via Cloudflare Email Routing (destination must be verified)
+//
 // All changes PATCH /api/mailboxes/:id/policies debounced 300 ms.
 // Debounce chosen over on-blur so toggle/radio changes persist immediately
 // without requiring the user to click elsewhere.
@@ -19,7 +24,12 @@
 import type { AllowlistEntry } from "./AllowlistEditor";
 import AllowlistEditor from "./AllowlistEditor";
 import { Select } from "~/ui";
-import { GlobeIcon, LockIcon, UsersIcon } from "@phosphor-icons/react";
+import {
+  GlobeIcon,
+  LockIcon,
+  PaperPlaneTiltIcon,
+  UsersIcon,
+} from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface InboxPolicies {
@@ -27,6 +37,8 @@ interface InboxPolicies {
   external_allow_mode: "all" | "allowlist";
   internal_inbound_mode: "everyone" | "contacts_only" | "none";
   allowlist: AllowlistEntry[];
+  // Phase 2 (TASK-2.5): per-mailbox outbound external flag
+  external_send_enabled: boolean;
 }
 
 interface PolicyCardProps {
@@ -114,6 +126,11 @@ export default function PolicyCard({ inboxId }: PolicyCardProps) {
   const setInternalMode = (mode: "everyone" | "contacts_only" | "none") => {
     setPolicies((p) => p && { ...p, internal_inbound_mode: mode });
     patchPolicies({ internal_inbound_mode: mode });
+  };
+
+  const setExternalSendEnabled = (enabled: boolean) => {
+    setPolicies((p) => p && { ...p, external_send_enabled: enabled });
+    patchPolicies({ external_send_enabled: enabled });
   };
 
   // ---------------------------------------------------------------------------
@@ -252,6 +269,53 @@ export default function PolicyCard({ inboxId }: PolicyCardProps) {
             "Only accepted contacts and group co-members can message this inbox."}
           {policies.internal_inbound_mode === "none" &&
             "No internal messages are accepted. Useful for outbound-only inboxes."}
+        </p>
+      </div>
+
+      <div className="border-t border-border" />
+
+      {/* Section 3: Outbound */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <PaperPlaneTiltIcon
+              size={14}
+              weight="duotone"
+              className="text-text-muted"
+            />
+            <span className="text-sm font-medium text-text-bright">
+              Outbound
+            </span>
+          </div>
+          {/* Toggle */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={policies.external_send_enabled}
+            aria-label="Enable external sending"
+            onClick={() =>
+              setExternalSendEnabled(!policies.external_send_enabled)
+            }
+            className={[
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent",
+              "transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-kumo-ring",
+              policies.external_send_enabled ? "bg-kumo-brand" : "bg-border",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                policies.external_send_enabled
+                  ? "translate-x-4"
+                  : "translate-x-0",
+              ].join(" ")}
+            />
+          </button>
+        </div>
+        <p className="text-xs text-text-muted">
+          When off, this mailbox can only send to other mailboxes hosted in this
+          app. Turn on to send externally via Cloudflare Email Routing
+          (destination must be verified).
         </p>
       </div>
     </div>
