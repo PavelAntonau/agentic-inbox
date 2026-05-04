@@ -204,6 +204,96 @@ loaded; real Cloudflare Access JWTs are validated upstream.
 
 ---
 
+## Deploy to production (Cloudflare) — CANONICAL
+
+**Read this. Do not invent another path. Do not run `wrangler login`.**
+This procedure is the documented, supported deploy method. Every prior
+session that reached for `wrangler login` lost time before circling back
+here — keep us honest.
+
+### One-command deploy
+
+```bash
+cd /Users/dev/ActionNowAI/agentic-inbox
+CLOUDFLARE_API_TOKEN="$(get from key MCP — see below)" npm run deploy
+```
+
+That runs `react-router build` → `wrangler deploy` against the single
+production environment defined in `wrangler.jsonc`. Target:
+`https://mail.actionnow.ai` (custom domain) and the
+`agentic-inbox.cloudflare-ascertain725.workers.dev` default. ~50–60 s
+wall-clock per turn.
+
+### Where the API token lives
+
+The Cloudflare deploy token is stored in the Key MCP server. Agents fetch it
+via the standard three-operation contract:
+
+```
+mcp__key__tool_get_secret(service="cloudflare", account="api-token")
+```
+
+Other related secrets in the same service (in case the worker config ever
+needs them again):
+
+```
+mcp__key__tool_get_secret(service="cloudflare", account="policy-aud")
+mcp__key__tool_get_secret(service="cloudflare", account="team-domain")
+mcp__key__tool_get_secret(service="cloudflare", account="BETTER_AUTH_SECRET")
+```
+
+**Never** call the macOS `security` CLI directly. **Never** copy the token
+into a tracked file or echo it back to the user. **Never** run
+`wrangler login` — the API token via env var is the deploy path, full stop.
+
+### Pre-deploy gates the agent should run
+
+Before any deploy:
+
+1. `git status -s` clean (or knowingly committed). `git stash list` empty.
+2. `npm test` green (vitest, currently 362 / 362).
+3. `npm run typecheck` — note: there are **2 pre-existing warnings about
+   `MOCK_MODE` typing in `workers/types.ts` / `workers/mcp/index.ts`**.
+   Wrangler-typegen widens it to `string` because `.dev.vars` declares it;
+   the local `Env` declares it as `string | undefined`. This does NOT block
+   deploy (`wrangler deploy` doesn't run tsc) and the runtime is safe
+   (`mock-mode.ts` checks `=== "1"` — handles both undefined and string).
+   Tracked but tolerated.
+4. Local 27-scenario suite ≥ 27/27 across 3 cycles
+   (`npm run scenarios:all`). See
+   `cld-net/.research/test-findings-phase3-3.md` for the canonical baseline.
+5. (Optional, recommended for product-code changes:) verify the change is
+   committed locally on `feature/autonomous-local-testing` (no upstream is
+   configured for this branch — that's intentional; commits stay local).
+
+### Post-deploy verification
+
+```bash
+curl -sIL --max-redirs 0 https://mail.actionnow.ai/ | head -3
+# expect: HTTP/2 302; location: https://actionnow.cloudflareaccess.com/cdn-cgi/access/login/...
+
+curl -s -o /dev/null -w "%{http_code}\n" https://mail.actionnow.ai/__mock/health
+# expect: 302 (CF Access gate). /__mock/* is doubly-protected: CF Access
+# intercepts before the worker runs, AND isMockMode() returns false in prod.
+```
+
+If `mail.actionnow.ai` 302s to `actionnow.cloudflareaccess.com` you're
+green. If you see a 200 with content, CF Access is misconfigured — surface
+to the user immediately.
+
+### History — why this section exists
+
+The deploy procedure was first documented in
+`cld-net/.research/action-plan-mail-actionnowai-platform.md:9` and
+`cld-net/.research/action-plan-mail-actionnowai-auth.md:6`, but those files
+are gitignored on the cld-net side, invisible to anyone reading
+`agentic-inbox` directly. As a result agents kept reaching for
+`wrangler login` and getting "not authenticated", forcing the user to
+re-explain the API-token path. Pinning it here in the project's main
+CLAUDE.md is the durable fix.
+
+---
+
 ## D1 schema (foundation Phase 2.1, in production)
 
 11 tables — `users`, `contacts`, `groups`, `group_members`, `group_invitations`,
