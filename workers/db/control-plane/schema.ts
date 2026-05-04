@@ -314,6 +314,27 @@ export const verification = sqliteTable(
   }),
 );
 
+// 13. rate_limit — better-auth rate-limit storage (Phase 1)
+//
+// better-auth writes to this table when rateLimit.storage = "database".
+// Column names must match the library's internal field mapping:
+//   id          → PK
+//   key         → unique rate-limit identifier (e.g. IP + path hash)
+//   count       → requests in the current window
+//   lastRequest → epoch ms of last request (camelCase in JS, snake_case in DB)
+export const rate_limit = sqliteTable(
+  "rate_limit",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull().unique(),
+    count: integer("count").notNull().default(0),
+    lastRequest: integer("last_request").notNull().default(0),
+  },
+  (t) => ({
+    keyIdx: index("rate_limit_key_idx").on(t.key),
+  }),
+);
+
 // 12. audit_log — append-only
 export const audit_log = sqliteTable(
   "audit_log",

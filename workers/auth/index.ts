@@ -22,6 +22,26 @@ import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
 import type { Env } from "../types";
 
+/** Minimal session shape returned by better-auth's getSession. */
+export interface BetterAuthSession {
+  session: {
+    id: string;
+    userId: string;
+    token: string;
+    expiresAt: Date | number;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    createdAt: Date | number;
+    updatedAt: Date | number;
+  };
+  user: {
+    id: string;
+    email: string;
+    name?: string | null;
+    emailVerified: boolean;
+  };
+}
+
 /**
  * Public surface of the per-request better-auth instance. We only need the
  * `handler` for mounting under /api/auth/*; declaring it explicitly here
@@ -31,7 +51,7 @@ import type { Env } from "../types";
 export interface ServerAuth {
   handler(request: Request): Promise<Response>;
   api: {
-    getSession(args: { headers: Headers }): Promise<unknown>;
+    getSession(args: { headers: Headers }): Promise<BetterAuthSession | null>;
   };
 }
 
@@ -62,9 +82,18 @@ export function createAuth(env: Env): ServerAuth {
         session: schema.session,
         account: schema.account,
         verification: schema.verification,
+        rateLimit: schema.rate_limit,
       },
       usePlural: false,
     }),
+
+    // Rate-limit: persist to D1 so limits survive Worker restarts and apply
+    // consistently across all Worker instances in the same region.
+    // modelName matches the drizzleAdapter key above ("rateLimit").
+    rateLimit: {
+      storage: "database",
+      modelName: "rateLimit",
+    },
 
     // Email OTP is the only auth method we ship in Phase 6.1. emailAndPassword
     // and OAuth-third-party providers are intentionally disabled.
