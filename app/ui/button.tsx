@@ -66,7 +66,12 @@ export const KUMO_BUTTON_VARIANTS = {
       description: "Default button style for most actions",
     },
     ghost: {
-      classes: "text-kumo-default hover:bg-kumo-tint shadow-none bg-inherit",
+      // hover bg uses the project's theme-aware --color-card-light token
+      // (registered via @theme so Tailwind emits a var()-backed utility).
+      // bg-kumo-tint was @theme-inline-baked to a near-white in BOTH modes,
+      // which produced the dark-mode "white flash" on hover (UAT round 2,
+      // item E — refresh / delete / copy-MCP buttons going white in dark mode).
+      classes: "text-kumo-default hover:bg-card-light shadow-none bg-inherit",
       description: "Minimal button with no background",
     },
     destructive: {
