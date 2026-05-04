@@ -46,7 +46,7 @@ function setupFetch(
   opts: {
     mailboxes?: typeof SAMPLE_MAILBOXES;
     config?: ReturnType<typeof makeConfig>;
-    createSpy?: ReturnType<typeof vi.fn>;
+    createSpy?: (url: string) => void;
   } = {},
 ) {
   const mailboxes = opts.mailboxes ?? [];

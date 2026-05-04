@@ -27,7 +27,7 @@ function makePoliciesResponse(overrides: Partial<typeof BASE_POLICIES> = {}) {
 function setupFetch(
   opts: {
     policies?: typeof BASE_POLICIES;
-    patchSpy?: ReturnType<typeof vi.fn>;
+    patchSpy?: (body: Record<string, unknown>) => void;
     fetchStatus?: number;
   } = {},
 ) {
