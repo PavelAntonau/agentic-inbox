@@ -20,6 +20,7 @@ import sInbox3 from "./s-inbox-3";
 import sInbox4 from "./s-inbox-4";
 import sMsg1 from "./s-msg-1";
 import sMsg2 from "./s-msg-2";
+import sMsg3 from "./s-msg-3";
 import sMsg5 from "./s-msg-5";
 import sCli1 from "./s-cli-1";
 import sCli2 from "./s-cli-2";
@@ -45,6 +46,7 @@ const ALL: Scenario[] = [
   sInbox4,
   sMsg1,
   sMsg2,
+  sMsg3,
   sMsg5,
   sCli1,
   sCli2,
