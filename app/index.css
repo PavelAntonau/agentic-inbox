@@ -184,41 +184,62 @@
   color-scheme: light;
 }
 
-/* Phase 3f: top + bottom radial gradients on the body — subtle cyan halo
- * up top (matching the border accent), darker fall-off at the bottom
- * (matching the panel-shadow vocabulary). Centered, fading to the sides
- * so the chrome at the edges stays clean. Light theme uses gentler
- * values; dark theme cranks the dark-bottom + cyan-top contrast. */
-body {
-  background-image:
-    radial-gradient(
-      ellipse 90% 35% at 50% 0%,
-      rgba(78, 195, 255, 0.1) 0%,
-      transparent 70%
-    ),
-    radial-gradient(
-      ellipse 90% 35% at 50% 100%,
-      rgba(10, 18, 38, 0.12) 0%,
-      transparent 70%
-    );
-  background-attachment: fixed;
+/* Phase 3f / UAT-r1-i5: top + bottom radial gradients as FIXED-position
+ * overlays — they sit above route-level bg-card surfaces (so they're
+ * visible inside the inbox, not just the profile), but below modals /
+ * dialogs / dropdowns (z-index >=20 in this codebase). Horizontal extent
+ * is tightened so the glow concentrates toward the page centre and fades
+ * to nothing at the left/right edges, giving a sense of depth. Light
+ * theme is gentler; dark theme cranks the cyan top + dark bottom contrast.
+ * pointer-events: none keeps clicks landing on real UI behind the layer. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 1;
+  height: 38vh;
   background-repeat: no-repeat;
 }
 
-:root.theme-dark body {
-  background-image:
-    radial-gradient(
-      ellipse 95% 40% at 50% 0%,
-      rgba(78, 195, 255, 0.18) 0%,
-      transparent 70%
-    ),
-    radial-gradient(
-      ellipse 95% 40% at 50% 100%,
-      rgba(0, 0, 0, 0.55) 0%,
-      transparent 70%
-    );
-  background-attachment: fixed;
-  background-repeat: no-repeat;
+body::before {
+  top: 0;
+  background-image: radial-gradient(
+    ellipse 55% 100% at 50% 0%,
+    rgba(78, 195, 255, 0.16) 0%,
+    rgba(78, 195, 255, 0.06) 45%,
+    transparent 85%
+  );
+}
+
+body::after {
+  bottom: 0;
+  background-image: radial-gradient(
+    ellipse 55% 100% at 50% 100%,
+    rgba(10, 18, 38, 0.18) 0%,
+    rgba(10, 18, 38, 0.07) 45%,
+    transparent 85%
+  );
+}
+
+:root.theme-dark body::before {
+  background-image: radial-gradient(
+    ellipse 60% 100% at 50% 0%,
+    rgba(78, 195, 255, 0.26) 0%,
+    rgba(78, 195, 255, 0.1) 45%,
+    transparent 85%
+  );
+}
+
+:root.theme-dark body::after {
+  background-image: radial-gradient(
+    ellipse 60% 100% at 50% 100%,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.2) 45%,
+    transparent 85%
+  );
 }
 
 /* === Primary CTA — shimmering navy → cyan gradient =========================
