@@ -340,31 +340,41 @@ export default function ProfileRoute() {
     (accountType === "company" ? trimmedCompany : "") !== (me.company ?? "");
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 md:px-6 md:py-16">
-      <h1 className="mb-2 text-2xl font-bold text-text-bright">Profile</h1>
-      <p className="mb-6 text-sm text-text-muted">
-        Public-ish identity. Other users may see this when your visibility
-        permits.{" "}
-        <a
-          href="/account"
-          className="underline decoration-dotted hover:text-text-bright"
-        >
-          Account settings →
-        </a>
-      </p>
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-2xl px-4 py-8 md:px-6 md:py-16">
+        <h1 className="mb-2 text-2xl font-bold text-text-bright">Profile</h1>
+        <p className="mb-6 text-sm text-text-muted">
+          Public-ish identity. Other users may see this when your visibility
+          permits.{" "}
+          <a
+            href="/account"
+            className="underline decoration-dotted hover:text-text-bright"
+          >
+            Account settings →
+          </a>
+        </p>
 
-      {/* Avatar card */}
-      <section className="mb-6 rounded-panel border border-border bg-card p-6">
-        <div className="flex items-start gap-5">
-          {me.avatar_url ? (
-            <button
-              type="button"
-              onClick={handleEditExisting}
-              disabled={busy}
-              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand"
-              title="Click to re-adjust your photo"
-              aria-label="Adjust profile photo"
-            >
+        {/* Avatar card */}
+        <section className="mb-6 rounded-panel border border-border bg-card p-6">
+          <div className="flex items-start gap-5">
+            {me.avatar_url ? (
+              <button
+                type="button"
+                onClick={handleEditExisting}
+                disabled={busy}
+                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand"
+                title="Click to re-adjust your photo"
+                aria-label="Adjust profile photo"
+              >
+                <Avatar
+                  userId={me.id}
+                  displayName={me.display_name}
+                  email={me.email}
+                  avatarUrl={me.avatar_url}
+                  size={88}
+                />
+              </button>
+            ) : (
               <Avatar
                 userId={me.id}
                 displayName={me.display_name}
@@ -372,157 +382,151 @@ export default function ProfileRoute() {
                 avatarUrl={me.avatar_url}
                 size={88}
               />
-            </button>
-          ) : (
-            <Avatar
-              userId={me.id}
-              displayName={me.display_name}
-              email={me.email}
-              avatarUrl={me.avatar_url}
-              size={88}
-            />
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="text-lg font-semibold text-text-bright">
-              {me.display_name?.trim() || me.email}
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-semibold text-text-bright">
+                {me.display_name?.trim() || me.email}
+              </div>
+              <div className="text-sm text-text-muted">{me.email}</div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handlePick}
+                  loading={busy}
+                  disabled={busy}
+                >
+                  {me.avatar_url ? "Change photo" : "Upload photo"}
+                </Button>
+                {me.avatar_url ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleEditExisting}
+                    disabled={busy}
+                  >
+                    Adjust
+                  </Button>
+                ) : null}
+                {me.avatar_url ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRemove}
+                    disabled={busy}
+                  >
+                    Remove
+                  </Button>
+                ) : null}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={ACCEPT}
+                  onChange={handleFile}
+                  className="hidden"
+                />
+              </div>
+              <p className="mt-2 text-xs text-text-muted">
+                PNG, JPEG, or WebP. Max 2 MB.
+              </p>
             </div>
-            <div className="text-sm text-text-muted">{me.email}</div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
+          </div>
+        </section>
+
+        {/* Profile editor */}
+        <section className="mb-6 rounded-panel border border-border bg-card p-6">
+          <h2 className="mb-4 text-lg font-semibold text-text-bright">
+            Details
+          </h2>
+          <div className="space-y-4">
+            <Input
+              label="Display name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Shown to other users in place of your email"
+              maxLength={100}
+            />
+
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-sm font-medium text-text-bright">
+                Account type
+              </legend>
+              {ACCOUNT_TYPE_OPTIONS.map((opt) => (
+                <label
+                  key={opt.value}
+                  className={[
+                    "flex cursor-pointer items-start gap-3 rounded-[10px] border px-3 py-2.5 transition-colors",
+                    accountType === opt.value
+                      ? "border-kumo-brand bg-kumo-brand/5"
+                      : "border-border hover:border-kumo-ring",
+                  ].join(" ")}
+                >
+                  <input
+                    type="radio"
+                    name="account_type"
+                    value={opt.value}
+                    checked={accountType === opt.value}
+                    onChange={() => setAccountType(opt.value)}
+                    className="mt-0.5 accent-kumo-brand"
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium text-text-bright">
+                      {opt.label}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-text-muted">
+                      {opt.helper}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+
+            {accountType === "company" ? (
+              <Input
+                label="Company"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                placeholder="ACME, Inc."
+                maxLength={200}
+              />
+            ) : null}
+
+            <div className="flex justify-end pt-2">
               <Button
                 variant="primary"
-                size="sm"
-                onClick={handlePick}
-                loading={busy}
-                disabled={busy}
+                onClick={handleSave}
+                loading={saving}
+                disabled={!dirty || saving}
               >
-                {me.avatar_url ? "Change photo" : "Upload photo"}
+                Save changes
               </Button>
-              {me.avatar_url ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleEditExisting}
-                  disabled={busy}
-                >
-                  Adjust
-                </Button>
-              ) : null}
-              {me.avatar_url ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleRemove}
-                  disabled={busy}
-                >
-                  Remove
-                </Button>
-              ) : null}
-              <input
-                ref={fileRef}
-                type="file"
-                accept={ACCEPT}
-                onChange={handleFile}
-                className="hidden"
-              />
             </div>
-            <p className="mt-2 text-xs text-text-muted">
-              PNG, JPEG, or WebP. Max 2 MB.
-            </p>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Profile editor */}
-      <section className="mb-6 rounded-panel border border-border bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold text-text-bright">Details</h2>
-        <div className="space-y-4">
-          <Input
-            label="Display name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Shown to other users in place of your email"
-            maxLength={100}
-          />
+        <p className="text-xs text-text-muted">
+          Sign out and visibility are in{" "}
+          <a
+            href="/account"
+            className="underline decoration-dotted hover:text-text-bright"
+          >
+            Account settings
+          </a>
+          .
+        </p>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-sm font-medium text-text-bright">
-              Account type
-            </legend>
-            {ACCOUNT_TYPE_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className={[
-                  "flex cursor-pointer items-start gap-3 rounded-[10px] border px-3 py-2.5 transition-colors",
-                  accountType === opt.value
-                    ? "border-kumo-brand bg-kumo-brand/5"
-                    : "border-border hover:border-kumo-ring",
-                ].join(" ")}
-              >
-                <input
-                  type="radio"
-                  name="account_type"
-                  value={opt.value}
-                  checked={accountType === opt.value}
-                  onChange={() => setAccountType(opt.value)}
-                  className="mt-0.5 accent-kumo-brand"
-                />
-                <span className="flex-1">
-                  <span className="block text-sm font-medium text-text-bright">
-                    {opt.label}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-text-muted">
-                    {opt.helper}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
-
-          {accountType === "company" ? (
-            <Input
-              label="Company"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-              placeholder="ACME, Inc."
-              maxLength={200}
-            />
-          ) : null}
-
-          <div className="flex justify-end pt-2">
-            <Button
-              variant="primary"
-              onClick={handleSave}
-              loading={saving}
-              disabled={!dirty || saving}
-            >
-              Save changes
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      <p className="text-xs text-text-muted">
-        Sign out and visibility are in{" "}
-        <a
-          href="/account"
-          className="underline decoration-dotted hover:text-text-bright"
-        >
-          Account settings
-        </a>
-        .
-      </p>
-
-      <AvatarCropDialog
-        open={cropOpen}
-        source={cropSource}
-        onOpenChange={(o) => {
-          if (busy) return;
-          setCropOpen(o);
-          if (!o) setCropSource(null);
-        }}
-        onSave={handleCropSave}
-        busy={busy}
-      />
+        <AvatarCropDialog
+          open={cropOpen}
+          source={cropSource}
+          onOpenChange={(o) => {
+            if (busy) return;
+            setCropOpen(o);
+            if (!o) setCropSource(null);
+          }}
+          onSave={handleCropSave}
+          busy={busy}
+        />
+      </div>
     </div>
   );
 }

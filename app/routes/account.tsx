@@ -148,105 +148,113 @@ export default function AccountRoute() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 md:px-6 md:py-16">
-      <h1 className="mb-2 text-2xl font-bold text-text-bright">Account</h1>
-      <p className="mb-6 text-sm text-text-muted">
-        Private settings. Nothing on this page is shown to other users.{" "}
-        <a
-          href="/profile"
-          className="underline decoration-dotted hover:text-text-bright"
-        >
-          Edit your public profile →
-        </a>
-      </p>
-
-      {/* Identity (read-only) */}
-      <section className="mb-6 rounded-panel border border-border bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold text-text-bright">
-          Identity
-        </h2>
-        <dl className="grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-sm">
-          <dt className="text-text-muted">Email</dt>
-          <dd className="text-text-bright">{me.email}</dd>
-          <dt className="text-text-muted">User ID</dt>
-          <dd className="font-mono text-text-bright break-all">{me.id}</dd>
-          <dt className="text-text-muted">Role</dt>
-          <dd className="text-text-bright">{me.role.replace(/_/g, " ")}</dd>
-        </dl>
-      </section>
-
-      {/* Visibility */}
-      <section className="mb-6 rounded-panel border border-border bg-card p-6">
-        <div className="mb-3 flex items-center gap-2">
-          <EyeIcon size={18} weight="duotone" className="text-text-muted" />
-          <h2 className="text-lg font-semibold text-text-bright">Visibility</h2>
-        </div>
-        <p className="mb-3 text-sm text-text-muted">
-          Controls who can find you in autocomplete suggestions when other users
-          send invitations or add contacts. People who already know your email
-          can always reach you.
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-2xl px-4 py-8 md:px-6 md:py-16">
+        <h1 className="mb-2 text-2xl font-bold text-text-bright">Account</h1>
+        <p className="mb-6 text-sm text-text-muted">
+          Private settings. Nothing on this page is shown to other users.{" "}
+          <a
+            href="/profile"
+            className="underline decoration-dotted hover:text-text-bright"
+          >
+            Edit your public profile →
+          </a>
         </p>
-        <fieldset className="flex flex-col gap-2" disabled={savingVisibility}>
-          <legend className="sr-only">Visibility</legend>
-          {VISIBILITY_OPTIONS.map((opt) => (
-            <label
-              key={opt.value}
-              className={[
-                "flex cursor-pointer items-start gap-3 rounded-[10px] border px-3 py-2.5 transition-colors",
-                me.visibility === opt.value
-                  ? "border-kumo-brand bg-kumo-brand/5"
-                  : "border-border hover:border-kumo-ring",
-              ].join(" ")}
-            >
-              <input
-                type="radio"
-                name="visibility"
-                value={opt.value}
-                checked={me.visibility === opt.value}
-                onChange={() => void handleVisibilityChange(opt.value)}
-                className="mt-0.5 accent-kumo-brand"
-              />
-              <span className="flex-1">
-                <span className="block text-sm font-medium text-text-bright">
-                  {opt.label}
-                </span>
-                <span className="mt-0.5 block text-xs text-text-muted">
-                  {opt.helper}
-                </span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      </section>
 
-      {/* Connected Agents — unified Clients panel (Phase 2, D-PLAT-7)
+        {/* Identity (read-only) */}
+        <section className="mb-6 rounded-panel border border-border bg-card p-6">
+          <h2 className="mb-4 text-lg font-semibold text-text-bright">
+            Identity
+          </h2>
+          <dl className="grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-sm">
+            <dt className="text-text-muted">Email</dt>
+            <dd className="text-text-bright">{me.email}</dd>
+            <dt className="text-text-muted">User ID</dt>
+            <dd className="font-mono text-text-bright break-all">{me.id}</dd>
+            <dt className="text-text-muted">Role</dt>
+            <dd className="text-text-bright">{me.role.replace(/_/g, " ")}</dd>
+          </dl>
+        </section>
+
+        {/* Visibility */}
+        <section className="mb-6 rounded-panel border border-border bg-card p-6">
+          <div className="mb-3 flex items-center gap-2">
+            <EyeIcon size={18} weight="duotone" className="text-text-muted" />
+            <h2 className="text-lg font-semibold text-text-bright">
+              Visibility
+            </h2>
+          </div>
+          <p className="mb-3 text-sm text-text-muted">
+            Controls who can find you in autocomplete suggestions when other
+            users send invitations or add contacts. People who already know your
+            email can always reach you.
+          </p>
+          <fieldset className="flex flex-col gap-2" disabled={savingVisibility}>
+            <legend className="sr-only">Visibility</legend>
+            {VISIBILITY_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={[
+                  "flex cursor-pointer items-start gap-3 rounded-[10px] border px-3 py-2.5 transition-colors",
+                  me.visibility === opt.value
+                    ? "border-kumo-brand bg-kumo-brand/5"
+                    : "border-border hover:border-kumo-ring",
+                ].join(" ")}
+              >
+                <input
+                  type="radio"
+                  name="visibility"
+                  value={opt.value}
+                  checked={me.visibility === opt.value}
+                  onChange={() => void handleVisibilityChange(opt.value)}
+                  className="mt-0.5 accent-kumo-brand"
+                />
+                <span className="flex-1">
+                  <span className="block text-sm font-medium text-text-bright">
+                    {opt.label}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-text-muted">
+                    {opt.helper}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        </section>
+
+        {/* Connected Agents — unified Clients panel (Phase 2, D-PLAT-7)
           Replaces the Phase-1 Devices card. Browser sessions are projected as
           kind='browser' clients by the API, so this one panel covers all
           client types and eliminates USR-anti-2. */}
-      <ClientsPanel />
+        <ClientsPanel />
 
-      {/* Sign out */}
-      <section className="mb-6 rounded-panel border border-border bg-card p-6">
-        <div className="mb-3 flex items-center gap-2">
-          <SignOutIcon size={18} weight="duotone" className="text-text-muted" />
-          <h2 className="text-lg font-semibold text-text-bright">Session</h2>
-        </div>
-        <p className="mb-4 text-sm text-text-muted">
-          Sign out of this device. Other sessions on other devices are not
-          affected.
+        {/* Sign out */}
+        <section className="mb-6 rounded-panel border border-border bg-card p-6">
+          <div className="mb-3 flex items-center gap-2">
+            <SignOutIcon
+              size={18}
+              weight="duotone"
+              className="text-text-muted"
+            />
+            <h2 className="text-lg font-semibold text-text-bright">Session</h2>
+          </div>
+          <p className="mb-4 text-sm text-text-muted">
+            Sign out of this device. Other sessions on other devices are not
+            affected.
+          </p>
+          <Button
+            variant="ghost"
+            onClick={() => void handleSignOut()}
+            disabled={signingOut}
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
+          </Button>
+        </section>
+
+        <p className="text-xs text-text-muted">
+          Notification preferences land in a future iteration.
         </p>
-        <Button
-          variant="ghost"
-          onClick={() => void handleSignOut()}
-          disabled={signingOut}
-        >
-          {signingOut ? "Signing out…" : "Sign out"}
-        </Button>
-      </section>
-
-      <p className="text-xs text-text-muted">
-        Notification preferences land in a future iteration.
-      </p>
+      </div>
     </div>
   );
 }

@@ -115,7 +115,12 @@ function DialogContent({
   const role = useDialogRole();
   return (
     <DialogBase.Portal>
-      <DialogBase.Backdrop className="fixed inset-0 bg-kumo-overlay opacity-80 transition-all duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+      {/* Theme-aware backdrop. The kumo @theme inline block bakes
+          --color-kumo-overlay as a near-white in BOTH modes, which read as a
+          white frosted-glass haze in dark mode (UAT round 2, item D). Using
+          a Tailwind black/alpha + dark: variant produces the expected dark
+          dimmer in light mode and the deeper dim in dark mode. */}
+      <DialogBase.Backdrop className="fixed inset-0 bg-black/50 dark:bg-black/70 transition-all duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
       <DialogBase.Popup
         render={<div role={role} />}
         className={cn(dialogVariants({ size }), className)}
