@@ -29,6 +29,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
+import { spawn } from "node:child_process";
 import { writeFinding, writeReport } from "./_findings";
 import { loadScenarios, type RegistryEntry } from "./_registry";
 import type {
@@ -46,7 +47,38 @@ const FINDINGS_ROOT = join(REPO_ROOT, ".scratch", "findings");
 const WORKER_BASE = process.env.SCENARIO_WORKER_BASE ?? "http://127.0.0.1:8788";
 const BROWSER_MCP_URL =
   process.env.SCENARIO_BROWSER_MCP_URL ?? "http://127.0.0.1:8810/mcp";
+const BROWSER_MCP_HEALTH =
+  process.env.SCENARIO_BROWSER_MCP_HEALTH ?? "http://127.0.0.1:8810/health";
 const STEP_TIMEOUT_MS = 15_000;
+const RPC_TIMEOUT_MS = 30_000; // Per browser-mcp RPC call. Wedge guard.
+const ANAI_PYTHON =
+  process.env.ANAI_PYTHON ??
+  "/Users/dev/ActionNowAI/release/python/venv/bin/python";
+
+// Marker for transport-level browser-mcp errors. Triggers retry-with-restart
+// at the scenario boundary; product-level assertions never raise this.
+class TransportError extends Error {
+  readonly _transport = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "TransportError";
+  }
+}
+
+function isTransportError(message: string | undefined): boolean {
+  if (!message) return false;
+  // Patterns observed when browser-mcp wedges or its Chrome instance dies.
+  return (
+    /TransportError/i.test(message) ||
+    /timed out after \d+ms/i.test(message) ||
+    /returned no parseable payload/i.test(message) ||
+    /\bECONN(REFUSED|RESET|ABORTED)\b/i.test(message) ||
+    /fetch failed/i.test(message) ||
+    /socket hang up/i.test(message) ||
+    /\bNoSuchSession\b/i.test(message) ||
+    /\bsession\b.*\bnot found\b/i.test(message)
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Browser-mcp Streamable HTTP client (minimal MCP handshake + tool calls).
@@ -103,6 +135,18 @@ class BrowserMcp implements BrowserMcpClient {
     } finally {
       this.sessionAlias = null;
     }
+  }
+
+  /**
+   * Drop all client-side state so the next call re-initializes from scratch.
+   * Used after a browser-mcp restart — the new server has no record of our
+   * old MCP session id, sessionAlias, or initialize handshake.
+   */
+  reset(): void {
+    this.mcpSessionId = null;
+    this.sessionAlias = null;
+    this.initialized = false;
+    this.nextRpcId = 0;
   }
 
   async call(
@@ -188,11 +232,32 @@ class BrowserMcp implements BrowserMcpClient {
     };
     if (this.mcpSessionId) headers["Mcp-Session-Id"] = this.mcpSessionId;
 
-    const res = await fetch(this.endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ jsonrpc: "2.0", id, ...body }),
-    });
+    // Per-call wall-clock guard — abort the fetch if browser-mcp hangs.
+    // Without this the runner can wedge indefinitely on a wedged Chrome.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+
+    let res: Response;
+    try {
+      res = await fetch(this.endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", id, ...body }),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      const err = e as Error & { name?: string };
+      if (err?.name === "AbortError") {
+        throw new TransportError(
+          `browser-mcp ${body.method} timed out after ${RPC_TIMEOUT_MS}ms`,
+        );
+      }
+      throw new TransportError(
+        `browser-mcp ${body.method} fetch failed: ${err.message}`,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (allowSessionHeader) {
       const s = res.headers.get("mcp-session-id");
@@ -228,12 +293,68 @@ class BrowserMcp implements BrowserMcpClient {
       payload = txt ? JSON.parse(txt) : null;
     }
     if (!payload) {
-      throw new Error(
+      throw new TransportError(
         `browser-mcp returned no parseable payload (status ${res.status}, ct=${ct}): ${txt.slice(0, 200)}`,
       );
     }
     return payload;
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// browser-mcp restart helper (F-PHASE3-004 — runner-side retry-with-restart).
+// ────────────────────────────────────────────────────────────────────────────
+
+async function restartBrowserMcp(): Promise<void> {
+  await new Promise<void>((resolveRestart, rejectRestart) => {
+    const proc = spawn(
+      ANAI_PYTHON,
+      ["-m", "anai", "mcp", "restart", "browser"],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let out = "";
+    let err = "";
+    proc.stdout.on("data", (d) => (out += d.toString()));
+    proc.stderr.on("data", (d) => (err += d.toString()));
+    const killTimer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      rejectRestart(new Error("anai mcp restart browser timed out after 30s"));
+    }, 30_000);
+    proc.on("exit", (code) => {
+      clearTimeout(killTimer);
+      if (code === 0) resolveRestart();
+      else
+        rejectRestart(
+          new Error(
+            `anai mcp restart browser exit=${code}: ${err.trim() || out.trim()}`,
+          ),
+        );
+    });
+    proc.on("error", (e) => {
+      clearTimeout(killTimer);
+      rejectRestart(e);
+    });
+  });
+
+  // Poll /health until ready or timeout — server takes a beat to bind :8810.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 2_000);
+      const r = await fetch(BROWSER_MCP_HEALTH, { signal: ctl.signal });
+      clearTimeout(t);
+      if (r.ok) return;
+    } catch {
+      /* keep polling */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(
+    `browser-mcp /health never came up after restart (${BROWSER_MCP_HEALTH})`,
+  );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -526,6 +647,55 @@ async function runOne(
   };
 }
 
+/**
+ * Run a scenario with one retry-after-browser-mcp-restart on transport
+ * wedge. Product-level assertion failures pass through unchanged — only
+ * transport errors (timeouts, fetch failures, NoSuchSession) trigger the
+ * restart. F-PHASE3-004.
+ */
+async function runOneWithRetry(
+  entry: RegistryEntry,
+  ctx: { browser: BrowserMcp; mock: MockControl },
+): Promise<ScenarioResult> {
+  const result = await runOne(entry, ctx);
+  if (result.status === "pass") return result;
+  if (!isTransportError(result.failure?.message)) return result;
+
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[runner] ${entry.scenario.id}: transport wedge detected — restarting browser-mcp + retrying once. (${result.failure?.message?.slice(0, 200)})`,
+  );
+
+  try {
+    await restartBrowserMcp();
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[runner] ${entry.scenario.id}: browser-mcp restart failed: ${(e as Error).message}`,
+    );
+    return result;
+  }
+
+  // Drop client-side state so the retry re-handshakes from scratch against
+  // the freshly-spawned server.
+  ctx.browser.reset();
+  try {
+    await ctx.browser.init();
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[runner] ${entry.scenario.id}: browser-mcp re-init failed post-restart: ${(e as Error).message}`,
+    );
+    return result;
+  }
+
+  const retried = await runOne(entry, ctx);
+  if (retried.failure) {
+    retried.failure.message = `[retried after browser-mcp restart] ${retried.failure.message}`;
+  }
+  return retried;
+}
+
 async function runAll(opts: RunOptions): Promise<ScenarioResult[]> {
   mkdirSync(ARTIFACTS_ROOT, { recursive: true });
   mkdirSync(FINDINGS_ROOT, { recursive: true });
@@ -573,7 +743,7 @@ async function runAll(opts: RunOptions): Promise<ScenarioResult[]> {
     console.log(
       `\n[runner] ▶ ${entry.scenario.id} — ${entry.scenario.description}`,
     );
-    const r = await runOne(entry, { browser, mock });
+    const r = await runOneWithRetry(entry, { browser, mock });
     results.push(r);
     // eslint-disable-next-line no-console
     console.log(
