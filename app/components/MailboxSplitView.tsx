@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 import ComposePanel from "~/components/ComposePanel";
 import EmailPanel from "~/components/EmailPanel";
+import ResizablePanel from "~/components/shell/ResizablePanel";
 import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
 
 interface MailboxSplitViewProps {
@@ -40,43 +41,59 @@ export default function MailboxSplitView({
 }: MailboxSplitViewProps) {
   const isPanelOpen = selectedEmailId !== null || isComposing;
 
+  // The third shell divider lives here, between the email list and the
+  // email/compose pane. On mobile we collapse one side or the other so the
+  // ResizablePanel only attaches on md+ when both panes are visible.
+  const showSplit = isPanelOpen;
+
   return (
     <div className="flex h-full">
-      {/* Left pane: list. On desktop always 380px so the right pane can host
-          either the active email/compose surface or the no-selection robot. */}
-      <div
-        className={`flex-col min-w-0 shrink-0 ${
-          isPanelOpen
-            ? "hidden md:flex md:w-[380px] md:border-r md:border-border"
-            : "flex w-full md:w-[380px] md:border-r md:border-border"
-        }`}
-      >
-        {children}
-      </div>
-      {/* Right pane: detail / compose / placeholder. Hidden on mobile when
-          nothing is active, so the list takes the full mobile viewport. */}
-      <div
-        className={`flex-col min-w-0 overflow-hidden ${
-          isPanelOpen
-            ? "flex flex-1 w-full md:w-auto"
-            : "hidden md:flex md:flex-1"
-        }`}
-      >
-        {isComposing && !selectedEmailId ? (
-          <ComposePanel />
-        ) : isComposing && selectedEmailId ? (
-          <div className="flex flex-col h-full overflow-y-auto">
-            <ComposePanel />
-            <div className="border-t border-border">
+      {showSplit ? (
+        <>
+          {/* List — visible only on md+ when the right pane is active. */}
+          <ResizablePanel
+            storageKey="ai.shell.emailList"
+            defaultWidth={380}
+            minWidth={280}
+            maxWidth={620}
+            side="left"
+            ariaLabel="Resize email list"
+            className="hidden md:flex flex-col bg-card overflow-hidden"
+          >
+            {children}
+          </ResizablePanel>
+          {/* Detail / compose — flex-1 on the right of the divider. */}
+          <div className="flex flex-1 flex-col min-w-0 overflow-hidden w-full md:w-auto">
+            {isComposing && !selectedEmailId ? (
+              <ComposePanel />
+            ) : isComposing && selectedEmailId ? (
+              <div className="flex flex-col h-full overflow-y-auto">
+                <ComposePanel />
+                <div className="border-t border-border">
+                  <EmailPanel emailId={selectedEmailId} />
+                </div>
+              </div>
+            ) : selectedEmailId ? (
               <EmailPanel emailId={selectedEmailId} />
-            </div>
+            ) : (
+              <NoSelectionPlaceholder />
+            )}
           </div>
-        ) : selectedEmailId ? (
-          <EmailPanel emailId={selectedEmailId} />
-        ) : (
-          <NoSelectionPlaceholder />
-        )}
-      </div>
+        </>
+      ) : (
+        // No selection yet: the list takes the full available width on
+        // mobile and a fixed 380 px on desktop with the placeholder to its
+        // right. We don't attach a divider here because there's nothing to
+        // resize against.
+        <>
+          <div className="flex flex-col w-full md:w-[380px] shrink-0 min-w-0 md:border-r md:border-border">
+            {children}
+          </div>
+          <div className="hidden md:flex flex-1 flex-col min-w-0 overflow-hidden">
+            <NoSelectionPlaceholder />
+          </div>
+        </>
+      )}
     </div>
   );
 }

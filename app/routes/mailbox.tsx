@@ -12,6 +12,7 @@
 import { useEffect, useRef } from "react";
 import { Outlet, useParams } from "react-router";
 import AgentSidebar from "~/components/AgentSidebar";
+import ResizablePanel from "~/components/shell/ResizablePanel";
 import { useMailbox } from "~/queries/mailboxes";
 import { useUIStore } from "~/hooks/useUIStore";
 
@@ -43,11 +44,22 @@ export default function MailboxRoute() {
         </main>
       </div>
 
-      {/* Agent + MCP sidebar — togglable on desktop, rendered inside center pane */}
+      {/* Agent + MCP sidebar — togglable on desktop, resizable + collapsible
+          when open. Toggle via the header robot button drives isAgentPanelOpen
+          (mount/unmount); once mounted, the divider's chevron drives an
+          intra-session collapse without losing the sidebar's content state. */}
       {isAgentPanelOpen && (
-        <div className="hidden lg:flex w-[380px] shrink-0 border-l border-border flex-col bg-card overflow-hidden">
+        <ResizablePanel
+          storageKey="ai.shell.agentSidebar"
+          defaultWidth={380}
+          minWidth={280}
+          maxWidth={640}
+          side="right"
+          ariaLabel="Resize agent panel"
+          className="hidden lg:flex flex-col bg-card overflow-hidden"
+        >
           <AgentSidebar />
-        </div>
+        </ResizablePanel>
       )}
     </div>
   );

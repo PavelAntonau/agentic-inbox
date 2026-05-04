@@ -521,3 +521,128 @@ body {
   margin-top: 0.25em;
   margin-bottom: 0.25em;
 }
+
+/* === Resizable shell dividers — UAT round 1 item 2 ==========================
+ *
+ * Three-panel shell (mailbox tree | center | preview/agents) shares one
+ * divider style. Matches the far-left rail's existing layered shadow but
+ * extends it with a "curved sheet" feel — the glow concentrates at vertical
+ * centre and fades to nothing at the very top and bottom of the divider.
+ * Hover lights the divider up neon-cyan + reveals a small grab handle.
+ */
+
+.resizable-divider {
+  position: relative;
+  z-index: 11; /* above shell-sidebar (z-10) so the hit-zone wins clicks */
+  background: transparent;
+}
+
+.resizable-divider__line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background-color: var(--color-border, rgba(0, 0, 0, 0.12));
+  box-shadow:
+    1px 0 0 0 rgba(78, 195, 255, 0.1),
+    8px 0 24px -12px rgba(10, 18, 38, 0.18),
+    2px 0 6px -3px rgba(10, 18, 38, 0.1);
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+:root.theme-dark .resizable-divider__line {
+  box-shadow:
+    1px 0 0 0 rgba(78, 195, 255, 0.16),
+    14px 0 36px -10px rgba(0, 0, 0, 0.55),
+    4px 0 10px -3px rgba(78, 195, 255, 0.1);
+}
+
+/* Curved-sheet glow — sits over the line; vertical gradient peaks at centre
+ * (deeper shadow) and fades at top/bottom so the divider reads as a softly
+ * curved sheet casting an uneven shadow rather than a uniform vertical bar. */
+.resizable-divider__glow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 6px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(10, 18, 38, 0.05) 30%,
+    rgba(10, 18, 38, 0.12) 50%,
+    rgba(10, 18, 38, 0.05) 70%,
+    transparent 100%
+  );
+  opacity: 0.85;
+  transition: opacity 140ms ease;
+}
+
+:root.theme-dark .resizable-divider__glow {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.18) 30%,
+    rgba(0, 0, 0, 0.42) 50%,
+    rgba(0, 0, 0, 0.18) 70%,
+    transparent 100%
+  );
+}
+
+/* Hover / active drag — neon cyan glow + slightly thicker visible line. */
+.resizable-divider[data-hovered="true"] .resizable-divider__line {
+  background-color: rgba(78, 195, 255, 0.85);
+  box-shadow:
+    0 0 0 1px rgba(78, 195, 255, 0.45),
+    0 0 12px 2px rgba(78, 195, 255, 0.45),
+    0 0 28px 6px rgba(78, 195, 255, 0.18);
+}
+
+:root.theme-dark
+  .resizable-divider[data-hovered="true"]
+  .resizable-divider__line {
+  background-color: rgba(120, 215, 255, 0.95);
+  box-shadow:
+    0 0 0 1px rgba(120, 215, 255, 0.55),
+    0 0 14px 3px rgba(120, 215, 255, 0.55),
+    0 0 36px 8px rgba(78, 195, 255, 0.28);
+}
+
+/* Collapse-toggle / drag handle pill that appears on hover. */
+.resizable-divider__handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 36px;
+  border-radius: 9px;
+  background-color: var(--color-card, #f0ede8);
+  border: 1px solid rgba(78, 195, 255, 0.65);
+  color: rgba(78, 195, 255, 0.9);
+  box-shadow:
+    0 0 8px rgba(78, 195, 255, 0.35),
+    0 1px 4px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+:root.theme-dark .resizable-divider__handle {
+  background-color: var(--color-card, #131e3e);
+  border-color: rgba(120, 215, 255, 0.75);
+  color: rgba(120, 215, 255, 1);
+  box-shadow:
+    0 0 10px rgba(120, 215, 255, 0.45),
+    0 1px 4px rgba(0, 0, 0, 0.55);
+}
+
+/* Collapsed panels render width:0 — keep the divider clickable so the
+ * user can still expand them. The chevron flips direction so it's clear
+ * a click will pull the panel back out. */
+.resizable-divider[data-collapsed="true"] {
+  cursor: pointer;
+}

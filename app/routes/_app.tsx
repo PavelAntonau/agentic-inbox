@@ -14,6 +14,7 @@ import { Outlet } from "react-router";
 import ComposeEmail from "~/components/ComposeEmail";
 import MailboxTreeRail from "~/components/shell/MailboxTreeRail";
 import PreviewPane from "~/components/shell/PreviewPane";
+import ResizablePanel from "~/components/shell/ResizablePanel";
 import { useUIStore } from "~/hooks/useUIStore";
 
 export default function AppShell() {
@@ -23,15 +24,23 @@ export default function AppShell() {
     // flex-1 fills remaining height below the global Header rendered in root.tsx.
     // overflow-hidden prevents double scrollbars; inner panes scroll independently.
     <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left rail — always visible on desktop. data-shell-sidebar marks
-          the surface so the dedicated multi-layer shadow rule in
-          app/index.css can target it (Phase 3f). */}
-      <div
-        data-shell-sidebar
-        className="hidden md:flex w-[240px] shrink-0 border-r border-border flex-col bg-card overflow-y-auto relative z-10"
+      {/* Left rail — resizable + collapsible. The divider next to it owns
+          the curved-sheet shadow now (matching the other shell dividers),
+          so we keep data-shell-sidebar but rely on the shared divider CSS
+          for the visual treatment. */}
+      <ResizablePanel
+        storageKey="ai.shell.mailboxRail"
+        defaultWidth={240}
+        minWidth={180}
+        maxWidth={420}
+        side="left"
+        ariaLabel="Resize mailbox rail"
+        className="hidden md:flex flex-col bg-card overflow-y-auto relative z-10"
       >
-        <MailboxTreeRail />
-      </div>
+        <div data-shell-sidebar className="flex flex-col w-full h-full">
+          <MailboxTreeRail />
+        </div>
+      </ResizablePanel>
 
       {/* Center — current route */}
       <main className="flex-1 min-w-0 overflow-hidden">
@@ -40,9 +49,17 @@ export default function AppShell() {
 
       {/* Right — preview pane when an email is selected */}
       {selectedEmailId && (
-        <div className="hidden lg:flex w-[380px] shrink-0 border-l border-border flex-col bg-card overflow-hidden">
+        <ResizablePanel
+          storageKey="ai.shell.previewPane"
+          defaultWidth={380}
+          minWidth={280}
+          maxWidth={640}
+          side="right"
+          ariaLabel="Resize preview pane"
+          className="hidden lg:flex flex-col bg-card overflow-hidden"
+        >
           <PreviewPane emailId={selectedEmailId} />
-        </div>
+        </ResizablePanel>
       )}
 
       <ComposeEmail />
