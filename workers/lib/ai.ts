@@ -16,14 +16,12 @@
  */
 
 import { escapeHtml, stripHtmlToText, textToHtml } from "./email-helpers";
+import { isAiMocked as sharedIsAiMocked } from "./mock-mode";
 
-type AiEnv = { AI: Ai; DEV_MOCK_AI?: string };
+type AiEnv = { AI: Ai; DEV_MOCK_AI?: string; MOCK_MODE?: string };
 
 function isAiMocked(env: AiEnv): boolean {
-  return (
-    typeof env.DEV_MOCK_AI === "string" &&
-    env.DEV_MOCK_AI.toLowerCase() === "true"
-  );
+  return sharedIsAiMocked(env);
 }
 
 // ── Prompt Injection Scanner ───────────────────────────────────────

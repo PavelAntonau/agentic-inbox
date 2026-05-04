@@ -25,4 +25,11 @@ export interface Env extends Cloudflare.Env {
   /** better-auth signing secret — set via `wrangler secret put BETTER_AUTH_SECRET`. */
   BETTER_AUTH_SECRET: string;
   // BETTER_AUTH_URL is declared in wrangler.jsonc and inherited via Cloudflare.Env.
+  /**
+   * Autonomous-local-testing umbrella switch. Set to `"1"` in `.dev.vars`
+   * (gitignored) to enable: mock CF Access shim, canned AI replies, R2-backed
+   * outbox, fixture data for CF management API, /__mock/* router. Production
+   * deploys must NEVER set this. See workers/lib/mock-mode.ts.
+   */
+  MOCK_MODE?: string;
 }

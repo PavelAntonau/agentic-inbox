@@ -92,7 +92,10 @@ export async function upsertEmail(
   env: Env,
   email: string,
 ): Promise<{ ok: boolean; mocked?: boolean; error?: string }> {
-  const isMock = env.CF_ACCESS_DEV_MODE === "mock" || !env.CF_ACCOUNT_ID;
+  const isMock =
+    env.MOCK_MODE === "1" ||
+    env.CF_ACCESS_DEV_MODE === "mock" ||
+    !env.CF_ACCOUNT_ID;
   if (isMock) {
     _mockEmailSet.add(email.toLowerCase());
     return { ok: true, mocked: true };
@@ -128,7 +131,10 @@ export async function removeEmail(
   env: Env,
   email: string,
 ): Promise<{ ok: boolean; mocked?: boolean; error?: string }> {
-  const isMock = env.CF_ACCESS_DEV_MODE === "mock" || !env.CF_ACCOUNT_ID;
+  const isMock =
+    env.MOCK_MODE === "1" ||
+    env.CF_ACCESS_DEV_MODE === "mock" ||
+    !env.CF_ACCOUNT_ID;
   if (isMock) {
     _mockEmailSet.delete(email.toLowerCase());
     return { ok: true, mocked: true };
