@@ -25,10 +25,13 @@ import {
   generateMessageId,
   buildReferencesChain,
   buildThreadingHeaders,
+  resolveMailboxBackend,
+  readSourceExternalSendEnabled,
 } from "./email-helpers";
 import { verifyDraft } from "./ai";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "./mocks/email-binding";
+import { decideSendPolicy, deliverInternal } from "./internal-delivery";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
 
@@ -465,17 +468,52 @@ export async function toolSendReply(
   });
   const fullBodyHtml = sanitizedBody + quotedBlock;
 
-  try {
-    await sendEmail(getEmailBinding(env), {
-      to: params.to,
-      from: mailboxId,
-      subject: params.subject,
-      html: fullBodyHtml,
-      headers: buildThreadingHeaders(originalMsgId, references),
-    });
-  } catch (e) {
-    console.error("Email send failed:", (e as Error).message);
-    return { error: `Failed to send reply: ${(e as Error).message}` };
+  // ── Send-policy decision (TASK-1.3) ────────────────────────────
+  const [destinationBackend, sourceExternalSendEnabled] = await Promise.all([
+    resolveMailboxBackend(env, params.to),
+    readSourceExternalSendEnabled(env, mailboxId),
+  ]);
+  const decision = decideSendPolicy({
+    destinationBackend,
+    sourceExternalSendEnabled,
+  });
+  if (decision.route === "denied") {
+    return { error: decision.error };
+  }
+
+  if (decision.route === "internal") {
+    try {
+      await deliverInternal(env, {
+        fromMailboxId: mailboxId.toLowerCase(),
+        toAddress: params.to.toLowerCase(),
+        subject: params.subject,
+        bodyHtml: fullBodyHtml,
+        outgoingMessageId,
+        messageId,
+        threading: {
+          in_reply_to: originalMsgId,
+          email_references:
+            references.length > 0 ? JSON.stringify(references) : null,
+          thread_id: threadId,
+        },
+      });
+    } catch (e) {
+      console.error("Internal delivery failed:", (e as Error).message);
+      return { error: `Failed to deliver reply: ${(e as Error).message}` };
+    }
+  } else {
+    try {
+      await sendEmail(getEmailBinding(env), {
+        to: params.to,
+        from: mailboxId,
+        subject: params.subject,
+        html: fullBodyHtml,
+        headers: buildThreadingHeaders(originalMsgId, references),
+      });
+    } catch (e) {
+      console.error("Email send failed:", (e as Error).message);
+      return { error: `Failed to send reply: ${(e as Error).message}` };
+    }
   }
 
   await stub.createEmail(
@@ -534,16 +572,45 @@ export async function toolSendEmail(
     };
   }
 
-  try {
-    await sendEmail(getEmailBinding(env), {
-      to: params.to,
-      from: mailboxId,
-      subject: params.subject,
-      html: sanitizedBody,
-    });
-  } catch (e) {
-    console.error("Email send failed:", (e as Error).message);
-    return { error: `Failed to send email: ${(e as Error).message}` };
+  // ── Send-policy decision (TASK-1.3) ────────────────────────────
+  const [destinationBackend, sourceExternalSendEnabled] = await Promise.all([
+    resolveMailboxBackend(env, params.to),
+    readSourceExternalSendEnabled(env, mailboxId),
+  ]);
+  const decision = decideSendPolicy({
+    destinationBackend,
+    sourceExternalSendEnabled,
+  });
+  if (decision.route === "denied") {
+    return { error: decision.error };
+  }
+
+  if (decision.route === "internal") {
+    try {
+      await deliverInternal(env, {
+        fromMailboxId: mailboxId.toLowerCase(),
+        toAddress: params.to.toLowerCase(),
+        subject: params.subject,
+        bodyHtml: sanitizedBody,
+        outgoingMessageId,
+        messageId,
+      });
+    } catch (e) {
+      console.error("Internal delivery failed:", (e as Error).message);
+      return { error: `Failed to deliver email: ${(e as Error).message}` };
+    }
+  } else {
+    try {
+      await sendEmail(getEmailBinding(env), {
+        to: params.to,
+        from: mailboxId,
+        subject: params.subject,
+        html: sanitizedBody,
+      });
+    } catch (e) {
+      console.error("Email send failed:", (e as Error).message);
+      return { error: `Failed to send email: ${(e as Error).message}` };
+    }
   }
 
   await stub.createEmail(

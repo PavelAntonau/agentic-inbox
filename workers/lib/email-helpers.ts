@@ -8,11 +8,15 @@
  * Includes: DO stub helpers, sender validation, message-ID generation,
  * threading, HTML utilities, and tool-logic (getFullEmail / getFullThread).
  */
+import { drizzle } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { MailboxDO } from "../durableObject";
 import type { EmailFull } from "./schemas";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
 import { formatQuotedDate } from "../../shared/dates";
+import * as schema from "../db/control-plane/schema";
 
 // ── DO Stub ────────────────────────────────────────────────────────
 
@@ -21,12 +25,12 @@ import { formatQuotedDate } from "../../shared/dates";
  * Replaces the repeated 3-line ns.idFromName / ns.get pattern.
  */
 export function getMailboxStub(
-	env: Env,
-	mailboxId: string,
+  env: Env,
+  mailboxId: string,
 ): DurableObjectStub<MailboxDO> {
-	const ns = env.MAILBOX;
-	const id = ns.idFromName(mailboxId);
-	return ns.get(id);
+  const ns = env.MAILBOX;
+  const id = ns.idFromName(mailboxId);
+  return ns.get(id);
 }
 
 // ── Mailbox Listing ────────────────────────────────────────────────
@@ -35,13 +39,84 @@ export function getMailboxStub(
  * List all mailboxes from R2 bucket metadata.
  */
 export async function listMailboxes(
-	bucket: R2Bucket,
+  bucket: R2Bucket,
 ): Promise<{ id: string; email: string }[]> {
-	const list = await bucket.list({ prefix: "mailboxes/" });
-	return list.objects.map((obj) => {
-		const id = obj.key.replace("mailboxes/", "").replace(".json", "");
-		return { id, email: id };
-	});
+  const list = await bucket.list({ prefix: "mailboxes/" });
+  return list.objects.map((obj) => {
+    const id = obj.key.replace("mailboxes/", "").replace(".json", "");
+    return { id, email: id };
+  });
+}
+
+// ── Backend Resolution ─────────────────────────────────────────────
+
+/**
+ * Resolve a destination email address to its backing storage:
+ *   - "d1" → present in the control-plane mailboxes table.
+ *   - "r2" → present in the legacy R2 v1 bucket only.
+ *   - null → external (not one of our mailboxes).
+ *
+ * D1 wins on collisions: if the same address is registered in both, the D1
+ * row is returned. The D1 lookup uses lower(address) to match the
+ * mailboxes_address_nocase unique index.
+ *
+ * Used by toolSendEmail / toolSendReply (workers/lib/tools.ts) to decide
+ * whether to short-circuit through deliverInternal() or fall through to
+ * Cloudflare Email Routing. Phase 2's TASK-2.1 will reuse it for the
+ * D1+R2 union list_mailboxes path.
+ */
+export async function resolveMailboxBackend(
+  env: Env,
+  address: string,
+): Promise<
+  | { kind: "d1"; row: typeof schema.mailboxes.$inferSelect }
+  | { kind: "r2"; row: { id: string; address: string } }
+  | null
+> {
+  const lowered = address.toLowerCase();
+
+  if (env.DB) {
+    const orm = drizzle(env.DB, { schema });
+    const row = await orm
+      .select()
+      .from(schema.mailboxes)
+      .where(eq(sql`lower(${schema.mailboxes.address})`, lowered))
+      .get();
+    if (row) return { kind: "d1", row };
+  }
+
+  if (env.BUCKET) {
+    const head = await env.BUCKET.head(`mailboxes/${lowered}.json`);
+    if (head) {
+      return { kind: "r2", row: { id: lowered, address: lowered } };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Read the source mailbox's external_send_enabled flag from the D1 control
+ * plane. Returns:
+ *   - true / false  → source mailbox exists in D1, with that flag value.
+ *   - undefined     → source mailbox is not in D1 (legacy v1 R2-only mailbox);
+ *                     callers treat this as "internal-only by default".
+ */
+export async function readSourceExternalSendEnabled(
+  env: Env,
+  fromAddress: string,
+): Promise<boolean | undefined> {
+  if (!env.DB) return undefined;
+  const lowered = fromAddress.toLowerCase();
+  const orm = drizzle(env.DB, { schema });
+  const row = await orm
+    .select({
+      external_send_enabled: schema.mailboxes.external_send_enabled,
+    })
+    .from(schema.mailboxes)
+    .where(eq(sql`lower(${schema.mailboxes.address})`, lowered))
+    .get();
+  return row?.external_send_enabled;
 }
 
 // ── Sender Validation ──────────────────────────────────────────────
@@ -51,30 +126,34 @@ export async function listMailboxes(
  * Returns the normalised values or throws with a user-facing message.
  */
 export function validateSender(
-	to: string | string[],
-	from: string | { email: string; name: string },
-	mailboxId: string,
+  to: string | string[],
+  from: string | { email: string; name: string },
+  mailboxId: string,
 ): { toStr: string; fromEmail: string; fromDomain: string } {
-	const toStr = (Array.isArray(to) ? to.join(", ") : to).toLowerCase();
-	const fromEmail = (typeof from === "string" ? from : from.email).toLowerCase();
+  const toStr = (Array.isArray(to) ? to.join(", ") : to).toLowerCase();
+  const fromEmail = (
+    typeof from === "string" ? from : from.email
+  ).toLowerCase();
 
-	if (fromEmail !== mailboxId.toLowerCase()) {
-		throw new SenderValidationError("From address must match the mailbox email address");
-	}
+  if (fromEmail !== mailboxId.toLowerCase()) {
+    throw new SenderValidationError(
+      "From address must match the mailbox email address",
+    );
+  }
 
-	const fromDomain = fromEmail.split("@")[1];
-	if (!fromDomain) {
-		throw new SenderValidationError("Invalid sender email address");
-	}
+  const fromDomain = fromEmail.split("@")[1];
+  if (!fromDomain) {
+    throw new SenderValidationError("Invalid sender email address");
+  }
 
-	return { toStr, fromEmail, fromDomain };
+  return { toStr, fromEmail, fromDomain };
 }
 
 export class SenderValidationError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "SenderValidationError";
-	}
+  constructor(message: string) {
+    super(message);
+    this.name = "SenderValidationError";
+  }
 }
 
 // ── Message ID ─────────────────────────────────────────────────────
@@ -83,12 +162,12 @@ export class SenderValidationError extends Error {
  * Generate an internal UUID and a proper RFC 2822 Message-ID.
  */
 export function generateMessageId(fromDomain: string): {
-	messageId: string;
-	outgoingMessageId: string;
+  messageId: string;
+  outgoingMessageId: string;
 } {
-	const messageId = crypto.randomUUID();
-	const outgoingMessageId = `${messageId}@${fromDomain}`;
-	return { messageId, outgoingMessageId };
+  const messageId = crypto.randomUUID();
+  const outgoingMessageId = `${messageId}@${fromDomain}`;
+  return { messageId, outgoingMessageId };
 }
 
 // ── Threading ──────────────────────────────────────────────────────
@@ -97,37 +176,37 @@ export function generateMessageId(fromDomain: string): {
  * Build the References chain and In-Reply-To from an original email.
  */
 export function buildReferencesChain(original: EmailFull): {
-	originalMsgId: string;
-	references: string[];
-	threadId: string;
+  originalMsgId: string;
+  references: string[];
+  threadId: string;
 } {
-	const originalMsgId = original.message_id || original.id;
-	let existingRefs: string[] = [];
-	if (original.email_references) {
-		try {
-			existingRefs = JSON.parse(original.email_references);
-		} catch {
-			// Malformed JSON in email_references — treat as empty
-		}
-	}
-	const references = [...existingRefs, originalMsgId].filter(Boolean);
-	const threadId = original.thread_id || original.id;
-	return { originalMsgId, references, threadId };
+  const originalMsgId = original.message_id || original.id;
+  let existingRefs: string[] = [];
+  if (original.email_references) {
+    try {
+      existingRefs = JSON.parse(original.email_references);
+    } catch {
+      // Malformed JSON in email_references — treat as empty
+    }
+  }
+  const references = [...existingRefs, originalMsgId].filter(Boolean);
+  const threadId = original.thread_id || original.id;
+  return { originalMsgId, references, threadId };
 }
 
 /**
  * Build threading headers (In-Reply-To + References) for the email binding.
  */
 export function buildThreadingHeaders(
-	originalMsgId: string,
-	references: string[],
+  originalMsgId: string,
+  references: string[],
 ): Record<string, string> {
-	return {
-		"In-Reply-To": `<${originalMsgId}>`,
-		...(references.length > 0
-			? { References: references.map((r) => `<${r}>`).join(" ") }
-			: {}),
-	};
+  return {
+    "In-Reply-To": `<${originalMsgId}>`,
+    ...(references.length > 0
+      ? { References: references.map((r) => `<${r}>`).join(" ") }
+      : {}),
+  };
 }
 
 // ── Draft-follows-in_reply_to ──────────────────────────────────────
@@ -137,14 +216,16 @@ export function buildThreadingHeaders(
  * Used by reply/forward routes to avoid threading against the draft itself.
  */
 export async function resolveOriginalEmail(
-	stub: DurableObjectStub<MailboxDO>,
-	email: EmailFull,
+  stub: DurableObjectStub<MailboxDO>,
+  email: EmailFull,
 ): Promise<EmailFull> {
-	if (email.folder_id === Folders.DRAFT && email.in_reply_to) {
-		const realOriginal = (await stub.getEmail(email.in_reply_to)) as EmailFull | null;
-		if (realOriginal) return realOriginal;
-	}
-	return email;
+  if (email.folder_id === Folders.DRAFT && email.in_reply_to) {
+    const realOriginal = (await stub.getEmail(
+      email.in_reply_to,
+    )) as EmailFull | null;
+    if (realOriginal) return realOriginal;
+  }
+  return email;
 }
 
 // ── HTML Utilities ─────────────────────────────────────────────────
@@ -154,13 +235,13 @@ export async function resolveOriginalEmail(
  * Safe for use in both text content and attribute contexts.
  */
 export function escapeHtml(text: string): string {
-	if (!text) return "";
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;");
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 /**
@@ -169,9 +250,9 @@ export function escapeHtml(text: string): string {
  * (clients that strip inline styles, e.g. Outlook) as a belt-and-suspenders approach.
  */
 export function textToHtml(text: string): string {
-	if (!text) return "";
-	const escaped = escapeHtml(text).replace(/\n/g, "<br>");
-	return `<div style="white-space:pre-wrap">${escaped}</div>`;
+  if (!text) return "";
+  const escaped = escapeHtml(text).replace(/\n/g, "<br>");
+  return `<div style="white-space:pre-wrap">${escaped}</div>`;
 }
 
 /**
@@ -180,13 +261,13 @@ export function textToHtml(text: string): string {
  * content into the output.
  */
 export function stripHtmlToText(html: string): string {
-	if (!html) return "";
-	return html
-		.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-		.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-		.replace(/<[^>]+>/g, " ")
-		.replace(/\s+/g, " ")
-		.trim();
+  if (!html) return "";
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -199,30 +280,30 @@ export const formatEmailDate = formatQuotedDate;
  * Build a quoted reply block HTML string from original email data.
  */
 export function buildQuotedReplyBlock(original: {
-	date?: string;
-	sender?: string;
-	body?: string;
+  date?: string;
+  sender?: string;
+  body?: string;
 }): string {
-	if (!original.body) return "";
-	
-	// HTML-escape sender and date to prevent injection
-	const originalSender = escapeHtml(original.sender || "unknown");
-	const originalDate = escapeHtml(formatEmailDate(original.date || ""));
+  if (!original.body) return "";
 
-	// Sanitize the body to plain text to prevent stored XSS.
-	// The original HTML renders safely in the sandboxed iframe, but quoted
-	// reply blocks are injected into the compose editor and outgoing emails
-	// where raw HTML would execute. Convert to escaped plain text instead.
-	const plainBody = stripHtmlToText(original.body);
-	const bodyToQuote = escapeHtml(plainBody).replace(/\n/g, "<br>");
+  // HTML-escape sender and date to prevent injection
+  const originalSender = escapeHtml(original.sender || "unknown");
+  const originalDate = escapeHtml(formatEmailDate(original.date || ""));
 
-	return `<br><blockquote style="border-left: 2px solid #ccc; margin: 0; padding-left: 1em; color: #666;">On ${originalDate}, ${originalSender} wrote:<br><br>${bodyToQuote}</blockquote>`;
+  // Sanitize the body to plain text to prevent stored XSS.
+  // The original HTML renders safely in the sandboxed iframe, but quoted
+  // reply blocks are injected into the compose editor and outgoing emails
+  // where raw HTML would execute. Convert to escaped plain text instead.
+  const plainBody = stripHtmlToText(original.body);
+  const bodyToQuote = escapeHtml(plainBody).replace(/\n/g, "<br>");
+
+  return `<br><blockquote style="border-left: 2px solid #ccc; margin: 0; padding-left: 1em; color: #666;">On ${originalDate}, ${originalSender} wrote:<br><br>${bodyToQuote}</blockquote>`;
 }
 
 // ── Tool Logic (getFullEmail / getFullThread) ──────────────────────
 
 type MailboxThreadReaderStub = {
-	getThreadEmails: (threadId: string) => Promise<EmailFull[]>;
+  getThreadEmails: (threadId: string) => Promise<EmailFull[]>;
 };
 
 /**
@@ -230,14 +311,14 @@ type MailboxThreadReaderStub = {
  * Returns null if the email is not found.
  */
 export async function getFullEmail(
-	stub: DurableObjectStub<MailboxDO>,
-	emailId: string,
+  stub: DurableObjectStub<MailboxDO>,
+  emailId: string,
 ) {
-	const email = (await stub.getEmail(emailId)) as EmailFull | null;
-	if (!email) return null;
+  const email = (await stub.getEmail(emailId)) as EmailFull | null;
+  if (!email) return null;
 
-	const textBody = email.body ? stripHtmlToText(email.body) : "";
-	return { ...email, body_text: textBody, body_html: email.body };
+  const textBody = email.body ? stripHtmlToText(email.body) : "";
+  return { ...email, body_text: textBody, body_html: email.body };
 }
 
 /**
@@ -246,21 +327,25 @@ export async function getFullEmail(
  * instead of the previous N+1 pattern (1 list query + N getEmail calls).
  */
 export async function getFullThread(
-	stub: DurableObjectStub<MailboxDO>,
-	threadId: string,
+  stub: DurableObjectStub<MailboxDO>,
+  threadId: string,
 ) {
-	const threadStub = stub as unknown as MailboxThreadReaderStub;
-	const emails = await threadStub.getThreadEmails(threadId);
+  const threadStub = stub as unknown as MailboxThreadReaderStub;
+  const emails = await threadStub.getThreadEmails(threadId);
 
-	const enriched = emails.map((email) => {
-		const textBody = email.body ? stripHtmlToText(email.body) : "";
-		return { ...email, body_text: textBody };
-	});
+  const enriched = emails.map((email) => {
+    const textBody = email.body ? stripHtmlToText(email.body) : "";
+    return { ...email, body_text: textBody };
+  });
 
-	// Already sorted ASC by the DO query, but ensure consistency
-	enriched.sort(
-		(a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-	);
+  // Already sorted ASC by the DO query, but ensure consistency
+  enriched.sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
 
-	return { thread_id: threadId, message_count: enriched.length, messages: enriched };
+  return {
+    thread_id: threadId,
+    message_count: enriched.length,
+    messages: enriched,
+  };
 }
