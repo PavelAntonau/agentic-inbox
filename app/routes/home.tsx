@@ -5,24 +5,18 @@
 import {
   Button,
   Dialog,
-  Empty,
   Input,
   Loader,
   Select,
   Text,
   useToastManager,
 } from "~/ui";
-import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { PlusIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Link as RouterLink } from "react-router";
 import api from "~/services/api";
 import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
-import {
-  useCreateMailbox,
-  useDeleteMailbox,
-  useMailboxes,
-} from "~/queries/mailboxes";
+import { useCreateMailbox, useMailboxes } from "~/queries/mailboxes";
 import { queryKeys } from "~/queries/keys";
 
 export function meta() {
@@ -37,7 +31,6 @@ export default function HomeRoute() {
     isFetched: mailboxesFetched,
   } = useMailboxes();
   const createMailbox = useCreateMailbox();
-  const deleteMailbox = useDeleteMailbox();
 
   const { data: configData } = useQuery({
     queryKey: queryKeys.config,
@@ -54,12 +47,6 @@ export default function HomeRoute() {
   const [newName, setNewName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-  const [mailboxToDelete, setMailboxToDelete] = useState<{
-    id: string;
-    email: string;
-  } | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Set default domain when config loads
   useEffect(() => {
@@ -122,88 +109,25 @@ export default function HomeRoute() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!mailboxToDelete) return;
-    setIsDeleting(true);
-    try {
-      await deleteMailbox.mutateAsync(mailboxToDelete.id);
-      toastManager.add({ title: "Mailbox deleted" });
-      setIsDeleteOpen(false);
-      setMailboxToDelete(null);
-    } catch {
-      toastManager.add({ title: "Failed to delete mailbox", variant: "error" });
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
   const isConfigured = emailAddresses.length > 0;
-  const accounts = isConfigured
-    ? emailAddresses.map((addr) => ({
-        id: addr,
-        email: addr,
-        name: addr.split("@")[0] || addr,
-      }))
-    : mailboxes;
-
   const isLoading = !configData;
 
   return (
     <div className="min-h-screen bg-bg flex flex-col items-center justify-center">
       <div className="mx-auto w-full max-w-3xl px-4 py-8 md:px-6 md:py-16">
-        {/* Heading + actionnow.ai subtitle removed (Phase 3e) — they didn't
-            fit the visual language. The "+ New Mailbox" hero CTA also
-            moved to the sidebar; this page is now just the empty state /
-            account list, centered in the viewport. */}
+        {/* Mailboxes are shown exclusively in the sidebar via MailboxTreeRail.
+            This page is the welcome / empty state seen when no mailbox is open.
+            The mid-page account list was removed in Phase 2 (TASK-2.4) to avoid
+            duplicating the sidebar tree. */}
 
         {isLoading ? (
           <div className="flex justify-center py-20">
             <Loader size="lg" />
           </div>
-        ) : accounts.length > 0 ? (
-          <div className="rounded-panel border border-border bg-card overflow-hidden">
-            {accounts.map((account, idx) => (
-              <RouterLink
-                key={account.id}
-                to={`/mailbox/${account.id}`}
-                className={`group flex items-center gap-4 px-5 py-4 no-underline transition-colors hover:bg-tx-card-hover ${
-                  idx > 0 ? "border-t border-border" : ""
-                }`}
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card-light text-sm font-bold text-text-bright">
-                  {account.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-text-bright truncate">
-                    {account.name}
-                  </div>
-                  <div className="text-sm text-text-muted">{account.email}</div>
-                </div>
-                {!isConfigured && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    shape="square"
-                    icon={<TrashIcon size={16} />}
-                    aria-label={`Delete mailbox ${account.email}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setMailboxToDelete({
-                        id: account.id,
-                        email: account.email,
-                      });
-                      setIsDeleteOpen(true);
-                    }}
-                  />
-                )}
-              </RouterLink>
-            ))}
-          </div>
         ) : (
           <div className="rounded-panel border border-border bg-card py-20 px-10 md:px-12">
             <div className="flex flex-col items-center text-center">
-              {/* Hero image — bigger again per Phase 3f. */}
+              {/* Hero image */}
               <div className="mb-8">
                 <img
                   src={heroUrl}
@@ -212,9 +136,9 @@ export default function HomeRoute() {
                   draggable={false}
                 />
               </div>
-              {/* Phase 3f order: Create button is the focal CTA right
-                  under the hero, then the supporting copy beneath it. */}
-              {!isConfigured && (
+              {/* Show Create CTA only when there are no mailboxes yet and the
+                  app is not in managed-address mode. */}
+              {!isConfigured && mailboxes.length === 0 && (
                 <div className="mb-6">
                   <Button
                     variant="primary"
@@ -226,12 +150,14 @@ export default function HomeRoute() {
                 </div>
               )}
               <h3 className="text-lg font-semibold text-text-bright mb-1.5">
-                No mailboxes yet
+                {mailboxes.length > 0 ? "Select a mailbox" : "No mailboxes yet"}
               </h3>
               <p className="italic text-sm text-text-muted max-w-md">
-                {isConfigured
-                  ? "Your email routing is configured but no mailboxes have been created yet. They will appear here automatically."
-                  : "Create a mailbox to start sending and receiving emails with your domain."}
+                {mailboxes.length > 0
+                  ? "Choose a mailbox from the sidebar to start reading your email."
+                  : isConfigured
+                    ? "Your email routing is configured but no mailboxes have been created yet. They will appear here automatically."
+                    : "Create a mailbox to start sending and receiving emails with your domain."}
               </p>
             </div>
           </div>
@@ -315,45 +241,6 @@ export default function HomeRoute() {
               </Button>
             </div>
           </form>
-        </Dialog>
-      </Dialog.Root>
-
-      {/* Delete Dialog */}
-      <Dialog.Root
-        open={isDeleteOpen}
-        onOpenChange={(open) => {
-          setIsDeleteOpen(open);
-          if (!open) setMailboxToDelete(null);
-        }}
-      >
-        <Dialog size="sm" className="p-6">
-          <Dialog.Title className="text-base font-semibold mb-2">
-            Delete Mailbox
-          </Dialog.Title>
-          <Dialog.Description className="text-text-muted text-sm mb-5">
-            Are you sure you want to delete{" "}
-            <strong className="text-text-bright">
-              {mailboxToDelete?.email}
-            </strong>
-            ? This action cannot be undone.
-          </Dialog.Description>
-          <div className="flex justify-end gap-2">
-            <Dialog.Close
-              render={(props) => (
-                <Button {...props} variant="secondary" size="sm">
-                  Cancel
-                </Button>
-              )}
-            />
-            <Button
-              variant="destructive"
-              size="sm"
-              loading={isDeleting}
-              onClick={handleDelete}
-            >
-              Delete
-            </Button>
-          </div>
         </Dialog>
       </Dialog.Root>
     </div>
