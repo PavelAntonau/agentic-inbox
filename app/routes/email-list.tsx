@@ -170,11 +170,22 @@ export default function EmailListRoute() {
     [folder, page],
   );
 
-  const { data: emailData, isFetching: isRefreshing } = useEmails(
-    mailboxId,
-    params,
-    { refetchInterval: 30_000 },
-  );
+  const {
+    data: emailData,
+    isFetching,
+    isPending: isInitialLoad,
+  } = useEmails(mailboxId, params, { refetchInterval: 30_000 });
+
+  // Distinguish user-initiated refresh from background polling. The spinner
+  // and disabled state should only fire on initial load and when the user
+  // clicks the refresh button — silent background polls must not flicker
+  // the UI even when isFetching flips.
+  const [userRefreshing, setUserRefreshing] = useState(false);
+  useEffect(() => {
+    if (!isFetching && userRefreshing) setUserRefreshing(false);
+  }, [isFetching, userRefreshing]);
+
+  const isRefreshing = isInitialLoad || userRefreshing;
 
   const emails = emailData?.emails ?? [];
   const totalCount = emailData?.totalCount ?? 0;
@@ -228,6 +239,7 @@ export default function EmailListRoute() {
 
   const handleRefresh = () => {
     if (mailboxId) {
+      setUserRefreshing(true);
       queryClient.invalidateQueries({ queryKey: ["emails", mailboxId] });
       queryClient.invalidateQueries({
         queryKey: queryKeys.folders.list(mailboxId),
