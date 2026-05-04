@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import ContactRow, { type Contact } from "~/components/contacts/ContactRow";
 import SendContactRequestDialog from "~/components/contacts/SendContactRequestDialog";
 
-type Tab = "all" | "pending" | "accepted" | "blocked";
+type Tab = "all" | "sent" | "incoming" | "accepted" | "blocked";
 
 export function meta() {
   return [{ title: "Contacts | Agentic Inbox" }];
@@ -60,19 +60,35 @@ export default function ContactsRoute() {
     void fetchContacts();
   }, [fetchContacts]);
 
+  // Sent = outgoing pending requests (initiated_by = me).
+  // Incoming = pending requests addressed to me (initiated_by != me).
+  // Phase 5 / D12: outgoing rows stay 'pending' forever from the sender's view
+  // even if the recipient declined — declined rows are filtered server-side
+  // out of the recipient's listing only.
+  const isSent = (c: Contact) =>
+    c.status === "pending" && c.initiated_by === actorUserId;
+  const isIncoming = (c: Contact) =>
+    c.status === "pending" && c.initiated_by !== actorUserId;
+
   const counts = {
     all: contacts.length,
-    pending: contacts.filter((c) => c.status === "pending").length,
+    sent: contacts.filter(isSent).length,
+    incoming: contacts.filter(isIncoming).length,
     accepted: contacts.filter((c) => c.status === "accepted").length,
     blocked: contacts.filter((c) => c.status === "blocked").length,
   };
 
-  const filtered =
-    tab === "all" ? contacts : contacts.filter((c) => c.status === tab);
+  const filtered = (() => {
+    if (tab === "all") return contacts;
+    if (tab === "sent") return contacts.filter(isSent);
+    if (tab === "incoming") return contacts.filter(isIncoming);
+    return contacts.filter((c) => c.status === tab);
+  })();
 
   const TABS: { id: Tab; label: string }[] = [
     { id: "all", label: `All (${counts.all})` },
-    { id: "pending", label: `Pending (${counts.pending})` },
+    { id: "sent", label: `Sent (${counts.sent})` },
+    { id: "incoming", label: `Incoming (${counts.incoming})` },
     { id: "accepted", label: `Accepted (${counts.accepted})` },
     { id: "blocked", label: `Blocked (${counts.blocked})` },
   ];
@@ -129,7 +145,8 @@ export default function ContactsRoute() {
         <div className="rounded-lg border border-border bg-card px-5">
           {filtered.length === 0 ? (
             <p className="text-sm text-text-muted text-center py-12">
-              {tab === "pending" && "No pending contact requests."}
+              {tab === "sent" && "No outgoing requests."}
+              {tab === "incoming" && "No incoming requests."}
               {tab === "accepted" && "No accepted contacts yet."}
               {tab === "blocked" && "No blocked users."}
               {tab === "all" &&
