@@ -16,6 +16,7 @@ import sAuth3 from "./s-auth-3";
 import sInbox1 from "./s-inbox-1";
 import sInbox2 from "./s-inbox-2";
 import sMsg1 from "./s-msg-1";
+import sMsg2 from "./s-msg-2";
 import sCli1 from "./s-cli-1";
 
 export interface RegistryEntry {
@@ -29,6 +30,7 @@ const ALL: Scenario[] = [
   sInbox1,
   sInbox2,
   sMsg1,
+  sMsg2,
   sCli1,
 ];
 
