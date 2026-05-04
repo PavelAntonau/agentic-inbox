@@ -204,22 +204,28 @@ body::after {
   background-repeat: no-repeat;
 }
 
+/* UAT round-3 (second batch): top gradient was the most eye-catching
+ * fixed-position layer — softened by ~50 % opacity AND tightened to
+ * 28 vh so it doesn't dominate the chrome. Bottom dimmed slightly too
+ * for visual balance. */
 body::before {
+  height: 28vh;
   top: 0;
   background-image: radial-gradient(
     ellipse 55% 100% at 50% 0%,
-    rgba(78, 195, 255, 0.16) 0%,
-    rgba(78, 195, 255, 0.06) 45%,
+    rgba(78, 195, 255, 0.08) 0%,
+    rgba(78, 195, 255, 0.03) 45%,
     transparent 85%
   );
 }
 
 body::after {
+  height: 32vh;
   bottom: 0;
   background-image: radial-gradient(
     ellipse 55% 100% at 50% 100%,
-    rgba(10, 18, 38, 0.18) 0%,
-    rgba(10, 18, 38, 0.07) 45%,
+    rgba(10, 18, 38, 0.14) 0%,
+    rgba(10, 18, 38, 0.05) 45%,
     transparent 85%
   );
 }
@@ -227,8 +233,8 @@ body::after {
 :root.theme-dark body::before {
   background-image: radial-gradient(
     ellipse 60% 100% at 50% 0%,
-    rgba(78, 195, 255, 0.26) 0%,
-    rgba(78, 195, 255, 0.1) 45%,
+    rgba(78, 195, 255, 0.13) 0%,
+    rgba(78, 195, 255, 0.05) 45%,
     transparent 85%
   );
 }
@@ -236,8 +242,8 @@ body::after {
 :root.theme-dark body::after {
   background-image: radial-gradient(
     ellipse 60% 100% at 50% 100%,
-    rgba(0, 0, 0, 0.55) 0%,
-    rgba(0, 0, 0, 0.2) 45%,
+    rgba(0, 0, 0, 0.45) 0%,
+    rgba(0, 0, 0, 0.16) 45%,
     transparent 85%
   );
 }
@@ -544,60 +550,19 @@ body {
   left: 50%;
   width: 1px;
   transform: translateX(-50%);
-  /* Rest state: a soft cyan tinted line matching the brand accent, NOT
-   * the neutral border-gray that read as a gray bar (UAT round 2 round-3
-   * feedback). Same hue as the hover state but at much lower opacity so
-   * the rest line is a quiet hint, not a wall. */
-  background-color: rgba(78, 195, 255, 0.35);
-  box-shadow:
-    1px 0 0 0 rgba(78, 195, 255, 0.18),
-    8px 0 24px -12px rgba(10, 18, 38, 0.18),
-    2px 0 6px -3px rgba(10, 18, 38, 0.1);
+  /* UAT round-3 second batch: only the turquoise stripe — every other
+   * shadow layer (the secondary cyan hairline, the dark drop) was the
+   * "break + darker area" the user was seeing. The curved-paper shadow
+   * moved to the sidebar containers (see [data-shell-sidebar][data-shadow-side]
+   * below). */
+  background-color: rgba(78, 195, 255, 0.55);
   transition:
     background-color 140ms ease,
     box-shadow 140ms ease;
 }
 
 :root.theme-dark .resizable-divider__line {
-  background-color: rgba(120, 215, 255, 0.45);
-  box-shadow:
-    1px 0 0 0 rgba(120, 215, 255, 0.22),
-    14px 0 36px -10px rgba(0, 0, 0, 0.55),
-    4px 0 10px -3px rgba(78, 195, 255, 0.14);
-}
-
-/* Curved-sheet glow — sits over the line; vertical gradient peaks at centre
- * (deeper shadow) and fades at top/bottom so the divider reads as a softly
- * curved sheet casting an uneven shadow rather than a uniform vertical bar. */
-.resizable-divider__glow {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 6px;
-  transform: translateX(-50%);
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(10, 18, 38, 0.05) 30%,
-    rgba(10, 18, 38, 0.12) 50%,
-    rgba(10, 18, 38, 0.05) 70%,
-    transparent 100%
-  );
-  opacity: 0.85;
-  transition: opacity 140ms ease;
-}
-
-:root.theme-dark .resizable-divider__glow {
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.18) 30%,
-    rgba(0, 0, 0, 0.42) 50%,
-    rgba(0, 0, 0, 0.18) 70%,
-    transparent 100%
-  );
+  background-color: rgba(120, 215, 255, 0.6);
 }
 
 /* Hover / active drag — neon cyan glow + slightly thicker visible line. */
@@ -619,30 +584,54 @@ body {
     0 0 36px 8px rgba(78, 195, 255, 0.28);
 }
 
-/* Collapse-toggle / drag handle pill that appears on hover. */
+/* Collapse-toggle / drag handle pill — UAT round-3 second batch:
+ * ALWAYS visible at rest (dim + small) and magnifies on hover/drag so
+ * users can see and find the click target without having to discover it. */
 .resizable-divider__handle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 36px;
-  border-radius: 9px;
+  width: 16px;
+  height: 32px;
+  border-radius: 8px;
   background-color: var(--color-card, #f0ede8);
-  border: 1px solid rgba(78, 195, 255, 0.65);
-  color: rgba(78, 195, 255, 0.9);
-  box-shadow:
-    0 0 8px rgba(78, 195, 255, 0.35),
-    0 1px 4px rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(78, 195, 255, 0.45);
+  color: rgba(78, 195, 255, 0.7);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   pointer-events: none;
+  opacity: 0.7;
+  transform: translate(-50%, -50%) scale(1);
+  transition:
+    opacity 140ms ease,
+    transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.resizable-divider__handle[data-active="true"] {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.25);
+  border-color: rgba(78, 195, 255, 0.85);
+  color: rgba(78, 195, 255, 1);
+  box-shadow:
+    0 0 8px rgba(78, 195, 255, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.18);
 }
 
 :root.theme-dark .resizable-divider__handle {
   background-color: var(--color-card, #131e3e);
-  border-color: rgba(120, 215, 255, 0.75);
+  border-color: rgba(120, 215, 255, 0.5);
+  color: rgba(120, 215, 255, 0.8);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+:root.theme-dark .resizable-divider__handle[data-active="true"] {
+  border-color: rgba(120, 215, 255, 1);
   color: rgba(120, 215, 255, 1);
   box-shadow:
-    0 0 10px rgba(120, 215, 255, 0.45),
-    0 1px 4px rgba(0, 0, 0, 0.55);
+    0 0 10px rgba(120, 215, 255, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.55);
 }
 
 /* Collapsed panels render width:0 — keep the divider clickable so the
@@ -650,4 +639,136 @@ body {
  * a click will pull the panel back out. */
 .resizable-divider[data-collapsed="true"] {
   cursor: pointer;
+}
+
+/* Sidebar curved-paper drop shadow (UAT round-3 second batch).
+ *
+ * Rendered as a 14 px-wide pseudo-element strip sitting JUST OUTSIDE the
+ * sidebar's edge with a vertical linear-gradient: shadow is denser at
+ * vertical centre and fades at top + bottom — that's the "softly curved
+ * sheet" cue. Use `data-shadow-side` to pick which edge gets the shadow.
+ * The horizontal gradient inside each strip tapers from the panel edge
+ * outward so the shadow has a soft outer feather. */
+[data-shell-sidebar] {
+  position: relative;
+}
+[data-shell-sidebar][data-shadow-side]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  pointer-events: none;
+  z-index: 9;
+  background:
+    linear-gradient(
+      to right,
+      rgba(10, 18, 38, 0.16) 0%,
+      rgba(10, 18, 38, 0.06) 45%,
+      transparent 100%
+    ),
+    /* vertical mask: denser middle, transparent at top + bottom */
+    linear-gradient(
+        to bottom,
+        transparent 0%,
+        rgba(0, 0, 0, 0.55) 30%,
+        rgba(0, 0, 0, 1) 50%,
+        rgba(0, 0, 0, 0.55) 70%,
+        transparent 100%
+      );
+  background-blend-mode: multiply;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 28%,
+    black 72%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 28%,
+    black 72%,
+    transparent 100%
+  );
+}
+[data-shell-sidebar][data-shadow-side="right"]::after {
+  left: 100%;
+}
+[data-shell-sidebar][data-shadow-side="left"]::after {
+  right: 100%;
+  background: linear-gradient(
+    to left,
+    rgba(10, 18, 38, 0.16) 0%,
+    rgba(10, 18, 38, 0.06) 45%,
+    transparent 100%
+  );
+}
+[data-shell-sidebar][data-shadow-side="both"]::before,
+[data-shell-sidebar][data-shadow-side="both"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  pointer-events: none;
+  z-index: 9;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 28%,
+    black 72%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 28%,
+    black 72%,
+    transparent 100%
+  );
+}
+[data-shell-sidebar][data-shadow-side="both"]::before {
+  right: 100%;
+  background: linear-gradient(
+    to left,
+    rgba(10, 18, 38, 0.16) 0%,
+    rgba(10, 18, 38, 0.06) 45%,
+    transparent 100%
+  );
+}
+[data-shell-sidebar][data-shadow-side="both"]::after {
+  left: 100%;
+  background: linear-gradient(
+    to right,
+    rgba(10, 18, 38, 0.16) 0%,
+    rgba(10, 18, 38, 0.06) 45%,
+    transparent 100%
+  );
+}
+
+:root.theme-dark [data-shell-sidebar][data-shadow-side="right"]::after {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.2) 45%,
+    transparent 100%
+  );
+}
+:root.theme-dark [data-shell-sidebar][data-shadow-side="left"]::after,
+:root.theme-dark [data-shell-sidebar][data-shadow-side="both"]::before {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.2) 45%,
+    transparent 100%
+  );
+}
+:root.theme-dark [data-shell-sidebar][data-shadow-side="both"]::after {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.2) 45%,
+    transparent 100%
+  );
 }

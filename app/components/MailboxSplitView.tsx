@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import ComposePanel from "~/components/ComposePanel";
 import EmailPanel from "~/components/EmailPanel";
 import ResizablePanel from "~/components/shell/ResizablePanel";
+import ComposeIcon from "~/components/branding/ComposeIcon";
 
 interface MailboxSplitViewProps {
   selectedEmailId: string | null;
@@ -15,11 +16,18 @@ interface MailboxSplitViewProps {
 
 function NoSelectionPlaceholder() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-12 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8 py-12 text-center">
+      {/* Standalone robot pair — the brand mark belongs HERE, not on a
+          button. Two mailbox-as-robot images mirrored, large and decorative.
+          UAT round-3 second batch directive. */}
+      <div className="flex items-end justify-center gap-4">
+        <ComposeIcon size={72} className="opacity-95" />
+        <ComposeIcon size={72} className="opacity-95 -scale-x-100" />
+      </div>
       <h2 className="text-xl font-semibold text-text-bright">
         Select an email or compose
       </h2>
-      <p className="max-w-sm text-sm text-text-muted">
+      <p className="max-w-sm text-sm italic text-text-muted">
         Pick a conversation from the list, or start a new one — your trusted
         agent inbox awaits.
       </p>

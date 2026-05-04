@@ -5,6 +5,8 @@
 import { Loader } from "~/ui";
 import { PlugsIcon, RobotIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { useParams } from "react-router";
+import { useMailbox } from "~/queries/mailboxes";
 import MCPPanel from "./MCPPanel";
 
 function LazyAgentPanel() {
@@ -42,11 +44,16 @@ function LazyAgentPanel() {
 
 export default function AgentSidebar() {
   const [activeTab, setActiveTab] = useState<"agent" | "mcp">("agent");
+  const { mailboxId } = useParams<{ mailboxId: string }>();
+  const { data: mailbox } = useMailbox(mailboxId);
+  const mailboxLabel = mailbox?.name?.trim() || mailbox?.email?.trim() || null;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab bar */}
-      <div className="flex items-center border-b border-border shrink-0">
+      {/* Tab bar — Agent | MCP, plus a trailing inbox-name pill so the
+          scoping ("this agent + MCP belong to <mailbox>") is unambiguous
+          from any entry point (UAT round-3 second batch directive). */}
+      <div className="flex items-center border-b border-border shrink-0 px-1 gap-1">
         <button
           type="button"
           onClick={() => setActiveTab("agent")}
@@ -77,6 +84,15 @@ export default function AgentSidebar() {
           />
           MCP
         </button>
+        {mailboxLabel && (
+          <span
+            className="ml-auto mr-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue/10 text-blue text-[11px] font-medium border border-blue/25 max-w-[60%] truncate"
+            title={`Scoped to ${mailboxLabel}`}
+          >
+            <span className="opacity-70 shrink-0">for</span>
+            <span className="truncate font-mono">{mailboxLabel}</span>
+          </span>
+        )}
       </div>
 
       {/* Tab content — keep agent mounted so chat isn't lost */}

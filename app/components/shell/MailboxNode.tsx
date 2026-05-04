@@ -93,7 +93,11 @@ export default function MailboxNode({
           {isOwner ? (
             <Badge
               variant="secondary"
-              className="text-[10px] px-1 py-0 shrink-0"
+              /* UAT round-3: the secondary kumo-fill resolves to a near-white
+                 in dark theme that screams against the navy rail. Override
+                 with theme-aware classes — soft slate on light, muted
+                 translucent navy on dark. */
+              className="text-[10px] px-1 py-0 shrink-0 bg-slate-200 text-slate-700 dark:bg-white/10 dark:text-blue-100/85 dark:border dark:border-white/10"
             >
               owner
             </Badge>

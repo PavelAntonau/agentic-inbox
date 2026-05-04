@@ -116,7 +116,11 @@ export default function ResizableDivider({
     ? CaretRightIcon
     : CaretLeftIcon;
 
-  const showHandle = hovered || dragging;
+  // UAT round-3 (second batch): the chevron handle stays visible at all
+  // times when collapsible — at rest it's dim and small, on hover/drag it
+  // brightens AND scales up to telegraph the click affordance.
+  const showHandle = collapsible;
+  const handleActive = hovered || dragging;
 
   return (
     <div
@@ -150,13 +154,15 @@ export default function ResizableDivider({
         touchAction: "none",
       }}
     >
-      {/* Hairline + curved-sheet shadow — pure CSS, see app/index.css. */}
+      {/* Single turquoise hairline — the curved-paper shadow lives on the
+          sidebar (data-shell-sidebar) now, not on the divider, per UAT
+          round-3 second batch. */}
       <span aria-hidden className="resizable-divider__line" />
-      <span aria-hidden className="resizable-divider__glow" />
-      {collapsible && showHandle && (
+      {showHandle && (
         <span
           aria-hidden
           className="resizable-divider__handle"
+          data-active={handleActive ? "true" : undefined}
           style={{
             position: "absolute",
             top: "50%",

@@ -47,7 +47,9 @@ export default function MailboxRoute() {
       {/* Agent + MCP sidebar — togglable on desktop, resizable + collapsible
           when open. Toggle via the header robot button drives isAgentPanelOpen
           (mount/unmount); once mounted, the divider's chevron drives an
-          intra-session collapse without losing the sidebar's content state. */}
+          intra-session collapse without losing the sidebar's content state.
+          data-shell-sidebar / data-shadow-side="left" paints the curved-
+          paper drop shadow on the LEFT edge (UAT round-3 second batch). */}
       {isAgentPanelOpen && (
         <ResizablePanel
           storageKey="ai.shell.agentSidebar"
@@ -58,7 +60,13 @@ export default function MailboxRoute() {
           ariaLabel="Resize agent panel"
           className="hidden lg:flex flex-col bg-card overflow-hidden"
         >
-          <AgentSidebar />
+          <div
+            data-shell-sidebar
+            data-shadow-side="left"
+            className="flex flex-col w-full h-full relative"
+          >
+            <AgentSidebar />
+          </div>
         </ResizablePanel>
       )}
     </div>

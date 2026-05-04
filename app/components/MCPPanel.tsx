@@ -6,9 +6,8 @@ import { Button, Tooltip } from "~/ui";
 import {
   CheckIcon,
   CopyIcon,
-  KeyIcon,
   PlugsIcon,
-  RobotIcon,
+  WarningIcon,
   WrenchIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
@@ -71,50 +70,29 @@ export default function MCPPanel() {
   const mcpUrl = `${baseUrl}/mcp`;
   const mailboxLabel =
     mailbox?.name?.trim() || mailbox?.email?.trim() || "this inbox";
-  const tokenIssueCmd = mailboxId
-    ? `curl -X POST ${baseUrl}/api/tokens/mailboxes/${mailboxId}/tokens \\
-  -H "Content-Type: application/json" \\
-  -H "Cookie: <your CF Access cookie>" \\
-  -d '{"label":"my-claude-code","max_instances":1}'`
-    : `curl -X POST ${baseUrl}/api/tokens/mailboxes/<MAILBOX_ID>/tokens \\
-  -H "Content-Type: application/json" \\
-  -H "Cookie: <your CF Access cookie>" \\
-  -d '{"label":"my-claude-code","max_instances":1}'`;
-  const claudeAddCmd = `claude mcp add inbox ${mcpUrl} \\
-  --transport http \\
-  --header "Authorization: Bearer <CLIENT_ID>:<CLIENT_SECRET>"`;
+
+  // Single copy-paste-and-hand-to-the-agent command. We deliberately leave
+  // OFF the Authorization header until the in-browser token flow is live —
+  // a half-baked curl placeholder ("paste your CF Access cookie here")
+  // was the round-3 anti-pattern. Once the token surface ships, this
+  // command grows a `--header "Authorization: Bearer …"` line.
+  const claudeAddCmd = `claude mcp add inbox ${mcpUrl} --transport http`;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
-        {/* Intro — explicitly scoped to THIS inbox so users understand
-            the MCP/agent are inbox-specific, not generic workspace tools. */}
+        {/* Intro — explicit that the Agent + MCP are scoped to THIS inbox.
+            The tab strip in AgentSidebar also shows the mailbox label so
+            the scoping is unambiguous from any entry point. */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue/10">
-              <RobotIcon size={20} weight="duotone" className="text-blue" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-text-bright">
-                Inbox Agent &amp; MCP
-              </h3>
-              <p className="text-xs text-text-muted">
-                Scoped to{" "}
-                <span className="font-mono text-text-bright">
-                  {mailboxLabel}
-                </span>
-              </p>
-            </div>
-          </div>
           <p className="text-xs text-text-muted leading-relaxed">
-            This MCP server and its tools operate{" "}
+            The agent and MCP server on this tab operate{" "}
             <span className="font-medium text-text-bright">
-              only on this inbox
+              only on {mailboxLabel}
             </span>{" "}
-            — not the whole workspace. Connect any MCP-aware AI client (Claude
-            Code, Cursor, etc.) and it can read, search, draft, and send mail
-            for this mailbox using natural language.
+            — not the whole workspace. Wire any MCP-aware AI client (Claude
+            Code, Cursor, etc.) to the URL below and it can read, search, draft,
+            and send mail for this mailbox using natural language.
           </p>
         </div>
 
@@ -124,7 +102,7 @@ export default function MCPPanel() {
             <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue/15 text-blue text-[10px] font-bold mr-1.5">
               1
             </span>
-            Copy the server URL
+            Server URL
           </label>
           <div className="relative group">
             <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
@@ -136,62 +114,17 @@ export default function MCPPanel() {
           </div>
         </div>
 
-        {/* Step 2 — Generate a token */}
+        {/* Step 2 — Add it to your client (full copy-paste command) */}
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-text-bright block">
             <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue/15 text-blue text-[10px] font-bold mr-1.5">
               2
             </span>
-            Generate a connection token
-          </label>
-          <p className="text-xs text-text-muted leading-relaxed">
-            Authentication is bearer-token: the AI client sends{" "}
-            <span className="font-mono text-text-bright">
-              Authorization: Bearer &lt;client_id&gt;:&lt;client_secret&gt;
-            </span>
-            . Issue one for this inbox by calling the token API while signed in
-            (the in-app token UI is being rebuilt — for now use the curl below).
-            The response includes the secret{" "}
-            <span className="font-medium text-text-bright">once</span> — copy it
-            immediately.
-          </p>
-          <div className="relative group">
-            <div className="absolute right-1.5 top-1.5">
-              <CopyButton text={tokenIssueCmd} />
-            </div>
-            <pre className="bg-bg text-text-bright font-mono text-[11px] px-3 py-2.5 pr-10 rounded-lg border border-border whitespace-pre-wrap leading-relaxed">
-              {tokenIssueCmd}
-            </pre>
-          </div>
-          <p className="text-[11px] text-text-muted leading-relaxed">
-            <KeyIcon
-              size={11}
-              weight="bold"
-              className="inline-block align-[-1px] mr-1 text-text-muted"
-            />
-            Token is scoped to this mailbox. Keep it secret; revoke it via{" "}
-            <span className="font-mono">
-              POST /api/tokens/&lt;tokenId&gt;/revoke
-            </span>{" "}
-            if it leaks.
-          </p>
-        </div>
-
-        {/* Step 3 — Wire it into the client */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-text-bright block">
-            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue/15 text-blue text-[10px] font-bold mr-1.5">
-              3
-            </span>
             Add it to your AI client
           </label>
           <p className="text-xs text-text-muted leading-relaxed">
-            Paste the token into the client's MCP config under an
-            <span className="font-mono text-text-bright">
-              {" "}
-              Authorization
-            </span>{" "}
-            header. Example for Claude Code:
+            Copy this and hand it directly to your agent — it's the full
+            registration command for Claude Code:
           </p>
           <div className="relative group">
             <div className="absolute right-1.5 top-1.5">
@@ -201,6 +134,29 @@ export default function MCPPanel() {
               {claudeAddCmd}
             </pre>
           </div>
+        </div>
+
+        {/* Honest auth-gap notice. The user explicitly asked us to say so
+            instead of papering over it with curl-and-cookie placeholders. */}
+        <div className="space-y-1.5 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <WarningIcon
+              size={16}
+              weight="duotone"
+              className="text-amber-500 shrink-0"
+            />
+            <h4 className="text-xs font-semibold text-text-bright">
+              Authentication — known gap
+            </h4>
+          </div>
+          <p className="text-[11px] text-text-muted leading-relaxed">
+            The in-browser token flow isn't wired yet. Production access to this
+            MCP currently rides on your Cloudflare Access browser session, which
+            a headless agent won't have. Generating inbox-scoped bearer tokens
+            directly from this panel is the next item on the roadmap — until it
+            lands, hosted MCP clients without a CF Access session will be
+            rejected at the edge.
+          </p>
         </div>
 
         {/* Available tools */}

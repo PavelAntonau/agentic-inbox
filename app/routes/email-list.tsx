@@ -15,7 +15,6 @@ import {
   StarIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import ComposeIcon from "~/components/branding/ComposeIcon";
 import emailReadUrl from "~/assets/branding/email-read.png?url";
 import emailUnreadUrl from "~/assets/branding/email-unread.png?url";
 import { useQueryClient } from "@tanstack/react-query";
@@ -44,7 +43,6 @@ const FOLDER_EMPTY_STATES: Record<
     icon: React.ReactNode;
     title: string;
     description: string;
-    showCompose?: boolean;
   }
 > = {
   [Folders.INBOX]: {
@@ -52,7 +50,6 @@ const FOLDER_EMPTY_STATES: Record<
     title: "Inbox zero!",
     description:
       "Nothing in your inbox right now. New emails will land here when they arrive.",
-    showCompose: true,
   },
   [Folders.SENT]: {
     icon: (
@@ -60,13 +57,11 @@ const FOLDER_EMPTY_STATES: Record<
     ),
     title: "No sent emails",
     description: "Emails you send will show up here.",
-    showCompose: true,
   },
   [Folders.DRAFT]: {
     icon: <FileIcon size={48} weight="thin" className="text-text-muted" />,
     title: "No drafts",
     description: "Emails you're still working on will be saved here.",
-    showCompose: true,
   },
   [Folders.ARCHIVE]: {
     icon: <ArchiveIcon size={48} weight="thin" className="text-text-muted" />,
@@ -104,13 +99,7 @@ function EmailListSkeleton() {
   );
 }
 
-function FolderEmptyState({
-  folder,
-  onCompose,
-}: {
-  folder?: string;
-  onCompose: () => void;
-}) {
+function FolderEmptyState({ folder }: { folder?: string }) {
   const config = (folder && FOLDER_EMPTY_STATES[folder]) || {
     icon: (
       <EnvelopeSimpleIcon size={48} weight="thin" className="text-text-muted" />
@@ -121,23 +110,15 @@ function FolderEmptyState({
 
   return (
     <div className="flex flex-col items-center justify-center py-24 px-6 text-center">
-      <div className="mb-4">{config.icon}</div>
+      {config.icon && <div className="mb-4">{config.icon}</div>}
       <h3 className="text-base font-semibold text-text-bright mb-1.5">
         {config.title}
       </h3>
-      <p className="text-sm text-text-muted max-w-xs mb-5">
+      {/* Italic copy per UAT round-3 directive — only the persistent header
+          "+ Compose" should be a CTA; the empty state is purely informational. */}
+      <p className="text-sm italic text-text-muted max-w-xs">
         {config.description}
       </p>
-      {"showCompose" in config && config.showCompose && (
-        <Button
-          variant="primary"
-          size="sm"
-          icon={<ComposeIcon size={18} />}
-          onClick={onCompose}
-        >
-          Compose
-        </Button>
-      )}
     </div>
   );
 }
@@ -492,7 +473,7 @@ export default function EmailListRoute() {
             })}
           </div>
         ) : (
-          <FolderEmptyState folder={folder} onCompose={() => startCompose()} />
+          <FolderEmptyState folder={folder} />
         )}
       </div>
 

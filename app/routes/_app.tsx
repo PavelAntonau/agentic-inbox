@@ -20,11 +20,12 @@ export default function AppShell() {
   return (
     // flex-1 fills remaining height below the global Header rendered in root.tsx.
     // overflow-hidden prevents double scrollbars; inner panes scroll independently.
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left rail — resizable + collapsible. The divider next to it owns
-          the curved-sheet shadow now (matching the other shell dividers),
-          so we keep data-shell-sidebar but rely on the shared divider CSS
-          for the visual treatment. */}
+    // UAT round-3 (second batch): horizontal gutter so panels don't slam
+    // against the browser edge on either side.
+    <div className="flex flex-1 min-h-0 overflow-hidden md:px-[10px]">
+      {/* Left rail — resizable + collapsible. data-shell-sidebar paints
+          a curved-paper drop shadow on the RIGHT edge (see app/index.css
+          → [data-shell-sidebar][data-shadow-side="right"]). */}
       <ResizablePanel
         storageKey="ai.shell.mailboxRail"
         defaultWidth={240}
@@ -34,7 +35,11 @@ export default function AppShell() {
         ariaLabel="Resize mailbox rail"
         className="hidden md:flex flex-col bg-card overflow-y-auto relative z-10"
       >
-        <div data-shell-sidebar className="flex flex-col w-full h-full">
+        <div
+          data-shell-sidebar
+          data-shadow-side="right"
+          className="flex flex-col w-full h-full relative"
+        >
           <MailboxTreeRail />
         </div>
       </ResizablePanel>
