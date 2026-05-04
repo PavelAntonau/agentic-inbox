@@ -24,6 +24,13 @@ export interface Env extends Cloudflare.Env {
   TOKEN_PEPPER?: string;
   /** better-auth signing secret — set via `wrangler secret put BETTER_AUTH_SECRET`. */
   BETTER_AUTH_SECRET: string;
+  /**
+   * Resend API key (transactional outbound mail). Set via
+   * `wrangler secret put RESEND_API_KEY`. Required in production —
+   * `getResendBinding` throws on first send if absent. Not needed in
+   * MOCK_MODE (outbound is captured to the R2 outbox).
+   */
+  RESEND_API_KEY?: string;
   // BETTER_AUTH_URL is declared in wrangler.jsonc and inherited via Cloudflare.Env.
   /**
    * Autonomous-local-testing umbrella switch. Set to `"1"` in `.dev.vars`

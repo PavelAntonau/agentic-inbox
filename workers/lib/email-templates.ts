@@ -2,10 +2,22 @@
 // Licensed under the Apache 2.0 license
 
 /**
- * Email templates for group invitation flow.
+ * Email templates for the invitation flow.
  *
- * Generates minimal HTML emails — plain text + group name + description +
- * inviter display name + opaque HMAC token URL.
+ * Two distinct templates live here:
+ *
+ *   1. **Plain-text invite** (`plainTextInvite`) — the canonical onboarding
+ *      template. No HTML, no images, no magic-link tokens. The body is one
+ *      paragraph, one URL, one signature line. This is what real users see
+ *      after Phase 2 of the round-2 plan: invites must look like personal
+ *      mail to clear aggressive spam filters and to read well in
+ *      disposable-mail aggregators (SimpleLogin et al.) which often strip
+ *      or mangle HTML.
+ *
+ *   2. **Branded group-invitation HTML/text** (`groupInvitationHtml` /
+ *      `groupInvitationText`) — kept for reference and for any future
+ *      branded-channel that needs richer formatting. The invitation route
+ *      uses the plain-text invite by default.
  */
 
 export interface GroupInvitationEmailParams {
@@ -15,6 +27,27 @@ export interface GroupInvitationEmailParams {
   inviterEmail: string;
   acceptUrl: string;
   workspaceHost: string;
+}
+
+export interface PlainTextInviteParams {
+  /** Already-URL-encoded e-mail; prefilled into the login route. */
+  loginUrl: string;
+}
+
+/**
+ * The canonical plain-text invitation body, per the round-2 user spec.
+ * One paragraph, one link, one signature line. No HTML.
+ */
+export function plainTextInvite(params: PlainTextInviteParams): string {
+  return [
+    "Hello,",
+    "",
+    "You've been invited to ActionNow. Open this link to sign in:",
+    "",
+    `  ${params.loginUrl}`,
+    "",
+    "— ActionNow team",
+  ].join("\n");
 }
 
 function escapeHtml(s: string): string {

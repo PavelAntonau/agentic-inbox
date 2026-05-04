@@ -41,8 +41,18 @@ export default function LoginRoute() {
 
   const redirect = safeRedirect(searchParams.get("redirect"));
 
+  // Plain-text invitation emails route recipients to /login?email=<urlencoded>;
+  // pre-fill the input so they can hit "Send code" immediately. We still let
+  // the user edit it before submission.
+  const prefilledEmail = (() => {
+    const raw = searchParams.get("email");
+    if (!raw) return "";
+    const trimmed = raw.trim();
+    return trimmed.includes("@") ? trimmed : "";
+  })();
+
   const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefilledEmail);
   const [otp, setOtp] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);

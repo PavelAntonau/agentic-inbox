@@ -24,17 +24,14 @@
 		// set via `wrangler secret put BETTER_AUTH_SECRET`.
 		"BETTER_AUTH_URL": "https://mail.actionnow.ai"
 	},
-	// EMAIL binding: prod uses real Cloudflare Email Routing automatically.
-	// `remote: true` would proxy outbound mail through prod even in `wrangler dev`,
-	// requiring `wrangler login`. Dropping the flag keeps prod unchanged while
-	// letting local dev run unauthenticated — local sends are no-ops in miniflare.
-	// The /api/__test__/email-ingest endpoint exercises the inbound path directly
-	// via MailboxDO without needing the EMAIL binding for outbound.
-	"send_email": [
-		{
-			"name": "EMAIL"
-		}
-	],
+	// Outbound mail goes through Resend (workers/lib/resend-client.ts) — the
+	// previous Cloudflare Email Routing `send_email` binding was reply-only /
+	// verified-destination-only and could not deliver invitations to fresh
+	// recipients. The Resend API key is supplied via:
+	//     wrangler secret put RESEND_API_KEY
+	// Inbound mail still uses Cloudflare Email Routing rules (config, not a
+	// binding) pointed at this Worker; the /api/__test__/email-ingest endpoint
+	// exercises the inbound path directly via MailboxDO.
 	"r2_buckets": [
 		{
 			"binding": "BUCKET",

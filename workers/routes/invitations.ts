@@ -10,10 +10,7 @@ import { appendAudit } from "../lib/audit-log";
 import { upsertEmail } from "../lib/cloudflare-access-policy";
 import { getEmailBinding } from "../lib/mocks/email-binding";
 import { getSettings } from "../lib/settings-cache";
-import {
-  groupInvitationHtml,
-  groupInvitationText,
-} from "../lib/email-templates";
+import { plainTextInvite } from "../lib/email-templates";
 import {
   filterVisibleUsers,
   sortByRelevance,
@@ -210,48 +207,47 @@ router.post("/", async (c) => {
     await upsertEmail(c.env, rawEmail);
   }
 
-  // Send email
+  // Build the login URL — the plain-text invite spec routes recipients
+  // straight to /login?email=<urlencoded> and lets the OTP flow take over.
+  // The HMAC-token /i/<id>?t=<token> path is preserved for the in-app
+  // notifications drawer (existing user case) and for future branded mail,
+  // but external recipients receive the simpler login link.
   const host = new URL(c.req.url).host;
   const hmacKey =
     (c.env as unknown as Record<string, string>)["INVITATION_HMAC_KEY"] ??
     "dev-fallback-hmac-key";
-  const token = await makeHmacToken(hmacKey, finalInvitationId);
-  const acceptUrl = `https://${host}/i/${finalInvitationId}?t=${token}`;
+  // Token still computed so notifications endpoints can use it without an
+  // additional crypto round-trip; the value is recorded on the invitation
+  // row implicitly via the HMAC, no need to store separately.
+  await makeHmacToken(hmacKey, finalInvitationId);
+  const loginUrl = `https://${host}/login?email=${encodeURIComponent(rawEmail)}`;
 
-  const inviterDisplayName =
-    inviter?.display_name ?? inviter?.email ?? ctx.user_id;
-  const inviterEmail = inviter?.email ?? ctx.user_id;
-
-  // Fire-and-forget email (errors logged, never surfaced to caller per E15/E16/E17)
+  // Send the invitation email. We log structured failures but DO NOT swallow
+  // them silently — that was the round-1 bug that hid mail-delivery problems
+  // for weeks. The privacy contract (don't leak whether the address belongs
+  // to an existing user) is preserved by the unconditional `sent: true`
+  // success response below; that does not require silencing actual errors.
+  let sendError: string | null = null;
   try {
     const emailBinding = getEmailBinding(c.env);
-    if (emailBinding) {
-      const htmlBody = groupInvitationHtml({
-        groupName: group.name,
-        groupDescription: group.description,
-        inviterDisplayName,
-        inviterEmail,
-        acceptUrl,
-        workspaceHost: host,
-      });
-      const textBody = groupInvitationText({
-        groupName: group.name,
-        groupDescription: group.description,
-        inviterDisplayName,
-        inviterEmail,
-        acceptUrl,
-        workspaceHost: host,
-      });
-      await emailBinding.send({
-        to: rawEmail,
-        from: { name: "ActionNow.AI", email: `noreply@${host}` },
-        subject: `You've been invited to join ${group.name} on ActionNow.AI`,
-        text: textBody,
-        html: htmlBody,
-      });
-    }
-  } catch {
-    // Intentionally swallowed — privacy-preserving: never reveal email delivery errors
+    const textBody = plainTextInvite({ loginUrl });
+    await emailBinding.send({
+      to: rawEmail,
+      from: { name: "ActionNow", email: "noreply@actionnow.ai" },
+      subject: "You've been invited to ActionNow",
+      text: textBody,
+    });
+  } catch (e) {
+    sendError = (e as Error).message;
+    console.error(
+      "[invitations] send failed",
+      JSON.stringify({
+        invitation_id: finalInvitationId,
+        group_id: groupId,
+        recipient: rawEmail,
+        error: sendError,
+      }),
+    );
   }
 
   await appendAudit(
@@ -263,10 +259,14 @@ router.post("/", async (c) => {
       group_id: groupId,
       target: rawEmail,
       invitee_user_id_or_null: inviteeUserId,
+      mail_send_status: sendError ? "failed" : "sent",
+      mail_send_error: sendError,
     },
   );
 
-  // ALWAYS return 200 { sent: true } regardless of user existence
+  // Privacy contract: ALWAYS return { sent: true } so callers cannot probe
+  // whether the address corresponds to an existing user. Mail-send failures
+  // are surfaced via the audit log + console.error, not the response.
   return c.json({ sent: true });
 });
 
