@@ -361,17 +361,83 @@ async function restartBrowserMcp(): Promise<void> {
 // Mock-control client (HTTP against /__mock/*).
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Retry an HTTP fetch when the worker restarts mid-request.
+ *
+ * Wrangler dev occasionally cycles its in-process worker — after a long
+ * suite run the next request returns HTTP 503 with body
+ *   "Your worker restarted mid-request. Please try sending the request
+ *    again. Only GET or HEAD requests are retried automatically."
+ * That's transient and idempotent on /__mock/* (reset / health / outbox
+ * are all idempotent; otp-latest is a GET; inbox is an idempotent
+ * synthesise-an-inbound-email call). Retry up to `attempts` times with
+ * a brief sleep so the suite absorbs the cycle instead of crashing.
+ *
+ * Network-level fetch rejections (ECONNREFUSED, ECONNRESET) get the same
+ * retry treatment — the underlying cause is the same.
+ */
+async function fetchWithRestartRetry(
+  url: string,
+  init?: RequestInit,
+  opts: { attempts?: number; sleepMs?: number } = {},
+): Promise<Response> {
+  const attempts = opts.attempts ?? 4;
+  const sleepMs = opts.sleepMs ?? 500;
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await fetch(url, init);
+      if (r.status === 503) {
+        const body = await r.clone().text();
+        if (/worker restarted mid-request/i.test(body)) {
+          lastErr = new Error(
+            `mock 503 worker restarted: ${body.slice(0, 200)}`,
+          );
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[runner] ${url}: worker-restart 503 (attempt ${i + 1}/${attempts}) — sleeping ${sleepMs}ms then retrying`,
+          );
+          await new Promise((res) => setTimeout(res, sleepMs));
+          continue;
+        }
+      }
+      return r;
+    } catch (e) {
+      lastErr = e;
+      const msg = (e as Error).message ?? String(e);
+      // ECONNREFUSED / ECONNRESET / fetch failed — same family as 503
+      if (
+        /ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/i.test(msg) &&
+        i < attempts - 1
+      ) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[runner] ${url}: network error (attempt ${i + 1}/${attempts}) — sleeping ${sleepMs}ms then retrying: ${msg.slice(0, 120)}`,
+        );
+        await new Promise((res) => setTimeout(res, sleepMs));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(
+    `${url}: exhausted ${attempts} retries (last: ${(lastErr as Error)?.message ?? "unknown"})`,
+  );
+}
+
 class MockControl implements MockControlClient {
   constructor(private readonly base: string) {}
 
   async health(): Promise<unknown> {
-    const r = await fetch(`${this.base}/__mock/health`);
+    const r = await fetchWithRestartRetry(`${this.base}/__mock/health`);
     if (!r.ok) throw new Error(`mock health ${r.status}`);
     return r.json();
   }
 
   async reset(): Promise<unknown> {
-    const r = await fetch(`${this.base}/__mock/reset`, { method: "POST" });
+    const r = await fetchWithRestartRetry(`${this.base}/__mock/reset`, {
+      method: "POST",
+    });
     if (!r.ok) throw new Error(`mock reset ${r.status}: ${await r.text()}`);
     return r.json();
   }
@@ -379,7 +445,7 @@ class MockControl implements MockControlClient {
   async otpLatest(
     email: string,
   ): Promise<{ code: string; email: string; created_iso: string }> {
-    const r = await fetch(
+    const r = await fetchWithRestartRetry(
       `${this.base}/__mock/otp-latest?email=${encodeURIComponent(email)}`,
     );
     if (!r.ok)
@@ -394,7 +460,9 @@ class MockControl implements MockControlClient {
   async outbox(
     limit = 100,
   ): Promise<{ count: number; entries: Array<{ key: string }> }> {
-    const r = await fetch(`${this.base}/__mock/outbox?limit=${limit}`);
+    const r = await fetchWithRestartRetry(
+      `${this.base}/__mock/outbox?limit=${limit}`,
+    );
     if (!r.ok) throw new Error(`mock outbox ${r.status}`);
     return r.json() as Promise<{
       count: number;
@@ -408,7 +476,7 @@ class MockControl implements MockControlClient {
     subject: string;
     body: string;
   }): Promise<unknown> {
-    const r = await fetch(`${this.base}/__mock/inbox`, {
+    const r = await fetchWithRestartRetry(`${this.base}/__mock/inbox`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
