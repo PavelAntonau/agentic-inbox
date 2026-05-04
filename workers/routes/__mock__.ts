@@ -248,6 +248,51 @@ mockRouter.post("/seed-user", async (c) => {
   });
 });
 
+/**
+ * POST /__mock/impersonate — swap the `x-mock-user-email` cookie.
+ *
+ * The dev-mode picker at /login sets `x-mock-user-email` to whichever
+ * preset (or custom email) the user chose. Once set, every subsequent
+ * request resolves to that identity via the mock-access shim
+ * (workers/lib/mock-access.ts).
+ *
+ * Multi-user UI scenarios — contacts handshake (recipient accepts a
+ * pending request), group invitation acceptance, mailbox transfer,
+ * share-with-group — need to flip identity mid-test without stepping
+ * through the picker form again. This endpoint is the cheap helper.
+ *
+ * Production never sees /__mock/* — the router is only mounted when
+ * MOCK_MODE=1 (workers/app.ts) AND every route defends with
+ * isMockMode(c.env).
+ *
+ * Body: { email: string }
+ *   - Must be a syntactically valid email. The endpoint does NOT verify
+ *     the user exists in the `users` table; callers that need a real
+ *     row should POST /__mock/seed-user first.
+ *
+ * Returns: { ok: true, email } and Set-Cookie header that overrides the
+ * existing x-mock-user-email cookie.
+ */
+mockRouter.post("/impersonate", async (c) => {
+  let body: { email?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const { email } = body;
+  if (typeof email !== "string" || email.trim().length === 0) {
+    return c.json({ error: "email is required" }, 400);
+  }
+  const trimmed = email.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    return c.json({ error: "invalid email syntax" }, 400);
+  }
+  const cookie = `x-mock-user-email=${encodeURIComponent(trimmed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
+  c.header("Set-Cookie", cookie);
+  return c.json({ ok: true, email: trimmed });
+});
+
 mockRouter.post("/inbox", async (c) => {
   const body = await c.req.json<{
     to: string;
