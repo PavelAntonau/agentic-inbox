@@ -22,6 +22,10 @@
 		"BOOTSTRAP_OWNER_EMAIL": "pavel@digifirst.org",
 		// Phase 6.1 — better-auth base URL. BETTER_AUTH_SECRET is a secret,
 		// set via `wrangler secret put BETTER_AUTH_SECRET`.
+		// Phase 1 (mcp-oauth, T1.4) — OAUTH_JWT_SIGNING_KEY is a secret holding
+		// stringified JSON `{kid,alg,crv,publicJwk,privateJwk}` (Ed25519). Set
+		// via `wrangler secret put OAUTH_JWT_SIGNING_KEY`; mirrored in Keychain
+		// at `cloudflare/OAUTH_JWT_SIGNING_KEY`.
 		"BETTER_AUTH_URL": "https://mail.actionnow.ai"
 	},
 	// Outbound mail goes through Resend (workers/lib/resend-client.ts) — the

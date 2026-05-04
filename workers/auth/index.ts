@@ -24,6 +24,48 @@ import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "../lib/mocks/email-binding";
 import type { Env } from "../types";
 
+/**
+ * Static OAuth JWT signing key, parsed from `env.OAUTH_JWT_SIGNING_KEY`. The
+ * env value is stringified JSON `{kid,alg,crv,publicJwk,privateJwk}` produced
+ * by `.scratch/gen-oauth-signing-key.mjs` (Ed25519). The shape mirrors the
+ * `Jwk` row better-auth's `jwt()` plugin would otherwise persist in the `jwks`
+ * D1 table; injecting it via `adapter.getJwks` keeps signing reproducible
+ * across Worker isolates and removes the per-sign D1 round-trip.
+ */
+interface StaticSigningJwk {
+  id: string;
+  publicKey: string;
+  privateKey: string;
+  alg: "EdDSA";
+  crv: "Ed25519";
+  createdAt: Date;
+}
+
+function loadStaticSigningKey(env: Env): StaticSigningJwk {
+  const raw = env.OAUTH_JWT_SIGNING_KEY;
+  if (!raw) {
+    throw new Error(
+      "OAUTH_JWT_SIGNING_KEY is not set. Provision it with " +
+        "`wrangler secret put OAUTH_JWT_SIGNING_KEY` (and mirror to Keychain).",
+    );
+  }
+  const parsed = JSON.parse(raw) as {
+    kid: string;
+    alg: "EdDSA";
+    crv: "Ed25519";
+    publicJwk: Record<string, string>;
+    privateJwk: Record<string, string>;
+  };
+  return {
+    id: parsed.kid,
+    alg: parsed.alg,
+    crv: parsed.crv,
+    publicKey: JSON.stringify(parsed.publicJwk),
+    privateKey: JSON.stringify(parsed.privateJwk),
+    createdAt: new Date(0),
+  };
+}
+
 /** Minimal session shape returned by better-auth's getSession. */
 export interface BetterAuthSession {
   session: {
@@ -67,6 +109,7 @@ export interface ServerAuth {
  */
 export function createAuth(env: Env): ServerAuth {
   const db = drizzle(env.DB, { schema });
+  const staticSigningKey = loadStaticSigningKey(env);
 
   const auth = betterAuth({
     secret: env.BETTER_AUTH_SECRET,
@@ -204,10 +247,19 @@ export function createAuth(env: Env): ServerAuth {
       }),
 
       // JWT plugin: required by oauthProvider for non-opaque access tokens.
-      // Static signing-key wiring lands in T1.4; default behaviour stores a
-      // generated JWK in the `jwks` table so module load + typecheck succeed
-      // before the secret is provisioned.
-      jwt(),
+      // T1.4 — static Ed25519 signing key sourced from `env.OAUTH_JWT_SIGNING_KEY`,
+      // injected via `adapter.getJwks`. The key is identical across every Worker
+      // isolate, so MCP clients see a stable JWKS at /jwks and can cache it.
+      // `disablePrivateKeyEncryption` avoids the symmetric-encrypt/decrypt round
+      // trip the default path runs against `BETTER_AUTH_SECRET` — our key is
+      // already protected by the Worker secret store. The `jwks` D1 table
+      // (migration 0011) stays defined but unused at runtime.
+      jwt({
+        jwks: { disablePrivateKeyEncryption: true },
+        adapter: {
+          getJwks: async () => [staticSigningKey],
+        },
+      }),
 
       // OAuth Authorization Server (RFC 6749/7636/8707/9728/8414) for MCP.
       //

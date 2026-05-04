@@ -25,6 +25,14 @@ export interface Env extends Cloudflare.Env {
   /** better-auth signing secret — set via `wrangler secret put BETTER_AUTH_SECRET`. */
   BETTER_AUTH_SECRET: string;
   /**
+   * Static OAuth JWT signing key for the better-auth `jwt()` plugin. Stringified
+   * JSON of `{ kid, alg, crv, publicJwk, privateJwk }` (Ed25519). Set via
+   * `wrangler secret put OAUTH_JWT_SIGNING_KEY`; mirrored in macOS Keychain at
+   * `cloudflare/OAUTH_JWT_SIGNING_KEY` (Key MCP). Provisioned in T1.4 of the
+   * mcp-oauth plan.
+   */
+  OAUTH_JWT_SIGNING_KEY: string;
+  /**
    * Resend API key (transactional outbound mail). Set via
    * `wrangler secret put RESEND_API_KEY`. Required in production —
    * `getResendBinding` throws on first send if absent. Not needed in
