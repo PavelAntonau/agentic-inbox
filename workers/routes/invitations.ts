@@ -8,6 +8,7 @@ import { forGroup, type AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
 import { appendAudit } from "../lib/audit-log";
 import { upsertEmail } from "../lib/cloudflare-access-policy";
+import { getEmailBinding } from "../lib/mocks/email-binding";
 import { getSettings } from "../lib/settings-cache";
 import {
   groupInvitationHtml,
@@ -223,7 +224,8 @@ router.post("/", async (c) => {
 
   // Fire-and-forget email (errors logged, never surfaced to caller per E15/E16/E17)
   try {
-    if (c.env.EMAIL) {
+    const emailBinding = getEmailBinding(c.env);
+    if (emailBinding) {
       const htmlBody = groupInvitationHtml({
         groupName: group.name,
         groupDescription: group.description,
@@ -240,7 +242,7 @@ router.post("/", async (c) => {
         acceptUrl,
         workspaceHost: host,
       });
-      await c.env.EMAIL.send({
+      await emailBinding.send({
         to: rawEmail,
         from: { name: "ActionNow.AI", email: `noreply@${host}` },
         subject: `You've been invited to join ${group.name} on ActionNow.AI`,

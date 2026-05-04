@@ -20,6 +20,7 @@ import { emailOTP } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
+import { getEmailBinding } from "../lib/mocks/email-binding";
 import type { Env } from "../types";
 
 /** Minimal session shape returned by better-auth's getSession. */
@@ -257,7 +258,7 @@ async function sendOtpEmail(
   </div>
 </body></html>`;
 
-  await sendEmail(env.EMAIL, {
+  await sendEmail(getEmailBinding(env), {
     to,
     from: { name: "Agentic Inbox", email: "auth@actionnow.ai" },
     subject,
