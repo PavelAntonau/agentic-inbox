@@ -188,6 +188,7 @@ router.post("/request", async (c) => {
 
   const now = Date.now();
 
+  // Sender's row — visible in sender's "Sent" tab. Stays 'pending' forever per D12.
   await db
     .insert(schema.contacts)
     .values({
@@ -201,6 +202,33 @@ router.post("/request", async (c) => {
     .onConflictDoUpdate({
       target: [schema.contacts.owner_user_id, schema.contacts.contact_user_id],
       set: { status: "pending", initiated_by: ctx.user_id, created_at: now },
+    })
+    .run();
+
+  // F-PHASE3-009 — recipient mirror row at request time so /contacts UI's
+  // "Incoming" tab can render the pending request. Without this, the
+  // recipient has no row where they are owner_user_id and GET /api/contacts
+  // returns empty for them, even though /accept can still complete via API.
+  // declined_at is reset so a previously-declined request can be re-sent.
+  await db
+    .insert(schema.contacts)
+    .values({
+      owner_user_id: targetUserId,
+      contact_user_id: ctx.user_id,
+      status: "pending",
+      initiated_by: ctx.user_id,
+      created_at: now,
+      accepted_at: null,
+    })
+    .onConflictDoUpdate({
+      target: [schema.contacts.owner_user_id, schema.contacts.contact_user_id],
+      set: {
+        status: "pending",
+        initiated_by: ctx.user_id,
+        created_at: now,
+        accepted_at: null,
+        declined_at: null,
+      },
     })
     .run();
 
@@ -245,19 +273,16 @@ router.post("/:id/accept", async (c) => {
 
   const now = Date.now();
 
-  // Flip the original row to 'accepted'
-  await db
-    .update(schema.contacts)
-    .set({ status: "accepted", accepted_at: now })
-    .where(
-      and(
-        eq(schema.contacts.owner_user_id, requesterId),
-        eq(schema.contacts.contact_user_id, ctx.user_id),
-      ),
-    )
-    .run();
-
-  // Insert mirror row (actor → requester), accepted immediately
+  // F-PHASE3-010 — D12 sender-blind. The sender's row (owner=requesterId,
+  // contact=ctx.user_id) is INTENTIONALLY left as 'pending'. The sender's
+  // GET /api/contacts continues to read 'pending' forever, with no visible
+  // status flip. Acceptance is implicit through the existence of the
+  // recipient's mirror row in 'accepted' state — the UI surfaces "mutual
+  // contact" by joining against contacts from the recipient's side.
+  //
+  // Update the recipient's mirror row (created at /request time per
+  // F-PHASE3-009) from 'pending' → 'accepted'. ON CONFLICT keeps the call
+  // idempotent and tolerates legacy rows from before F-PHASE3-009 landed.
   await db
     .insert(schema.contacts)
     .values({
@@ -270,7 +295,7 @@ router.post("/:id/accept", async (c) => {
     })
     .onConflictDoUpdate({
       target: [schema.contacts.owner_user_id, schema.contacts.contact_user_id],
-      set: { status: "accepted", accepted_at: now },
+      set: { status: "accepted", accepted_at: now, declined_at: null },
     })
     .run();
 
@@ -312,22 +337,32 @@ router.post("/:id/decline", async (c) => {
   if (!perm.ok) return c.json({ error: perm.reason }, 403);
 
   // D12 — sender-blind decline.
-  // The row is NOT deleted and NOT flipped to a visible 'declined' state.
-  // Status stays 'pending'; declined_at is set so the recipient (this actor)
-  // filters the row out of GET /api/contacts. The sender's view of their
-  // outgoing request — which is the same physical row, just queried by
-  // owner_user_id from the sender's session — continues to read 'pending'
-  // forever, with no audit trail visible to the sender (audit-log reads are
-  // gated to global_owner / global_admin only — see workers/routes/observability.ts).
+  // F-PHASE3-010: declined_at is set on the RECIPIENT's mirror row
+  // (owner=ctx.user_id, contact=requesterId) — created at /request time per
+  // F-PHASE3-009. The recipient's GET filters the row out (declined_at IS
+  // NOT NULL guard at line ~89). The sender's row (owner=requesterId,
+  // contact=ctx.user_id) is left untouched — their GET continues to read
+  // status='pending' forever with no audit-log surface (gated to
+  // global_owner / global_admin per workers/routes/observability.ts).
+  //
+  // Insert-on-conflict guards against legacy data: if the recipient mirror
+  // row is missing (request was created before F-PHASE3-009 landed), seed
+  // it directly into a declined state so future GETs filter it correctly.
   await db
-    .update(schema.contacts)
-    .set({ declined_at: Date.now() })
-    .where(
-      and(
-        eq(schema.contacts.owner_user_id, requesterId),
-        eq(schema.contacts.contact_user_id, ctx.user_id),
-      ),
-    )
+    .insert(schema.contacts)
+    .values({
+      owner_user_id: ctx.user_id,
+      contact_user_id: requesterId,
+      status: "pending",
+      initiated_by: requesterId,
+      created_at: Date.now(),
+      accepted_at: null,
+      declined_at: Date.now(),
+    })
+    .onConflictDoUpdate({
+      target: [schema.contacts.owner_user_id, schema.contacts.contact_user_id],
+      set: { declined_at: Date.now() },
+    })
     .run();
 
   await appendAudit(
