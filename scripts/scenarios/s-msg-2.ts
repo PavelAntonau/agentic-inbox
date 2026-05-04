@@ -31,7 +31,12 @@ const scenario: Scenario = {
   async run(ctx) {
     await loginAs(ctx, TEST_USERS.alice);
 
-    const senderEmail = "thread-sender@actionnow.ai";
+    // Per-run unique sender — `/__mock/reset` doesn't drop R2 mailbox
+    // keys, so re-using the same address would 409 on re-seed and the
+    // browser-logged "Failed to load resource: 409" would fail the
+    // post-reply console assertion when the suite runs twice in a row
+    // (or when a prior scenario seeded the same address).
+    const senderEmail = `thread-sender-${Date.now()}@actionnow.ai`;
 
     // Seed v1 mailbox so /api/v1/mailboxes/:id/emails passes requireMailbox.
     await ctx.browser.call("browser_evaluate", {
@@ -41,7 +46,7 @@ const scenario: Scenario = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: 'Thread Sender', email: ${JSON.stringify(senderEmail)} }),
         });
-        if (!res.ok && res.status !== 409) {
+        if (!res.ok) {
           throw new Error('v1 seed failed: ' + res.status + ' ' + (await res.text()));
         }
         return true;
