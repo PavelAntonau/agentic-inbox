@@ -310,6 +310,27 @@ app.post("/api/users/me/avatar", async (c) => {
     httpMetadata: { contentType: file.type },
   });
 
+  // Optional `original` field — preserves the pre-crop source so the user
+  // can re-adjust later via the AvatarCropDialog "edit existing" path.
+  // Stored at the same hash with an `-orig` suffix so the original can be
+  // located deterministically from the avatar's object key without a new
+  // DB column. Best-effort: any failure here doesn't fail the upload.
+  const originalField = formData.get("original");
+  if (originalField instanceof File && originalField.size > 0) {
+    const origExt = allowedExt[originalField.type] ?? "jpg";
+    if (originalField.size <= 4 * 1024 * 1024) {
+      const origKey = `avatars/${ctx.user_id}/${hash}-orig.${origExt}`;
+      try {
+        const origBuf = await originalField.arrayBuffer();
+        await c.env.BUCKET.put(origKey, origBuf, {
+          httpMetadata: { contentType: originalField.type },
+        });
+      } catch {
+        // Best-effort — keep the cropped upload regardless.
+      }
+    }
+  }
+
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
   const schema = await import("./db/control-plane/schema");
@@ -373,7 +394,18 @@ app.delete("/api/users/me/avatar", async (c) => {
 
   if (prev?.avatar_url) {
     c.executionCtx.waitUntil(
-      c.env.BUCKET.delete(prev.avatar_url).catch(() => {}),
+      Promise.all([
+        c.env.BUCKET.delete(prev.avatar_url).catch(() => {}),
+        // Best-effort cleanup of the matching original — derived from the
+        // displayed avatar key (avatars/<uid>/<hash>.<ext> ->
+        // avatars/<uid>/<hash>-orig.*); we don't know the original's ext,
+        // so try the three legal candidates.
+        ...(["jpg", "png", "webp"] as const).map((e) =>
+          c.env.BUCKET.delete(
+            prev.avatar_url!.replace(/\.[a-z]+$/, `-orig.${e}`),
+          ).catch(() => {}),
+        ),
+      ]).then(() => undefined),
     );
   }
 
@@ -425,6 +457,50 @@ app.get("/avatars/:userId", async (c) => {
       ETag: obj.httpEtag,
     },
   });
+});
+
+// GET /avatars/:userId/original — fetch the pre-crop original (UAT round 1
+// item 6). Returns 404 if no original was stored alongside the displayed
+// avatar (legacy avatars uploaded before dual-storage shipped). Same auth
+// posture as GET /avatars/:userId.
+app.get("/avatars/:userId/original", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  const userId = c.req.param("userId");
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const orm = drizzle(c.env.DB, { schema });
+
+  const user = await orm
+    .select({ avatar_url: schema.users.avatar_url })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
+  if (!user?.avatar_url) {
+    return c.json({ error: "no avatar" }, 404);
+  }
+
+  // Try each legal extension in turn — we don't know which the user
+  // uploaded as their original (could differ from the displayed-avatar ext
+  // since the cropped output is always JPEG).
+  for (const ext of ["jpg", "png", "webp"] as const) {
+    const key = user.avatar_url.replace(/\.[a-z]+$/, `-orig.${ext}`);
+    const obj = await c.env.BUCKET.get(key);
+    if (obj) {
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": obj.httpMetadata?.contentType ?? "image/jpeg",
+          "Cache-Control": "private, max-age=300, must-revalidate",
+          ETag: obj.httpEtag,
+        },
+      });
+    }
+  }
+
+  return c.json({ error: "no original" }, 404);
 });
 
 // PATCH /api/users/me/visibility — update own visibility setting (Phase 6)

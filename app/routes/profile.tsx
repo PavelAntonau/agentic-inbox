@@ -14,6 +14,7 @@
 import { Button, Input, Loader, Text, useToastManager } from "~/ui";
 import { useEffect, useRef, useState } from "react";
 import Avatar from "~/components/Avatar";
+import AvatarCropDialog from "~/components/profile/AvatarCropDialog";
 
 type AccountType = "personal" | "company";
 
@@ -73,6 +74,11 @@ export default function ProfileRoute() {
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const toastManager = useToastManager();
+  // Crop-dialog state. cropSource is the Blob the dialog edits — either a
+  // freshly-picked File (upload flow) or the previously-stored original
+  // re-fetched from the server (edit flow).
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropSource, setCropSource] = useState<Blob | null>(null);
 
   // Editable form state — initialised from /api/users/me, dirty-tracked
   // against `me` so the Save button only enables when something changed.
@@ -114,9 +120,9 @@ export default function ProfileRoute() {
     fileRef.current?.click();
   };
 
-  const handleFile = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = (ev: React.ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0];
-    ev.target.value = ""; // allow re-uploading the same file
+    ev.target.value = ""; // allow re-picking the same file
     if (!file) return;
 
     if (!ACCEPT.split(",").includes(file.type)) {
@@ -131,10 +137,71 @@ export default function ProfileRoute() {
       return;
     }
 
+    // Open the cropper. The actual upload runs from handleCropSave once
+    // the user has positioned and confirmed the crop.
+    setCropSource(file);
+    setCropOpen(true);
+  };
+
+  // Click the existing avatar to re-edit. Fetches the original from the
+  // server, then opens the cropper against it. Falls back to the displayed
+  // image if the server has no original (legacy avatars uploaded before
+  // dual-storage shipped).
+  const handleEditExisting = async () => {
+    if (!me?.avatar_url || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/avatars/${me.id}/original`);
+      let blob: Blob;
+      if (res.ok) {
+        blob = await res.blob();
+      } else {
+        // Legacy fallback: use the cropped avatar as the source for re-edit.
+        const fallback = await fetch(me.avatar_url);
+        if (!fallback.ok) {
+          toastManager.add({
+            title: "Could not load existing photo to edit.",
+            variant: "error",
+          });
+          return;
+        }
+        blob = await fallback.blob();
+      }
+      setCropSource(blob);
+      setCropOpen(true);
+    } catch {
+      toastManager.add({ title: "Network error.", variant: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCropSave = async (cropped: Blob, original: Blob) => {
     setBusy(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      // Always send a `.jpg` filename so the server's content-type sniff
+      // lands on image/jpeg consistently regardless of source format.
+      fd.append(
+        "file",
+        new File([cropped], "avatar.jpg", { type: "image/jpeg" }),
+      );
+      // Original goes alongside; server stores at avatars/<uid>/<hash>-orig.<ext>.
+      // We re-upload on every save so the server-side original always matches
+      // what the user has been editing — important for the edit-existing flow
+      // where the user may have started from a fallback (cropped) blob.
+      const origExt =
+        original.type === "image/png"
+          ? "png"
+          : original.type === "image/webp"
+            ? "webp"
+            : "jpg";
+      fd.append(
+        "original",
+        new File([original], `original.${origExt}`, {
+          type: original.type || "image/jpeg",
+        }),
+      );
       const res = await fetch("/api/users/me/avatar", {
         method: "POST",
         body: fd,
@@ -150,6 +217,8 @@ export default function ProfileRoute() {
       const body = (await res.json()) as { avatar_url: string };
       setMe((prev) => (prev ? { ...prev, avatar_url: body.avatar_url } : prev));
       toastManager.add({ title: "Profile photo updated." });
+      setCropOpen(false);
+      setCropSource(null);
     } catch {
       toastManager.add({ title: "Network error.", variant: "error" });
     } finally {
@@ -287,13 +356,32 @@ export default function ProfileRoute() {
       {/* Avatar card */}
       <section className="mb-6 rounded-panel border border-border bg-card p-6">
         <div className="flex items-start gap-5">
-          <Avatar
-            userId={me.id}
-            displayName={me.display_name}
-            email={me.email}
-            avatarUrl={me.avatar_url}
-            size={88}
-          />
+          {me.avatar_url ? (
+            <button
+              type="button"
+              onClick={handleEditExisting}
+              disabled={busy}
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand"
+              title="Click to re-adjust your photo"
+              aria-label="Adjust profile photo"
+            >
+              <Avatar
+                userId={me.id}
+                displayName={me.display_name}
+                email={me.email}
+                avatarUrl={me.avatar_url}
+                size={88}
+              />
+            </button>
+          ) : (
+            <Avatar
+              userId={me.id}
+              displayName={me.display_name}
+              email={me.email}
+              avatarUrl={me.avatar_url}
+              size={88}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <div className="text-lg font-semibold text-text-bright">
               {me.display_name?.trim() || me.email}
@@ -309,6 +397,16 @@ export default function ProfileRoute() {
               >
                 {me.avatar_url ? "Change photo" : "Upload photo"}
               </Button>
+              {me.avatar_url ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleEditExisting}
+                  disabled={busy}
+                >
+                  Adjust
+                </Button>
+              ) : null}
               {me.avatar_url ? (
                 <Button
                   variant="ghost"
@@ -413,6 +511,18 @@ export default function ProfileRoute() {
         </a>
         .
       </p>
+
+      <AvatarCropDialog
+        open={cropOpen}
+        source={cropSource}
+        onOpenChange={(o) => {
+          if (busy) return;
+          setCropOpen(o);
+          if (!o) setCropSource(null);
+        }}
+        onSave={handleCropSave}
+        busy={busy}
+      />
     </div>
   );
 }
