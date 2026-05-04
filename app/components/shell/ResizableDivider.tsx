@@ -25,7 +25,7 @@
 //     chevron fires onToggleCollapse instead — the same divider thus
 //     handles both gestures unambiguously.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
 
 export interface ResizableDividerProps {
@@ -86,6 +86,30 @@ export default function ResizableDivider({
     setDragging(false);
   };
 
+  // Safety net: if the divider's pointerup never fires (browser swallowed
+  // the event because the user dragged outside the viewport, switched tabs
+  // mid-drag, etc.) the previous implementation would freeze with active=true
+  // and the next pointermove on the divider would resume drag from the wrong
+  // anchor. Listen on the window while dragging and force a clean exit.
+  useEffect(() => {
+    if (!dragging) return;
+    const release = () => {
+      const d = dragRef.current;
+      if (!d.active) return;
+      if (d.moved) onResizeEnd?.();
+      d.active = false;
+      setDragging(false);
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", release);
+    };
+  }, [dragging, onResizeEnd]);
+
   // Caret faces the direction the panel will collapse OUT of (so clicking
   // it visually "pushes" the panel away).
   const Caret = (collapsed ? side === "left" : side === "right")
@@ -119,6 +143,11 @@ export default function ResizableDivider({
       style={{
         width: 8,
         cursor: collapsed ? "pointer" : "ew-resize",
+        // touchAction: 'none' prevents the browser from interpreting drag
+        // gestures as scroll/zoom (which silently steals the pointer from
+        // setPointerCapture and was the source of the "drag freezes
+        // mid-resize" symptom).
+        touchAction: "none",
       }}
     >
       {/* Hairline + curved-sheet shadow — pure CSS, see app/index.css. */}

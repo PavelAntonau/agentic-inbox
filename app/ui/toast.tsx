@@ -34,19 +34,30 @@ export const KUMO_TOAST_VARIANTS = {
     description: "Close button with X icon",
   },
   variant: {
+    // Default = positive confirmation (green). Most confirmation toasts in
+    // the app ("Email sent", "Visibility updated", "Code sent") fire with
+    // no explicit variant, so default carries the success treatment.
     default: {
-      classes: "border-kumo-fill bg-kumo-control",
-      description: "Default toast style",
+      classes:
+        "border-emerald-500/60 bg-emerald-500/15 [&_[data-toast-title]]:text-emerald-700 dark:border-emerald-400/55 dark:bg-emerald-500/20 dark:[&_[data-toast-title]]:text-emerald-200",
+      description: "Success toast — positive confirmation (green)",
+    },
+    // Explicit success variant for clarity when a caller wants to be loud
+    // about it. Same visual treatment as default.
+    success: {
+      classes:
+        "border-emerald-500/60 bg-emerald-500/15 [&_[data-toast-title]]:text-emerald-700 dark:border-emerald-400/55 dark:bg-emerald-500/20 dark:[&_[data-toast-title]]:text-emerald-200",
+      description: "Success toast — positive confirmation (green)",
     },
     error: {
       classes:
-        "border-kumo-fill bg-kumo-control [&_[data-toast-icon]]:text-[light-dark(var(--color-red-600),var(--color-red-400))] [&_[data-toast-title]]:text-[light-dark(var(--color-red-600),var(--color-red-400))]",
-      description: "Error toast for critical issues",
+        "border-red-500/60 bg-red-500/15 [&_[data-toast-title]]:text-red-700 dark:border-red-400/55 dark:bg-red-500/20 dark:[&_[data-toast-title]]:text-red-200",
+      description: "Error toast — failed operation (red)",
     },
     warning: {
       classes:
-        "border-kumo-fill bg-kumo-control [&_[data-toast-icon]]:text-[light-dark(var(--color-amber-700),var(--color-amber-500))] [&_[data-toast-title]]:text-[light-dark(var(--color-amber-700),var(--color-amber-500))]",
-      description: "Warning toast for cautionary messages",
+        "border-amber-500/60 bg-amber-500/15 [&_[data-toast-title]]:text-amber-700 dark:border-amber-400/55 dark:bg-amber-500/20 dark:[&_[data-toast-title]]:text-amber-200",
+      description: "Warning toast — cautionary message (amber)",
     },
   },
 } as const;
@@ -140,23 +151,23 @@ function ToastList() {
       key={t.id}
       toast={t}
       className={cn(
-        // Stacking / animation classes from kumo chunk
-        "absolute right-0 bottom-0 left-auto z-[calc(1000-var(--toast-index))] mr-0 h-[var(--height)] w-full origin-bottom select-none",
+        // Top-anchored stack: toasts slide DOWN into view from above the
+        // viewport edge. Render from `top-0` instead of `bottom-0` and flip
+        // the index/peek math so the frontmost toast sits closest to the top.
+        "absolute top-0 right-0 left-0 z-[calc(1000-var(--toast-index))] h-[var(--height)] w-full origin-top select-none rounded-lg border p-4 shadow-lg",
         toastVariants({ variant: t.data?.variant }),
-        "[--gap:0.75rem] [--height:var(--toast-frontmost-height,var(--toast-height))] [--offset-y:calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y))] [--peek:0.75rem] [--scale:calc(max(0,1-(var(--toast-index)*0.1)))] [--shrink:calc(1-var(--scale))]",
-        "[transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--peek))-(var(--shrink)*var(--height))))_scale(var(--scale))] [transition:transform_0.5s_cubic-bezier(0.22,1,0.36,1),opacity_0.5s,height_0.15s]",
-        "after:absolute after:top-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-['']",
-        "data-[ending-style]:opacity-0 data-[expanded]:h-[var(--toast-height)] data-[expanded]:[transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--offset-y)))] data-[limited]:opacity-0 data-[starting-style]:[transform:translateY(150%)]",
+        "[--gap:0.75rem] [--height:var(--toast-frontmost-height,var(--toast-height))] [--offset-y:calc(var(--toast-offset-y)+calc(var(--toast-index)*var(--gap))+var(--toast-swipe-movement-y))] [--peek:0.75rem] [--scale:calc(max(0,1-(var(--toast-index)*0.1)))] [--shrink:calc(1-var(--scale))]",
+        "[transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)+(var(--toast-index)*var(--peek))+(var(--shrink)*var(--height))))_scale(var(--scale))] [transition:transform_0.5s_cubic-bezier(0.22,1,0.36,1),opacity_0.5s,height_0.15s]",
+        "after:absolute after:bottom-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-['']",
+        "data-[ending-style]:opacity-0 data-[expanded]:h-[var(--toast-height)] data-[expanded]:[transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--offset-y)))] data-[limited]:opacity-0 data-[starting-style]:[transform:translateY(-150%)]",
       )}
     >
-      {/* Glass backing — matches kumo */}
-      <div className="absolute inset-0 rounded-[11px] bg-kumo-control/90" />
       <Toast.Content className="isolate flex flex-col gap-1 transition-opacity [transition-duration:250ms] data-[behind]:pointer-events-none data-[behind]:opacity-0 data-[expanded]:pointer-events-auto data-[expanded]:opacity-100">
         <div className="flex items-start gap-2">
           <div className="flex flex-col gap-1 overflow-hidden">
             <Toast.Title
               data-toast-title
-              className="text-[0.975rem] leading-5 font-medium text-kumo-default"
+              className="text-[0.975rem] leading-5 font-semibold"
             />
             <Toast.Description className="text-[0.925rem] leading-5 text-kumo-subtle" />
           </div>
@@ -194,7 +205,7 @@ export function Toasty({ children }: ToastyProps) {
     <Toast.Provider>
       {children}
       <Toast.Portal>
-        <Toast.Viewport className="fixed top-auto right-4 bottom-4 z-1 mx-auto flex w-[calc(100%-2rem)] sm:right-8 sm:bottom-8 sm:w-[340px]">
+        <Toast.Viewport className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] mx-auto flex w-[calc(100%-2rem)] max-w-[440px] sm:top-6">
           <ToastList />
         </Toast.Viewport>
       </Toast.Portal>

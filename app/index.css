@@ -544,9 +544,13 @@ body {
   left: 50%;
   width: 1px;
   transform: translateX(-50%);
-  background-color: var(--color-border, rgba(0, 0, 0, 0.12));
+  /* Rest state: a soft cyan tinted line matching the brand accent, NOT
+   * the neutral border-gray that read as a gray bar (UAT round 2 round-3
+   * feedback). Same hue as the hover state but at much lower opacity so
+   * the rest line is a quiet hint, not a wall. */
+  background-color: rgba(78, 195, 255, 0.35);
   box-shadow:
-    1px 0 0 0 rgba(78, 195, 255, 0.1),
+    1px 0 0 0 rgba(78, 195, 255, 0.18),
     8px 0 24px -12px rgba(10, 18, 38, 0.18),
     2px 0 6px -3px rgba(10, 18, 38, 0.1);
   transition:
@@ -555,10 +559,11 @@ body {
 }
 
 :root.theme-dark .resizable-divider__line {
+  background-color: rgba(120, 215, 255, 0.45);
   box-shadow:
-    1px 0 0 0 rgba(78, 195, 255, 0.16),
+    1px 0 0 0 rgba(120, 215, 255, 0.22),
     14px 0 36px -10px rgba(0, 0, 0, 0.55),
-    4px 0 10px -3px rgba(78, 195, 255, 0.1);
+    4px 0 10px -3px rgba(78, 195, 255, 0.14);
 }
 
 /* Curved-sheet glow — sits over the line; vertical gradient peaks at centre
