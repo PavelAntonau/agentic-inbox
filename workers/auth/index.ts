@@ -85,6 +85,16 @@ export function createAuth(env: Env): ServerAuth {
         account: schema.account,
         verification: schema.verification,
         rateLimit: schema.rate_limit,
+        // Phase 1 (mcp-oauth) — JWT plugin storage. Backs jwt() until T1.4
+        // switches to a static signing key.
+        jwks: schema.jwks,
+        // Phase 1 (mcp-oauth) — @better-auth/oauth-provider plugin tables.
+        // Plugin model names ↔ snake_case schema exports. usePlural:false
+        // means each model resolves to whichever export we map here.
+        oauthClient: schema.oauth_client,
+        oauthConsent: schema.oauth_consent,
+        oauthAccessToken: schema.oauth_access_token,
+        oauthRefreshToken: schema.oauth_refresh_token,
       },
       usePlural: false,
     }),

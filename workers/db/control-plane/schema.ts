@@ -458,3 +458,160 @@ export const clientGrants = sqliteTable(
     inboxIdx: index("idx_client_grants_inbox").on(t.inbox_id),
   }),
 );
+
+// Phase 1 (mcp-oauth) — better-auth/plugins/jwt key storage (migration 0011).
+// Used while the jwt() plugin runs without a static signing key. T1.4 may
+// switch to env-supplied keys, in which case this table stays present but
+// unused. Schema mirrors better-auth's plugins/jwt/schema.mjs verbatim.
+export const jwks = sqliteTable(
+  "jwks",
+  {
+    id: text("id").primaryKey(),
+    publicKey: text("public_key").notNull(),
+    privateKey: text("private_key").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at"),
+  },
+  (t) => ({
+    createdAtIdx: index("jwks_created_at_idx").on(t.createdAt),
+  }),
+);
+
+// Phase 1 (mcp-oauth) — @better-auth/oauth-provider plugin tables (migration 0011).
+// Schema mirrors @better-auth/oauth-provider/dist/index.mjs schema export.
+// Field-name mapping: TS camelCase ↔ DB snake_case via drizzle column-builder
+// (existing project convention; see 0005_better_auth.sql).
+//
+// JSON-array fields (redirectUris, scopes, grantTypes, responseTypes, contacts,
+// postLogoutRedirectUris) and JSON-object metadata are stored as TEXT — better-
+// auth's drizzleAdapter handles the encode/decode (string[] / json field types).
+
+// 1. oauth_client — registered OAuth clients.
+//    Logical identity is `client_id` (UNIQUE); FKs from tokens/consent target
+//    that column. Public clients (PKCE-only, e.g. Claude Code desktop) leave
+//    `client_secret` NULL.
+export const oauth_client = sqliteTable(
+  "oauth_client",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull().unique(),
+    clientSecret: text("client_secret"),
+    disabled: integer("disabled", { mode: "boolean" }),
+    skipConsent: integer("skip_consent", { mode: "boolean" }),
+    enableEndSession: integer("enable_end_session", { mode: "boolean" }),
+    subjectType: text("subject_type"),
+    scopes: text("scopes"),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at"),
+    updatedAt: integer("updated_at"),
+    name: text("name"),
+    uri: text("uri"),
+    icon: text("icon"),
+    contacts: text("contacts"),
+    tos: text("tos"),
+    policy: text("policy"),
+    softwareId: text("software_id"),
+    softwareVersion: text("software_version"),
+    softwareStatement: text("software_statement"),
+    redirectUris: text("redirect_uris").notNull(),
+    postLogoutRedirectUris: text("post_logout_redirect_uris"),
+    tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
+    grantTypes: text("grant_types"),
+    responseTypes: text("response_types"),
+    public: integer("public", { mode: "boolean" }),
+    type: text("type"),
+    requirePKCE: integer("require_pkce", { mode: "boolean" }),
+    referenceId: text("reference_id"),
+    metadata: text("metadata"),
+  },
+  (t) => ({
+    userIdIdx: index("oauth_client_user_id_idx").on(t.userId),
+  }),
+);
+
+// 2. oauth_consent — per-(client, user) scope grants (PKCE-bound).
+export const oauth_consent = sqliteTable(
+  "oauth_consent",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauth_client.clientId, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    referenceId: text("reference_id"),
+    scopes: text("scopes").notNull(),
+    createdAt: integer("created_at"),
+    updatedAt: integer("updated_at"),
+  },
+  (t) => ({
+    clientIdIdx: index("oauth_consent_client_id_idx").on(t.clientId),
+    userIdIdx: index("oauth_consent_user_id_idx").on(t.userId),
+  }),
+);
+
+// 3. oauth_refresh_token — refresh-token rotation chain (RFC 6749 §6).
+//    `revoked` (date) is set on the previous refresh when issuing a new one.
+//    session_id ON DELETE SET NULL preserves the audit trail past sign-out.
+export const oauth_refresh_token = sqliteTable(
+  "oauth_refresh_token",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").notNull(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauth_client.clientId, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => session.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    expiresAt: integer("expires_at"),
+    createdAt: integer("created_at"),
+    revoked: integer("revoked"),
+    authTime: integer("auth_time"),
+    scopes: text("scopes").notNull(),
+  },
+  (t) => ({
+    tokenIdx: index("oauth_refresh_token_token_idx").on(t.token),
+    clientIdIdx: index("oauth_refresh_token_client_id_idx").on(t.clientId),
+    userIdIdx: index("oauth_refresh_token_user_id_idx").on(t.userId),
+  }),
+);
+
+// 4. oauth_access_token — issued bearer access tokens (JWT or opaque).
+//    `token` UNIQUE-when-set: opaque tokens are looked up by it; JWT tokens
+//    are validated by signature + aud and don't need table lookup.
+export const oauth_access_token = sqliteTable(
+  "oauth_access_token",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").unique(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauth_client.clientId, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => session.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    referenceId: text("reference_id"),
+    refreshId: text("refresh_id").references(() => oauth_refresh_token.id, {
+      onDelete: "set null",
+    }),
+    expiresAt: integer("expires_at"),
+    createdAt: integer("created_at"),
+    scopes: text("scopes").notNull(),
+  },
+  (t) => ({
+    clientIdIdx: index("oauth_access_token_client_id_idx").on(t.clientId),
+    userIdIdx: index("oauth_access_token_user_id_idx").on(t.userId),
+    expiresAtIdx: index("oauth_access_token_expires_at_idx").on(t.expiresAt),
+  }),
+);
