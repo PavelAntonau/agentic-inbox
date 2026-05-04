@@ -13,7 +13,6 @@
 import { Menu } from "@base-ui/react/menu";
 import {
   ChartLineIcon,
-  EnvelopeIcon,
   GearSixIcon,
   SlidersIcon,
   UsersIcon,
@@ -27,7 +26,6 @@ import { cn } from "~/ui/lib/cn";
 // switched to solid in app/index.css globally. No inline override needed.
 
 interface SettingsMenuProps {
-  mailboxId: string | undefined;
   isAdmin: boolean;
   isSettingsActive: boolean;
 }
@@ -45,25 +43,13 @@ interface MenuGroupSpec {
 }
 
 export default function SettingsMenu({
-  mailboxId,
   isAdmin,
   isSettingsActive,
 }: SettingsMenuProps) {
   const groups: MenuGroupSpec[] = [];
 
-  if (mailboxId) {
-    groups.push({
-      label: "Mailbox",
-      items: [
-        {
-          key: "mailbox-settings",
-          label: "Mailbox settings",
-          to: `/mailbox/${mailboxId}/settings`,
-          icon: <EnvelopeIcon size={16} />,
-        },
-      ],
-    });
-  }
+  // UAT round-3 batch-4: mailbox settings moved to the inbox folder
+  // header (email-list.tsx). This menu is now workspace-scoped only.
 
   if (isAdmin) {
     // Tokens link removed — entire agent-token surface is being phased out
@@ -122,7 +108,7 @@ export default function SettingsMenu({
         {/* z-50 wins against the sticky header's z-10 (NotificationBell uses
          * z-40 for the same reason). Without this the popup renders behind
          * the header bar. */}
-        <Menu.Positioner sideOffset={8} align="end" className="z-50">
+        <Menu.Positioner sideOffset={8} align="end" className="z-[150]">
           <Menu.Popup
             className={cn(
               "min-w-56 origin-top-right rounded-xl border-2 border-border bg-card p-1.5",

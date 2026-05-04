@@ -548,19 +548,17 @@ body {
   left: 50%;
   width: 1px;
   transform: translateX(-50%);
-  /* UAT round-3 second batch: only the turquoise stripe — every other
-   * shadow layer (the secondary cyan hairline, the dark drop) was the
-   * "break + darker area" the user was seeing. The curved-paper shadow
-   * moved to the sidebar containers (see [data-shell-sidebar][data-shadow-side]
-   * below). */
-  background-color: rgba(78, 195, 255, 0.55);
+  /* UAT round-3 batch-4: a quiet hairline at REST — barely-there cyan tint
+   * matching the standard border. Round-3 batch-2 cranked this to 0.55
+   * which read as "always highlighted". Hover bumps to the bright cyan. */
+  background-color: rgba(78, 195, 255, 0.18);
   transition:
     background-color 140ms ease,
     box-shadow 140ms ease;
 }
 
 :root.theme-dark .resizable-divider__line {
-  background-color: rgba(120, 215, 255, 0.6);
+  background-color: rgba(120, 215, 255, 0.22);
 }
 
 /* Hover / active drag — neon cyan glow + slightly thicker visible line. */
@@ -607,14 +605,17 @@ body {
     box-shadow 140ms ease;
 }
 
+/* macOS-Dock-style magnifier: 2× scale on hover with a slight elastic
+ * overshoot. UAT round-3 batch-4 — the prior 1.25 was too subtle to
+ * register as a magnifier effect. */
 .resizable-divider__handle[data-active="true"] {
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1.25);
-  border-color: rgba(78, 195, 255, 0.85);
+  transform: translate(-50%, -50%) scale(2);
+  border-color: rgba(78, 195, 255, 0.95);
   color: rgba(78, 195, 255, 1);
   box-shadow:
-    0 0 8px rgba(78, 195, 255, 0.4),
-    0 2px 6px rgba(0, 0, 0, 0.18);
+    0 0 14px rgba(78, 195, 255, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.22);
 }
 
 :root.theme-dark .resizable-divider__handle {
@@ -628,8 +629,8 @@ body {
   border-color: rgba(120, 215, 255, 1);
   color: rgba(120, 215, 255, 1);
   box-shadow:
-    0 0 10px rgba(120, 215, 255, 0.5),
-    0 2px 6px rgba(0, 0, 0, 0.55);
+    0 0 18px rgba(120, 215, 255, 0.6),
+    0 4px 12px rgba(0, 0, 0, 0.6);
 }
 
 /* Collapsed panels render width:0 — keep the divider clickable so the

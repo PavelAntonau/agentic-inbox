@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Badge, Button, Loader, Tooltip } from "~/ui";
+import { Button, Loader, Tooltip } from "~/ui";
 import {
   ArrowUpIcon,
   RobotIcon,
@@ -335,12 +335,10 @@ function AgentChatConnected({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border shrink-0">
-        <div className="flex items-center gap-2">
-          <Badge variant="beta">AI</Badge>
-          <span className="text-xs text-text-muted">Email Agent</span>
-        </div>
+      {/* Header — UAT round-3 batch-4: dropped the "AI" beta badge and the
+          inline subtitle (the parent AgentSidebar tab strip already labels
+          this surface "Email Agent"). */}
+      <div className="flex items-center justify-end px-3 py-1.5 border-b border-border shrink-0 min-h-[36px]">
         <div className="flex items-center gap-1">
           {isStreaming && <Loader size="sm" />}
           {messages.length > 0 && (
@@ -450,8 +448,11 @@ function AgentChatConnected({
         )}
       </div>
 
-      {/* Input */}
-      <div className="shrink-0 border-t border-border px-3 py-2">
+      {/* Input — UAT round-3 batch-4: prominent border, subtle elevated
+          shadow on the textarea "island", and the send Button vertical-
+          centered with the textarea (items-stretch + matching min-height
+          on the button so they share a baseline). */}
+      <div className="shrink-0 border-t border-border px-3 py-2.5">
         {isStreaming ? (
           <div className="flex justify-center">
             <Button
@@ -464,7 +465,7 @@ function AgentChatConnected({
             </Button>
           </div>
         ) : (
-          <div className="flex items-end gap-1.5">
+          <div className="flex items-stretch gap-2">
             <textarea
               ref={inputRef}
               id="agent-chat-input"
@@ -475,7 +476,7 @@ function AgentChatConnected({
               placeholder="Ask your email agent..."
               rows={1}
               aria-label="Chat message input"
-              className="flex-1 resize-none rounded-lg border border-border bg-card px-3 py-2 text-xs text-text-bright placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-blue/40 min-h-[36px] max-h-[100px]"
+              className="flex-1 resize-none rounded-xl border-2 border-border bg-card px-3.5 py-2.5 text-xs text-text-bright placeholder:text-text-muted focus:outline-none focus:border-blue/60 focus:ring-2 focus:ring-blue/20 min-h-[40px] max-h-[100px] shadow-[0_2px_8px_-2px_rgba(10,18,38,0.10),_0_8px_24px_-12px_rgba(10,18,38,0.10)] dark:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.45),_0_8px_24px_-12px_rgba(0,0,0,0.45)] transition-colors"
               style={{ height: "auto", overflow: "hidden" }}
               onInput={(e) => {
                 const t = e.target as HTMLTextAreaElement;
@@ -487,11 +488,11 @@ function AgentChatConnected({
             <Button
               variant="primary"
               shape="square"
-              size="sm"
               disabled={!inputValue.trim()}
-              icon={<ArrowUpIcon size={14} weight="bold" />}
+              icon={<ArrowUpIcon size={16} weight="bold" />}
               onClick={handleSend}
               aria-label="Send message"
+              className="!h-10 !w-10 self-end shrink-0"
             />
           </div>
         )}

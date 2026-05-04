@@ -73,7 +73,7 @@ export default function ProfileMenu({
         {/* z-50 wins against the sticky header's z-10 (NotificationBell uses
          * z-40 for the same reason). Without this the popup renders behind
          * the header bar. */}
-        <Menu.Positioner sideOffset={8} align="end" className="z-50">
+        <Menu.Positioner sideOffset={8} align="end" className="z-[150]">
           <Menu.Popup
             className={cn(
               "min-w-64 origin-top-right rounded-xl border-2 border-border bg-card p-1.5",

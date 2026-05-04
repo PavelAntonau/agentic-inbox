@@ -67,7 +67,7 @@ export default function AgentSidebar() {
             size={14}
             weight={activeTab === "agent" ? "fill" : "regular"}
           />
-          Agent
+          Email Agent
         </button>
         <button
           type="button"
@@ -82,7 +82,7 @@ export default function AgentSidebar() {
             size={14}
             weight={activeTab === "mcp" ? "fill" : "regular"}
           />
-          MCP
+          Email MCP
         </button>
         {mailboxLabel && (
           <span

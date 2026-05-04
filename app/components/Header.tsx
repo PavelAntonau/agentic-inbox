@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license
 
 import { Button } from "~/ui";
-import { ListIcon, RobotIcon } from "@phosphor-icons/react";
+import { ListIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
@@ -33,7 +33,7 @@ const HEADER_GHOST_BTN_CLASS = "text-text-bright shadow-sm hover:bg-card-light";
 export default function Header() {
   const { mailboxId } = useParams<{ mailboxId: string }>();
   const location = useLocation();
-  const { toggleSidebar, toggleAgentPanel, isAgentPanelOpen } = useUIStore();
+  const { toggleSidebar } = useUIStore();
 
   // Fetch the current user. Drives the SettingsMenu admin grouping, the
   // avatar identity, and (future) avatar uploads. Server enforces the actual
@@ -56,8 +56,11 @@ export default function Header() {
 
   const isSettingsActive = location.pathname.includes("/settings");
 
-  // Phase 3d/3e/3f: shared right-cluster order is
-  //   Avatar  →  Robot panel  →  Bell  →  Theme  →  Settings
+  // UAT round-3 batch-4: this header is workspace-scoped now. The agent
+  // toggle and the mailbox-settings link both moved into the inbox folder
+  // header (email-list.tsx) — everything specific to one mailbox lives
+  // alongside the inbox itself, not in the global chrome.
+  //   Avatar  →  Bell  →  Theme  →  Settings (workspace-only)
   const rightCluster = (
     <div className="flex items-center gap-1.5 ml-auto shrink-0">
       {me && (
@@ -68,26 +71,9 @@ export default function Header() {
           avatarUrl={me.avatar_url}
         />
       )}
-      {mailboxId && (
-        <Button
-          variant={isAgentPanelOpen ? "secondary" : "ghost"}
-          shape="square"
-          icon={<RobotIcon size={20} />}
-          onClick={toggleAgentPanel}
-          aria-label={
-            isAgentPanelOpen ? "Hide agent panel" : "Show agent panel"
-          }
-          title={isAgentPanelOpen ? "Hide agent panel" : "Show agent panel"}
-          className={`hidden lg:inline-flex ${HEADER_GHOST_BTN_CLASS}`}
-        />
-      )}
       <NotificationBell />
       <ThemeToggle />
-      <SettingsMenu
-        mailboxId={mailboxId}
-        isAdmin={isAdmin}
-        isSettingsActive={isSettingsActive}
-      />
+      <SettingsMenu isAdmin={isAdmin} isSettingsActive={isSettingsActive} />
     </div>
   );
 

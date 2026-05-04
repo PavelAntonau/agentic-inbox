@@ -160,7 +160,7 @@ export default function NotificationBell() {
         <div
           role="menu"
           aria-label="Notifications"
-          className="absolute right-0 top-full z-40 mt-2 w-80 rounded-[17px] bg-bg border border-border shadow-lg"
+          className="absolute right-0 top-full z-[150] mt-2 w-80 rounded-[17px] bg-bg border border-border shadow-lg"
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
             <span className="text-sm font-semibold text-text-bright">

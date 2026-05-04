@@ -10,11 +10,14 @@ import {
   EnvelopeOpenIcon,
   EnvelopeSimpleIcon,
   FileIcon,
+  GearSixIcon,
   PaperPlaneTiltIcon,
   PlusIcon,
+  RobotIcon,
   StarIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
+import { Link } from "react-router";
 import emailReadUrl from "~/assets/branding/email-read.png?url";
 import emailUnreadUrl from "~/assets/branding/email-unread.png?url";
 import { useQueryClient } from "@tanstack/react-query";
@@ -134,6 +137,8 @@ export default function EmailListRoute() {
     selectEmail,
     closePanel,
     startCompose,
+    isAgentPanelOpen,
+    toggleAgentPanel,
   } = useUIStore();
   const [page, setPage] = useState(1);
 
@@ -271,10 +276,9 @@ export default function EmailListRoute() {
       selectedEmailId={selectedEmailId}
       isComposing={isComposing}
     >
-      {/* Folder header — persistent "+ Compose" button (UAT round-3): always
-          visible whether the folder has emails or not. The empty-state CTA
-          inside FolderEmptyState was the only entry point in round-2, so
-          the moment messages arrived the user lost the affordance. */}
+      {/* Folder header — UAT round-3 batch-4: mailbox-scoped controls live
+          here now (Compose, Settings, Agent toggle, Refresh). The global
+          header at the top stays workspace-scoped. */}
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-border shrink-0 md:px-5">
         <h1 className="text-lg font-semibold text-text-bright">{folderName}</h1>
         <div className="flex items-center gap-2">
@@ -293,11 +297,7 @@ export default function EmailListRoute() {
           >
             Compose
           </Button>
-          <Tooltip
-            content={isRefreshing ? "Refreshing..." : "Refresh"}
-            side="bottom"
-            asChild
-          >
+          <Tooltip content="Refresh" side="bottom" asChild>
             <Button
               variant="ghost"
               shape="square"
@@ -313,6 +313,38 @@ export default function EmailListRoute() {
               aria-label="Refresh"
             />
           </Tooltip>
+          {mailboxId && (
+            <Tooltip content="Mailbox settings" side="bottom" asChild>
+              <Link
+                to={`/mailbox/${mailboxId}/settings`}
+                aria-label="Mailbox settings"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-text-muted hover:text-text-bright hover:bg-tx-card-hover transition-colors"
+              >
+                <GearSixIcon size={18} />
+              </Link>
+            </Tooltip>
+          )}
+          {mailboxId && (
+            <Tooltip
+              content={
+                isAgentPanelOpen ? "Hide email agent" : "Show email agent"
+              }
+              side="bottom"
+              asChild
+            >
+              <Button
+                variant={isAgentPanelOpen ? "secondary" : "ghost"}
+                shape="square"
+                size="sm"
+                icon={<RobotIcon size={18} />}
+                onClick={toggleAgentPanel}
+                aria-label={
+                  isAgentPanelOpen ? "Hide email agent" : "Show email agent"
+                }
+                className="hidden lg:inline-flex"
+              />
+            </Tooltip>
+          )}
         </div>
       </div>
 
