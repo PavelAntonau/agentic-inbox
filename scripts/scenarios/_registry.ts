@@ -26,6 +26,7 @@ import sCli2 from "./s-cli-2";
 import sCli3 from "./s-cli-3";
 import sCli4 from "./s-cli-4";
 import sInbox3Allowlist from "./s-inbox-3-allowlist";
+import sInbox3InternalMode from "./s-inbox-3-internal-mode";
 
 export interface RegistryEntry {
   scenario: Scenario;
@@ -40,6 +41,7 @@ const ALL: Scenario[] = [
   sInbox2,
   sInbox3,
   sInbox3Allowlist,
+  sInbox3InternalMode,
   sInbox4,
   sMsg1,
   sMsg2,
