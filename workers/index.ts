@@ -597,13 +597,15 @@ async function receiveEmail(
   // break every legacy address; the safer default is to enforce policy
   // where it is configured.
   const policyRow = await env.DB.prepare(
-    "SELECT id, external_inbound_enabled, external_allow_mode FROM mailboxes WHERE address = ?1",
+    "SELECT id, owner_user_id, external_inbound_enabled, external_allow_mode, internal_inbound_mode FROM mailboxes WHERE address = ?1",
   )
     .bind(mailboxId.toLowerCase())
     .first<{
       id: string;
+      owner_user_id: string;
       external_inbound_enabled: number | boolean;
       external_allow_mode: string;
+      internal_inbound_mode: string;
     }>();
   if (policyRow && !policyRow.external_inbound_enabled) {
     console.log(
@@ -641,6 +643,49 @@ async function receiveEmail(
         `Bouncing email for ${mailboxId}: external_allow_mode=allowlist, sender ${senderEmail} not on allowlist`,
       );
       return;
+    }
+  }
+
+  // Internal-sender gate (Phase 2 — F-PHASE3-008). When the sender's email
+  // resolves to a row in the users table, the sender is "internal". Apply
+  // internal_inbound_mode:
+  //   • 'everyone'      — accept (default)
+  //   • 'none'          — bounce all internal senders
+  //   • 'contacts_only' — only senders that are accepted contacts of the
+  //                       recipient (contacts.status='accepted' AND
+  //                       declined_at IS NULL).
+  // External senders (no users row) skip this gate and have already passed
+  // the external_inbound_enabled + external_allow_mode checks above.
+  if (policyRow) {
+    const senderEmailLc = (parsedEmail.from?.address || "").toLowerCase();
+    if (senderEmailLc) {
+      const senderUser = await env.DB.prepare(
+        "SELECT id FROM users WHERE lower(email) = ?1",
+      )
+        .bind(senderEmailLc)
+        .first<{ id: string }>();
+      if (senderUser) {
+        const mode = policyRow.internal_inbound_mode;
+        if (mode === "none") {
+          console.log(
+            `Bouncing email for ${mailboxId}: internal_inbound_mode=none (internal sender ${senderEmailLc})`,
+          );
+          return;
+        }
+        if (mode === "contacts_only") {
+          const contact = await env.DB.prepare(
+            "SELECT 1 FROM contacts WHERE owner_user_id = ?1 AND contact_user_id = ?2 AND status = 'accepted' AND declined_at IS NULL",
+          )
+            .bind(policyRow.owner_user_id, senderUser.id)
+            .first<{ "1": number }>();
+          if (!contact) {
+            console.log(
+              `Bouncing email for ${mailboxId}: internal_inbound_mode=contacts_only, sender ${senderEmailLc} not an accepted contact`,
+            );
+            return;
+          }
+        }
+      }
     }
   }
 

@@ -169,6 +169,85 @@ mockRouter.post("/seed-session", async (c) => {
   });
 });
 
+/**
+ * POST /__mock/seed-user — directly insert a row into the `users` table.
+ *
+ * The dev-mode picker only auto-promotes BOOTSTRAP_OWNER_EMAIL via
+ * bootstrapOwner; every other email lands as 403 in authzContext. As a
+ * result, multi-user scenarios (S-INBOX-3-INTERNAL-MODE, contacts flows,
+ * group sharing, mailbox transfer) have no way to seed a SECOND user
+ * without going through admin endpoints that don't exist yet in MOCK_MODE.
+ *
+ * This endpoint exists ONLY to give such scenarios a deterministic seed
+ * path. Production never sees /__mock/* — the router is only mounted
+ * when MOCK_MODE=1 (workers/app.ts) AND every route defends with
+ * isMockMode(c.env) above.
+ *
+ * Body: { email: string, display_name?: string, role?: 'global_owner' | 'global_admin' | 'user' }
+ *  - email        — primary key (collapsed via UNIQUE(lower(email)))
+ *  - display_name — optional, defaults to null
+ *  - role         — optional, defaults to 'user'
+ *
+ * Idempotent: calling with the same email returns the existing row.
+ *
+ * Returns: { id, email, role, status, created_at }
+ */
+mockRouter.post("/seed-user", async (c) => {
+  let body: { email?: unknown; display_name?: unknown; role?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { email, display_name, role } = body;
+  if (typeof email !== "string" || email.trim().length === 0) {
+    return c.json({ error: "email is required" }, 400);
+  }
+  const trimmedEmail = email.trim();
+  const resolvedRole =
+    role === "global_owner" || role === "global_admin" || role === "user"
+      ? role
+      : "user";
+  const resolvedDisplayName =
+    typeof display_name === "string" && display_name.length > 0
+      ? display_name
+      : null;
+
+  // Collapse on UNIQUE(lower(email)) — return the existing row if present.
+  const existing = await c.env.DB.prepare(
+    "SELECT id, email, role, status, created_at FROM users WHERE lower(email) = lower(?1)",
+  )
+    .bind(trimmedEmail)
+    .first<{
+      id: string;
+      email: string;
+      role: string;
+      status: string;
+      created_at: number;
+    }>();
+  if (existing) {
+    return c.json(existing);
+  }
+
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO users (id, email, display_name, role, status, visibility, account_type, created_at, last_login_at, email_verified, updated_at)
+     VALUES (?1, ?2, ?3, ?4, 'active', 'everyone', 'personal', ?5, ?5, 0, ?5)`,
+  )
+    .bind(id, trimmedEmail, resolvedDisplayName, resolvedRole, now)
+    .run();
+
+  return c.json({
+    id,
+    email: trimmedEmail,
+    role: resolvedRole,
+    status: "active",
+    created_at: now,
+  });
+});
+
 mockRouter.post("/inbox", async (c) => {
   const body = await c.req.json<{
     to: string;
