@@ -1,25 +1,22 @@
 // Copyright (c) 2026 ActionNow.AI
 // Licensed under the Apache 2.0 license
 //
-// _app.tsx — Outlook-style three-pane shell.
+// _app.tsx — Outlook-style two-pane shell.
 //
-// Layout:   [MailboxTreeRail (left)] | [main content (center)] | [PreviewPane (right, conditional)]
+// Layout:   [MailboxTreeRail (left)] | [main content (center)]
 //
 // All authenticated routes except /admin/** render inside this shell.
 // The rail fetches /api/mailboxes/tree on the client and caches per
 // React Query's staleTime.  The center pane is always the current <Outlet>.
-// The right pane renders when an email is selected (useUIStore.selectedEmailId).
+// The selected-email detail surface lives inside the route's own
+// MailboxSplitView (center pane), not as a third shell column.
 
 import { Outlet } from "react-router";
 import ComposeEmail from "~/components/ComposeEmail";
 import MailboxTreeRail from "~/components/shell/MailboxTreeRail";
-import PreviewPane from "~/components/shell/PreviewPane";
 import ResizablePanel from "~/components/shell/ResizablePanel";
-import { useUIStore } from "~/hooks/useUIStore";
 
 export default function AppShell() {
-  const { selectedEmailId } = useUIStore();
-
   return (
     // flex-1 fills remaining height below the global Header rendered in root.tsx.
     // overflow-hidden prevents double scrollbars; inner panes scroll independently.
@@ -46,21 +43,6 @@ export default function AppShell() {
       <main className="flex-1 min-w-0 overflow-hidden">
         <Outlet />
       </main>
-
-      {/* Right — preview pane when an email is selected */}
-      {selectedEmailId && (
-        <ResizablePanel
-          storageKey="ai.shell.previewPane"
-          defaultWidth={380}
-          minWidth={280}
-          maxWidth={640}
-          side="right"
-          ariaLabel="Resize preview pane"
-          className="hidden lg:flex flex-col bg-card overflow-hidden"
-        >
-          <PreviewPane emailId={selectedEmailId} />
-        </ResizablePanel>
-      )}
 
       <ComposeEmail />
     </div>
