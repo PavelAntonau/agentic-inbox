@@ -89,7 +89,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en">
       <head>
         <meta charSet="UTF-8" />
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        {/* The SVG favicon link was first in the chain, which made browsers
+            prefer the old generic SVG over the new anai_favicon.PNG. PNG
+            sizes now win; .ico stays as the absolute fallback. */}
         <link
           rel="icon"
           type="image/png"
@@ -108,16 +110,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           sizes="512x512"
           href="/favicon-512.png"
         />
+        {/* No more .ico fallback — the legacy file was the old generic
+            placeholder. PNG sizes above cover every browser the app
+            supports. */}
         <link
           rel="apple-touch-icon"
           sizes="180x180"
           href="/apple-touch-icon.png"
-        />
-        <link
-          rel="icon"
-          type="image/x-icon"
-          href="/favicon.ico"
-          sizes="48x48 32x32 16x16"
         />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Agentic Inbox</title>
