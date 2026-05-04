@@ -15,6 +15,9 @@ export type AuthzContext = {
   authorized_mailbox_ids: string[];
   /** When the caller is a service token, the resolved token id. */
   agent_token_id?: string;
+  /** When the caller authenticated via better-auth session cookie, the session row id.
+   *  Used by GET /api/users/me/sessions to mark the current session. */
+  session_id?: string;
 };
 
 /**

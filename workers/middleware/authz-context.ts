@@ -12,6 +12,7 @@ import { isServiceToken, jwtEmail, serviceTokenClientId } from "../lib/auth";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 import { bootstrapOwner } from "../lib/bootstrap-owner";
 import { getSettings } from "../lib/settings-cache";
+import { createAuth } from "../auth";
 
 type Ctx = {
   Bindings: Env;
@@ -19,25 +20,85 @@ type Ctx = {
 };
 
 /**
- * Per-request middleware that resolves (user_id, role, group_ids,
- * authorized_mailbox_ids) from D1 and packs them into c.var.authzContext.
- *
- * Branches once on isServiceToken(jwt):
- *   - human path: lookup users by email; load their group memberships and
- *     authorized mailboxes (own private + shared via groups).
- *   - service-token path: lookup agent_tokens by cf_client_id; resolve to
- *     the issued_to_user; load that user's group memberships scoped to the
- *     token's mailbox.
- *
- * If the JWT is missing entirely (legacy dev-bypass path), authzContext is
- * left unset; downstream handlers MUST guard against it.
+ * Resolve the human-path authzContext fields (groups + mailboxes) for a
+ * known-active user row. Shared by the better-auth session path and the CF
+ * Access JWT path so the logic lives in one place.
  */
+async function buildHumanAuthzContext(
+  orm: ReturnType<typeof drizzle>,
+  user: { id: string; role: string; status: string },
+  extra?: { session_id?: string },
+): Promise<AuthzContext> {
+  const memberships = await orm
+    .select({ group_id: schema.group_members.group_id })
+    .from(schema.group_members)
+    .where(eq(schema.group_members.user_id, user.id))
+    .all();
+  const group_ids = memberships.map((m) => m.group_id);
+
+  const ownMailboxes = await orm
+    .select({ id: schema.mailboxes.id })
+    .from(schema.mailboxes)
+    .where(eq(schema.mailboxes.owner_user_id, user.id))
+    .all();
+  const groupMailboxes =
+    group_ids.length > 0
+      ? await orm
+          .select({ mailbox_id: schema.mailbox_groups.mailbox_id })
+          .from(schema.mailbox_groups)
+          .where(inArray(schema.mailbox_groups.group_id, group_ids))
+          .all()
+      : [];
+
+  const authorized_mailbox_ids = Array.from(
+    new Set([
+      ...ownMailboxes.map((m) => m.id),
+      ...groupMailboxes.map((m) => m.mailbox_id),
+    ]),
+  );
+
+  return {
+    user_id: user.id,
+    role: user.role as AuthzContext["role"],
+    group_ids,
+    authorized_mailbox_ids,
+    ...(extra?.session_id ? { session_id: extra.session_id } : {}),
+  };
+}
+
 export function authzContext(): MiddlewareHandler<Ctx> {
   return async (c, next) => {
+    const orm = drizzle(c.env.DB, { schema });
+
+    // ── Path 1: better-auth session cookie ──────────────────────────────────
+    // Check for a valid better-auth session BEFORE the CF Access JWT path.
+    // This allows the new auth surface to gate requests while CF Access remains
+    // as a fallback (Phase 3 will remove CF Access entirely).
+    try {
+      const auth = createAuth(c.env);
+      const baSession = await auth.api.getSession({
+        headers: c.req.raw.headers,
+      });
+      if (baSession) {
+        const user = await orm
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, baSession.user.id))
+          .get();
+        if (user && user.status === "active") {
+          const ctx = await buildHumanAuthzContext(orm, user, {
+            session_id: baSession.session.id,
+          });
+          c.set("authzContext", ctx);
+          return next();
+        }
+      }
+    } catch {
+      // better-auth unavailable or threw — fall through to CF Access path
+    }
+
     const jwt = c.var.jwt;
     if (!jwt) return next(); // legacy dev-bypass; downstream handles it
-
-    const orm = drizzle(c.env.DB, { schema });
 
     if (isServiceToken(jwt)) {
       const clientId = serviceTokenClientId(jwt);
@@ -171,41 +232,8 @@ export function authzContext(): MiddlewareHandler<Ctx> {
       }
     }
 
-    const memberships = await orm
-      .select({ group_id: schema.group_members.group_id })
-      .from(schema.group_members)
-      .where(eq(schema.group_members.user_id, user.id))
-      .all();
-    const group_ids = memberships.map((m) => m.group_id);
-
-    // Authorized mailboxes = mailboxes I own + mailboxes shared via my groups.
-    const ownMailboxes = await orm
-      .select({ id: schema.mailboxes.id })
-      .from(schema.mailboxes)
-      .where(eq(schema.mailboxes.owner_user_id, user.id))
-      .all();
-    const groupMailboxes =
-      group_ids.length > 0
-        ? await orm
-            .select({ mailbox_id: schema.mailbox_groups.mailbox_id })
-            .from(schema.mailbox_groups)
-            .where(inArray(schema.mailbox_groups.group_id, group_ids))
-            .all()
-        : [];
-
-    const authorized_mailbox_ids = Array.from(
-      new Set([
-        ...ownMailboxes.map((m) => m.id),
-        ...groupMailboxes.map((m) => m.mailbox_id),
-      ]),
-    );
-
-    c.set("authzContext", {
-      user_id: user.id,
-      role: user.role,
-      group_ids,
-      authorized_mailbox_ids,
-    });
+    const ctx = await buildHumanAuthzContext(orm, user);
+    c.set("authzContext", ctx);
     return next();
   };
 }
