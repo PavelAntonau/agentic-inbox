@@ -13,8 +13,9 @@
 // other users seeing your visibility setting would itself be a leak.
 
 import { Button, Loader, Text, useToastManager } from "~/ui";
-import { EyeIcon, SignOutIcon } from "@phosphor-icons/react";
+import { DevicesIcon, EyeIcon, SignOutIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { authClient } from "~/lib/auth-client";
 
 type Visibility = "everyone" | "contacts" | "nobody";
 
@@ -27,6 +28,41 @@ interface MeResponse {
   account_type: "personal" | "company";
   company: string | null;
   avatar_url?: string | null;
+}
+
+interface SessionRow {
+  id: string;
+  is_current: boolean;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+}
+
+/** Parse a UA string into a short human-readable device name. */
+function parseUaName(ua: string | null): string {
+  if (!ua) return "Unknown device";
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua)) return "iPad";
+  if (/Android/.test(ua)) return "Android";
+  if (/Mac/.test(ua)) return "Mac";
+  if (/Windows/.test(ua)) return "Windows PC";
+  if (/Linux/.test(ua)) return "Linux";
+  return "Browser";
+}
+
+/** Format epoch-ms as a relative time string. */
+function timeAgo(epochMs: number): string {
+  const diffMs = Date.now() - epochMs;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
 }
 
 const VISIBILITY_OPTIONS: {
@@ -61,6 +97,11 @@ export default function AccountRoute() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingVisibility, setSavingVisibility] = useState(false);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokingOthers, setRevokingOthers] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const toastManager = useToastManager();
 
   useEffect(() => {
@@ -85,6 +126,82 @@ export default function AccountRoute() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/users/me/sessions")
+      .then(async (r) => {
+        if (!r.ok) return; // non-fatal — sessions panel degrades gracefully
+        return r.json() as Promise<SessionRow[]>;
+      })
+      .then((data) => {
+        if (!cancelled && data) setSessions(data);
+      })
+      .catch(() => {
+        // sessions panel is non-critical — swallow silently
+      })
+      .finally(() => {
+        if (!cancelled) setSessionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleRevokeSession = async (sessionId: string) => {
+    setRevokingId(sessionId);
+    try {
+      const res = await fetch(`/api/users/me/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        toastManager.add({
+          title: "Failed to revoke session",
+          variant: "error",
+        });
+        return;
+      }
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      toastManager.add({ title: "Session revoked" });
+    } catch {
+      toastManager.add({ title: "Network error", variant: "error" });
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  const handleRevokeOthers = async () => {
+    setRevokingOthers(true);
+    try {
+      const res = await fetch("/api/users/me/sessions/revoke-others", {
+        method: "POST",
+      });
+      if (!res.ok) {
+        toastManager.add({
+          title: "Failed to sign out other sessions",
+          variant: "error",
+        });
+        return;
+      }
+      // Keep only the current session in UI state
+      setSessions((prev) => prev.filter((s) => s.is_current));
+      toastManager.add({ title: "Other sessions signed out" });
+    } catch {
+      toastManager.add({ title: "Network error", variant: "error" });
+    } finally {
+      setRevokingOthers(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await authClient.signOut();
+    } catch {
+      // best-effort — redirect regardless
+    }
+    window.location.href = "/login";
+  };
 
   const handleVisibilityChange = async (next: Visibility) => {
     if (!me || next === me.visibility) return;
@@ -206,6 +323,73 @@ export default function AccountRoute() {
         </fieldset>
       </section>
 
+      {/* Devices — active sessions */}
+      <section className="mb-6 rounded-panel border border-border bg-card p-6">
+        <div className="mb-1 flex items-center gap-2">
+          <DevicesIcon size={18} weight="duotone" className="text-text-muted" />
+          <h2 className="text-lg font-semibold text-text-bright">Devices</h2>
+        </div>
+        <p className="mb-4 text-sm text-text-muted">
+          Active sessions across your devices. Revoke any session you don't
+          recognise.
+        </p>
+
+        {sessions.length > 1 && (
+          <div className="mb-4">
+            <Button
+              variant="ghost"
+              onClick={() => void handleRevokeOthers()}
+              disabled={revokingOthers}
+            >
+              {revokingOthers ? "Signing out…" : "Sign out other sessions"}
+            </Button>
+          </div>
+        )}
+
+        {sessionsLoading ? (
+          <div className="flex justify-center py-4">
+            <Loader size="sm" />
+          </div>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-text-muted">No active sessions found.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {sessions.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-text-bright">
+                      {parseUaName(s.user_agent)}
+                    </span>
+                    {s.is_current && (
+                      <span className="rounded-full bg-kumo-brand/10 px-2 py-0.5 text-xs font-medium text-kumo-brand">
+                        this device
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 flex gap-3 text-xs text-text-muted">
+                    {s.ip_address && <span>{s.ip_address}</span>}
+                    <span>{timeAgo(s.updated_at)}</span>
+                  </div>
+                </div>
+                {!s.is_current && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => void handleRevokeSession(s.id)}
+                    disabled={revokingId === s.id}
+                  >
+                    {revokingId === s.id ? "…" : "Revoke"}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* Sign out */}
       <section className="mb-6 rounded-panel border border-border bg-card p-6">
         <div className="mb-3 flex items-center gap-2">
@@ -213,16 +397,15 @@ export default function AccountRoute() {
           <h2 className="text-lg font-semibold text-text-bright">Session</h2>
         </div>
         <p className="mb-4 text-sm text-text-muted">
-          Sign out of this device. Other devices keep their sessions until they
-          expire on their own.
+          Sign out of this device. Other sessions on other devices are not
+          affected.
         </p>
         <Button
           variant="ghost"
-          onClick={() => {
-            window.location.href = "/cdn-cgi/access/logout";
-          }}
+          onClick={() => void handleSignOut()}
+          disabled={signingOut}
         >
-          Sign out
+          {signingOut ? "Signing out…" : "Sign out"}
         </Button>
       </section>
 
