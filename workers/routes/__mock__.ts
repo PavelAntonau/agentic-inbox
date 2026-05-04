@@ -81,16 +81,20 @@ mockRouter.post("/inbox", async (c) => {
   if (!body.to || !body.from || !body.subject) {
     return c.json({ error: "to, from, subject required" }, 400);
   }
-  const raw = new Blob([
+  // Build the full RFC-822 message and pass its TOTAL byte length as
+  // rawSize. receiveEmail → streamToArrayBuffer reads up to rawSize bytes
+  // and throws "Stream exceeds declared size" if the stream produces more,
+  // so an undersized rawSize (e.g. body-only) breaks ingest.
+  const blob = new Blob([
     `From: ${body.from}\r\n`,
     `To: ${body.to}\r\n`,
     `Subject: ${body.subject}\r\n`,
     `\r\n`,
     body.body ?? "",
-  ]).stream();
+  ]);
   const { receiveEmail } = await import("../index");
   await receiveEmail(
-    { raw, rawSize: (body.body ?? "").length },
+    { raw: blob.stream(), rawSize: blob.size },
     c.env,
     c.executionCtx as ExecutionContext,
   );
