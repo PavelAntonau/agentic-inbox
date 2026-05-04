@@ -584,6 +584,24 @@ async function receiveEmail(
     return;
   }
 
+  // Inbox-policy gate (Phase 2 — F-PHASE3-006). When a D1 row exists for the
+  // recipient address, honour external_inbound_enabled. v1-only mailboxes
+  // (R2 key, no D1 row) keep the legacy "always-accept" behaviour because
+  // policy fields live in the D1 mailboxes table introduced by migration
+  // 0007. Failing closed for v1-only mailboxes would break every legacy
+  // address; the safer default is to enforce policy where it is configured.
+  const policyRow = await env.DB.prepare(
+    "SELECT external_inbound_enabled FROM mailboxes WHERE address = ?1",
+  )
+    .bind(mailboxId.toLowerCase())
+    .first<{ external_inbound_enabled: number | boolean }>();
+  if (policyRow && !policyRow.external_inbound_enabled) {
+    console.log(
+      `Bouncing email for ${mailboxId}: external_inbound_enabled=false`,
+    );
+    return;
+  }
+
   const stub = env.MAILBOX.get(env.MAILBOX.idFromName(mailboxId));
 
   const attachmentData: StoredAttachment[] = [];
