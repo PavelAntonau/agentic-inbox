@@ -844,6 +844,10 @@ app.route("/api/mailboxes", mailboxesRouter);
 // entire token surface; will be replaced by a session-connection-status view).
 // Source kept at workers/routes/tokens.ts for now; safe to remove in a follow-up.
 
+// Sessions router (Phase 1 — list/revoke sessions)
+const { default: sessionsRouter } = await import("./routes/sessions");
+app.route("/api/users/me/sessions", sessionsRouter);
+
 // Observability router (Phase 6 — admin obs panels)
 const { default: observabilityRouter } = await import("./routes/observability");
 app.route("/api/admin/obs", observabilityRouter);
