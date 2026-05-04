@@ -13,13 +13,11 @@
  *   POST /__mock/impersonate                            (back to alice)
  *   GET  /api/contacts                                  (alice's view: row now status='accepted')
  *
- * D12 — sender-blind accept: per the privacy directive the SENDER's
- * outgoing row is supposed to keep showing "pending" forever. The
- * current accept handler flips both sides (the mirror row plus the
- * original) to 'accepted' (workers/routes/contacts.ts:248-275). This
- * scenario records ground truth: it documents what the API actually
- * does today and would catch any future regression. If product chooses
- * to honour D12 strictly, the assertion below is the place to invert.
+ * D12 — sender-blind accept (FIXED 2026-05-04 — F-PHASE3-009 +
+ * F-PHASE3-010 landed). Per the privacy directive the SENDER's outgoing
+ * row keeps showing "pending" forever; only the RECIPIENT's mirror row
+ * flips to 'accepted'. The assertions below verify both the new mirror
+ * row at request time (009) and the sender-blind status (010).
  *
  * Per-run-unique recipient suffix avoids cross-run accept collisions —
  * the contacts table is keyed on (owner_user_id, contact_user_id) and
@@ -135,21 +133,11 @@ const scenario: Scenario = {
 
     // 5. As bob: GET /api/contacts.
     //
-    // FINDING F-PHASE3-009 — recipient cannot see incoming pending
-    // requests via /api/contacts. The endpoint filters strictly on
-    // `owner_user_id == ctx.user_id` (workers/routes/contacts.ts:86-91)
-    // and POST /api/contacts/request only inserts ONE row
-    // (owner=sender, contact=recipient, line 191-205). The UI's
-    // "Incoming" tab on /contacts therefore renders empty for the
-    // recipient until product writes the recipient-side mirror row at
-    // request time. The accept endpoint itself works regardless because
-    // it queries the SENDER's row directly (line 230-241), so the
-    // handshake CAN complete via the API even though no UI surface
-    // surfaces the pending request to the recipient.
-    //
-    // This scenario records the current state: bob's list is empty.
-    // When product fixes F-PHASE3-009 (insert mirror pending row), the
-    // assertion below will fail and surface the change.
+    // F-PHASE3-009 (FIXED) — POST /api/contacts/request now inserts the
+    // recipient's mirror row at request time (status='pending',
+    // initiated_by=sender). The recipient's GET /api/contacts therefore
+    // returns the pending row and the /contacts UI's "Incoming" tab can
+    // render it.
     const bobIncoming = (await ctx.browser.call("browser_evaluate", {
       expression: `(async () => {
         const res = await fetch('/api/contacts');
@@ -164,12 +152,35 @@ const scenario: Scenario = {
     const bobIncomingBody = JSON.parse(bobIncoming.body) as {
       contacts: ContactRow[];
     };
-    if (bobIncomingBody.contacts.length !== 0) {
+    if (bobIncomingBody.contacts.length !== 1) {
       throw new Error(
-        `F-PHASE3-009 may have shifted: bob's GET /api/contacts expected 0 rows pre-accept, got ${bobIncomingBody.contacts.length} — if product just landed the mirror-row fix, update this assertion.`,
+        `bob's GET /api/contacts expected 1 row (the alice→bob mirror), got ${bobIncomingBody.contacts.length}`,
       );
     }
-    ctx.log(`bob's GET /api/contacts empty (F-PHASE3-009 documented state) ✓`);
+    const bobIncomingRow = bobIncomingBody.contacts[0];
+    if (bobIncomingRow.owner_user_id !== bob.id) {
+      throw new Error(
+        `bob's incoming row owner_user_id expected ${bob.id}, got ${bobIncomingRow.owner_user_id}`,
+      );
+    }
+    if (bobIncomingRow.contact_user_id !== alice.user_id) {
+      throw new Error(
+        `bob's incoming row contact_user_id expected ${alice.user_id}, got ${bobIncomingRow.contact_user_id}`,
+      );
+    }
+    if (bobIncomingRow.status !== "pending") {
+      throw new Error(
+        `bob's incoming row status expected 'pending', got '${bobIncomingRow.status}'`,
+      );
+    }
+    if (bobIncomingRow.initiated_by !== alice.user_id) {
+      throw new Error(
+        `bob's incoming row initiated_by expected ${alice.user_id}, got ${bobIncomingRow.initiated_by}`,
+      );
+    }
+    ctx.log(
+      `bob's GET /api/contacts → 1 pending row, initiated_by=alice ✓ (F-PHASE3-009 fixed)`,
+    );
 
     // 6. As bob: POST /api/contacts/:aliceId/accept.
     //    Per the route comment, the :id parameter is the requester's user_id
@@ -207,18 +218,9 @@ const scenario: Scenario = {
     }
     ctx.log(`impersonate → alice ✓`);
 
-    // 8. Alice's view should now show bob row as 'accepted' with
-    //    accepted_at timestamp set.
-    //
-    // FINDING F-PHASE3-010 — D12 strict sender-blind not enforced.
-    // The plan's D12 directive (.scratch/requirements.md, line 61-72)
-    // specifies the sender's outgoing row stays "pending" forever from
-    // their view, regardless of recipient action. Today the accept
-    // handler flips BOTH sides (workers/routes/contacts.ts:248-275 —
-    // UPDATE original to 'accepted', plus mirror INSERT). Sender therefore
-    // sees the flip immediately. This scenario records the current
-    // observed behaviour — when D12 lands strictly, alice's row will
-    // stay 'pending' here and the assertion below inverts.
+    // 8a. Alice's view (sender) — D12 strict says her row stays 'pending'
+    //     forever, regardless of recipient action. F-PHASE3-010 fix: accept
+    //     handler no longer touches the sender's row.
     const aliceAfter = (await ctx.browser.call("browser_evaluate", {
       expression: `(async () => {
         const res = await fetch('/api/contacts');
@@ -228,28 +230,77 @@ const scenario: Scenario = {
     const aliceAfterBody = JSON.parse(aliceAfter.body) as {
       contacts: ContactRow[];
     };
-    const accepted = aliceAfterBody.contacts.find(
+    const aliceRow = aliceAfterBody.contacts.find(
       (r) => r.owner_user_id === alice.user_id && r.contact_user_id === bob.id,
     );
-    if (!accepted) {
+    if (!aliceRow) {
       throw new Error(
         `alice's row to bob missing after accept — got ${aliceAfterBody.contacts.length} rows`,
       );
     }
-    if (accepted.status !== "accepted") {
+    if (aliceRow.status !== "pending") {
       throw new Error(
-        `alice's row to bob expected 'accepted', got '${accepted.status}' — accept handler may have changed; check workers/routes/contacts.ts:248-275`,
+        `D12 sender-blind violated: alice's row to bob expected 'pending', got '${aliceRow.status}' — accept handler regressed F-PHASE3-010; check workers/routes/contacts.ts accept handler`,
       );
     }
-    if (typeof accepted.accepted_at !== "number") {
+    if (aliceRow.accepted_at !== null) {
       throw new Error(
-        `accepted_at expected number, got ${typeof accepted.accepted_at}`,
+        `D12 sender-blind violated: alice's row accepted_at expected null, got ${aliceRow.accepted_at}`,
       );
     }
     ctx.log(
-      `alice's row → status='accepted' accepted_at=${accepted.accepted_at} ✓`,
+      `alice's row → status='pending' accepted_at=null ✓ (D12 sender-blind, F-PHASE3-010 fixed)`,
     );
-    await ctx.screenshot("after-accept");
+    await ctx.screenshot("after-accept-alice-view");
+
+    // 8b. Switch to bob and verify HIS mirror row reflects the accept —
+    //     the only side that flips to 'accepted' under D12.
+    const impBob2 = (await ctx.browser.call("browser_evaluate", {
+      expression: `(async () => {
+        const res = await fetch('/__mock/impersonate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: ${JSON.stringify(bobEmail)} }),
+        });
+        return { status: res.status, body: await res.text() };
+      })()`,
+    })) as { status: number; body: string };
+    if (impBob2.status !== 200) {
+      throw new Error(
+        `impersonate(bob) #2 ${impBob2.status}: ${impBob2.body.slice(0, 200)}`,
+      );
+    }
+
+    const bobAfter = (await ctx.browser.call("browser_evaluate", {
+      expression: `(async () => {
+        const res = await fetch('/api/contacts');
+        return { status: res.status, body: await res.text() };
+      })()`,
+    })) as { status: number; body: string };
+    const bobAfterBody = JSON.parse(bobAfter.body) as {
+      contacts: ContactRow[];
+    };
+    const bobRow = bobAfterBody.contacts.find(
+      (r) => r.owner_user_id === bob.id && r.contact_user_id === alice.user_id,
+    );
+    if (!bobRow) {
+      throw new Error(
+        `bob's mirror row to alice missing after accept — got ${bobAfterBody.contacts.length} rows`,
+      );
+    }
+    if (bobRow.status !== "accepted") {
+      throw new Error(
+        `bob's mirror row expected 'accepted', got '${bobRow.status}' — accept handler regressed`,
+      );
+    }
+    if (typeof bobRow.accepted_at !== "number") {
+      throw new Error(
+        `bob's mirror row accepted_at expected number, got ${typeof bobRow.accepted_at}`,
+      );
+    }
+    ctx.log(
+      `bob's mirror row → status='accepted' accepted_at=${bobRow.accepted_at} ✓`,
+    );
 
     // No probe-shaped console errors expected — every fetch above is a 2xx.
     const consoleSummary = await ctx.captureConsole("after-handshake");
