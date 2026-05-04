@@ -23,6 +23,13 @@ import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "../lib/mocks/email-binding";
 import type { Env } from "../types";
+// T1.6 — pre-registered trusted MCP clients. Same module is consumed by
+// `scripts/seed-trusted-clients.ts` (writes the rows) and by the consent /
+// Connected-Agents UI (reads the metadata). Importing the Set here makes
+// the four clients immutable through the plugin's CRUD endpoints (per
+// `@better-auth/oauth-provider` ~line 1479: trusted clients must be
+// updated manually, not via DCR).
+import { TRUSTED_CLIENT_IDS } from "~/lib/cached-trusted-clients";
 
 /**
  * Static OAuth JWT signing key, parsed from `env.OAUTH_JWT_SIGNING_KEY`. The
@@ -282,6 +289,12 @@ export function createAuth(env: Env): ServerAuth {
           "mcp:profile:read",
         ],
         validAudiences: ["https://mail.actionnow.ai/mcp"],
+        // T1.6 — Claude Code, ChatGPT desktop, Cursor, ActionNowAI iOS.
+        // Set is constructed once at module import; the plugin reads it on
+        // each request via `.has(client_id)` to gate the three CRUD guards
+        // (delete / update / rotate-secret) so trusted-client metadata can
+        // only change via direct SQL UPDATE.
+        cachedTrustedClients: TRUSTED_CLIENT_IDS as Set<string>,
         // We mount `/.well-known/oauth-authorization-server` manually at the
         // site root in T2.2 because better-auth's basePath is `/api/auth`,
         // and RFC 8414 §3 places the discovery doc at the issuer root.
