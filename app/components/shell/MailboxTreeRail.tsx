@@ -17,16 +17,13 @@
 // with the header logo).
 
 import { Loader, Button } from "~/ui";
-import { EyeIcon, LockIcon } from "@phosphor-icons/react";
+import { EyeIcon, LockIcon, PlusIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router";
 import { useState } from "react";
 import { NavLink } from "react-router";
 import GroupSection from "~/components/shell/GroupSection";
 import MailboxNode from "~/components/shell/MailboxNode";
 import CreateMailboxDialog from "~/components/mailbox/CreateMailboxDialog";
-import ComposeIcon from "~/components/branding/ComposeIcon";
-import { useUIStore } from "~/hooks/useUIStore";
 import type { MailboxTreePayload } from "~/routes/_app/api.tree";
 
 const TREE_QUERY_KEY = ["mailbox-tree"] as const;
@@ -52,8 +49,6 @@ async function fetchMe(): Promise<{
 export default function MailboxTreeRail() {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
-  const { mailboxId } = useParams<{ mailboxId: string }>();
-  const { startCompose } = useUIStore();
 
   const { data: tree, isLoading: treeLoading } = useQuery({
     queryKey: TREE_QUERY_KEY,
@@ -110,16 +105,14 @@ export default function MailboxTreeRail() {
         All Mailboxes
       </NavLink>
 
-      {/* New mailbox + Compose — both primary actions, both branded with
-          the mailbox-as-robot ComposeIcon (light/dark theme variants). The
-          robot is the "selector" affordance for creating a mailbox; the
-          second button is the always-visible desktop entry point for
-          composing a new email (the existing Compose lived only inside
-          the mobile sidebar drawer, which desktop users never opened). */}
+      {/* New mailbox — sole primary action in the mailbox section. The
+          Compose entry point lives inside the Inbox view header (UAT
+          round-3 directive). Plain plus icon — the mailbox-as-robot
+          brand mark moved to the home welcome island. */}
       <Button
         variant="primary"
         size="sm"
-        icon={<ComposeIcon size={20} />}
+        icon={<PlusIcon size={16} weight="bold" />}
         onClick={() => setCreateOpen(true)}
         className="w-full justify-center"
         aria-label="Create new mailbox"
@@ -127,19 +120,6 @@ export default function MailboxTreeRail() {
       >
         New mailbox
       </Button>
-      {mailboxId && (
-        <Button
-          variant="primary"
-          size="sm"
-          icon={<ComposeIcon size={20} />}
-          onClick={() => startCompose()}
-          className="w-full justify-center mt-1"
-          aria-label="Compose new email"
-          title="Compose new email"
-        >
-          Compose
-        </Button>
-      )}
 
       <div className="border-t border-border my-1" />
 

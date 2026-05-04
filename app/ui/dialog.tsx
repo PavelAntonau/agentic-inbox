@@ -81,7 +81,7 @@ export function dialogVariants({
 }: KumoDialogVariantsProps = {}): string {
   return cn(
     // Base styles — matches kumo chunk exactly
-    "shadow-m fixed top-1/2 left-1/2 w-full sm:w-auto",
+    "shadow-m fixed top-1/2 left-1/2 w-full sm:w-auto z-[210]",
     "max-w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-3rem)]",
     "-translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl",
     "bg-kumo-base text-kumo-default duration-150",
@@ -119,8 +119,12 @@ function DialogContent({
           --color-kumo-overlay as a near-white in BOTH modes, which read as a
           white frosted-glass haze in dark mode (UAT round 2, item D). Using
           a Tailwind black/alpha + dark: variant produces the expected dark
-          dimmer in light mode and the deeper dim in dark mode. */}
-      <DialogBase.Backdrop className="fixed inset-0 bg-black/50 dark:bg-black/70 transition-all duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+          dimmer in light mode and the deeper dim in dark mode.
+          UAT round-3: explicit z-[200] guarantees the backdrop sits above
+          every in-app stacking context (sticky headers, popovers using
+          z-50, the email panel) so the overlay covers the WHOLE viewport
+          and intercepts every click. The popup itself uses z-[210]. */}
+      <DialogBase.Backdrop className="fixed inset-0 z-[200] bg-black/55 dark:bg-black/75 transition-all duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
       <DialogBase.Popup
         render={<div role={role} />}
         className={cn(dialogVariants({ size }), className)}

@@ -11,6 +11,7 @@ import {
   EnvelopeSimpleIcon,
   FileIcon,
   PaperPlaneTiltIcon,
+  PlusIcon,
   StarIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
@@ -289,15 +290,28 @@ export default function EmailListRoute() {
       selectedEmailId={selectedEmailId}
       isComposing={isComposing}
     >
-      {/* Folder header */}
+      {/* Folder header — persistent "+ Compose" button (UAT round-3): always
+          visible whether the folder has emails or not. The empty-state CTA
+          inside FolderEmptyState was the only entry point in round-2, so
+          the moment messages arrived the user lost the affordance. */}
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-border shrink-0 md:px-5">
         <h1 className="text-lg font-semibold text-text-bright">{folderName}</h1>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           {totalCount > 0 && (
             <span className="text-sm text-text-muted mr-2 hidden sm:inline">
               {totalCount} conversation{totalCount !== 1 ? "s" : ""}
             </span>
           )}
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<PlusIcon size={14} weight="bold" />}
+            onClick={() => startCompose()}
+            aria-label="Compose new email"
+            title="Compose new email"
+          >
+            Compose
+          </Button>
           <Tooltip
             content={isRefreshing ? "Refreshing..." : "Refresh"}
             side="bottom"

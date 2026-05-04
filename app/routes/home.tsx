@@ -17,6 +17,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import api from "~/services/api";
 import { useCreateMailbox, useMailboxes } from "~/queries/mailboxes";
 import { queryKeys } from "~/queries/keys";
+import ComposeIcon from "~/components/branding/ComposeIcon";
 
 export function meta() {
   return [{ title: "Agentic Inbox" }];
@@ -126,6 +127,14 @@ export default function HomeRoute() {
         ) : (
           <div className="rounded-panel border border-border bg-card py-20 px-10 md:px-12">
             <div className="flex flex-col items-center text-center">
+              {/* Brand robot pair — the mailbox-as-robot mark belongs on the
+                  central welcome island, not on the rail buttons (UAT
+                  round-3 directive). Two robots, mirrored, evoke the
+                  "agent + inbox" pairing the product is about. */}
+              <div className="mb-5 flex items-end justify-center gap-3">
+                <ComposeIcon size={56} className="opacity-90" />
+                <ComposeIcon size={56} className="opacity-90 -scale-x-100" />
+              </div>
               {/* Show Create CTA only when there are no mailboxes yet and the
                   app is not in managed-address mode. */}
               {!isConfigured && mailboxes.length === 0 && (

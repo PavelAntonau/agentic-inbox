@@ -8,7 +8,7 @@
 // result to navigate. Future iterations will broaden the index to emails,
 // contacts, and a semantic-search backend.
 
-import { Dialog } from "~/ui";
+import { Dialog, Loader } from "~/ui";
 import { EnvelopeIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -70,7 +70,7 @@ export default function GlobalSearch() {
     return () => window.clearTimeout(id);
   }, [open]);
 
-  const { data: tree } = useQuery({
+  const { data: tree, isFetching: isSearchFetching } = useQuery({
     queryKey: SEARCH_QUERY_KEY,
     queryFn: fetchTree,
     staleTime: 60_000,
@@ -100,29 +100,34 @@ export default function GlobalSearch() {
 
   return (
     <>
-      {/* Trigger — looks like a search input, behaves like a button. */}
+      {/* Trigger — looks like a search input, behaves like a button. UAT
+          round-3: bumped ~20 % vs round-2 (max-w-md → max-w-lg, base text
+          size, taller tap target) — the previous size still read as a
+          decorative pill rather than the primary command surface. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open global search"
         title={`Search (${shortcutLabel})`}
-        className="flex items-center gap-2.5 w-full max-w-md px-3 py-1.5 rounded-lg border border-border bg-card-light hover:bg-tx-card-hover transition-colors text-text-muted shadow-sm cursor-pointer"
+        className="flex items-center gap-3 w-full max-w-lg px-4 py-2.5 rounded-lg border border-border bg-card-light hover:bg-tx-card-hover transition-colors text-text-muted shadow-sm cursor-pointer"
       >
-        <MagnifyingGlassIcon size={16} className="shrink-0" />
-        <span className="text-sm flex-1 text-left truncate">
+        <MagnifyingGlassIcon size={18} className="shrink-0" />
+        <span className="text-sm md:text-base flex-1 text-left truncate">
           Search mailboxes and more...
         </span>
-        <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium bg-card border border-border text-text-muted shrink-0">
+        <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-card border border-border text-text-muted shrink-0">
           {shortcutLabel}
         </kbd>
       </button>
 
-      {/* Modal — Spotlight-style command palette. */}
+      {/* Modal — Spotlight-style command palette. UAT round-3: ~20 % wider
+          (lg → custom 38 rem), taller results pane (max-h-96 → max-h-[28rem]),
+          and a subtle low-saturation spinner during background fetch. */}
       <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog size="lg" className="p-0 overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+        <Dialog size="lg" className="p-0 overflow-hidden sm:!min-w-[38rem]">
+          <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
             <MagnifyingGlassIcon
-              size={18}
+              size={20}
               className="text-text-muted shrink-0"
             />
             <input
@@ -131,17 +136,29 @@ export default function GlobalSearch() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search mailboxes..."
-              className="flex-1 bg-transparent outline-none text-text-bright placeholder:text-text-muted text-sm"
+              className="flex-1 bg-transparent outline-none text-text-bright placeholder:text-text-muted text-base"
               aria-label="Search query"
             />
-            <kbd className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-card-light border border-border text-text-muted shrink-0">
+            {isSearchFetching && (
+              /* Subtle, low-saturation spinner — sized smaller than typical
+                 (sm) and dimmed to ~55 % so it's noticeable without
+                 stealing focus from the input. */
+              <span
+                className="shrink-0 opacity-55"
+                aria-label="Searching"
+                role="status"
+              >
+                <Loader size="sm" />
+              </span>
+            )}
+            <kbd className="px-1.5 py-0.5 rounded text-xs font-medium bg-card-light border border-border text-text-muted shrink-0">
               esc
             </kbd>
           </div>
 
-          <div className="max-h-96 overflow-y-auto p-2">
+          <div className="max-h-[28rem] overflow-y-auto p-2">
             {filtered.length === 0 ? (
-              <div className="px-3 py-10 text-center text-sm text-text-muted">
+              <div className="px-3 py-12 text-center text-sm text-text-muted">
                 {mailboxes.length === 0
                   ? "No mailboxes yet — create one from the rail."
                   : `No mailbox matches "${query.trim()}"`}
