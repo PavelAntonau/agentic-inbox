@@ -24,13 +24,13 @@ const NORMALIZED_SUBJECT_SQL = `LOWER(TRIM(
 ))`;
 
 const ALLOWED_SORT_COLUMNS = [
-	"id",
-	"subject",
-	"sender",
-	"recipient",
-	"date",
-	"read",
-	"starred",
+  "id",
+  "subject",
+  "sender",
+  "recipient",
+  "date",
+  "read",
+  "starred",
 ] as const;
 
 type SortColumn = (typeof ALLOWED_SORT_COLUMNS)[number];
@@ -40,205 +40,256 @@ type SortColumn = (typeof ALLOWED_SORT_COLUMNS)[number];
  * ORDER BY construction (no string interpolation into SQL).
  */
 const SORT_COLUMN_MAP = {
-	id: schema.emails.id,
-	subject: schema.emails.subject,
-	sender: schema.emails.sender,
-	recipient: schema.emails.recipient,
-	date: schema.emails.date,
-	read: schema.emails.read,
-	starred: schema.emails.starred,
-} satisfies Record<SortColumn, typeof schema.emails[keyof typeof schema.emails]>;
+  id: schema.emails.id,
+  subject: schema.emails.subject,
+  sender: schema.emails.sender,
+  recipient: schema.emails.recipient,
+  date: schema.emails.date,
+  read: schema.emails.read,
+  starred: schema.emails.starred,
+} satisfies Record<
+  SortColumn,
+  (typeof schema.emails)[keyof typeof schema.emails]
+>;
 
 interface SearchFilterOptions {
-	query: string;
-	folder?: string;
-	from?: string;
-	to?: string;
-	subject?: string;
-	date_start?: string;
-	date_end?: string;
-	is_read?: boolean;
-	is_starred?: boolean;
-	has_attachment?: boolean;
+  query: string;
+  folder?: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  date_start?: string;
+  date_end?: string;
+  is_read?: boolean;
+  is_starred?: boolean;
+  has_attachment?: boolean;
 }
 
 interface GetEmailsOptions {
-	folder?: string;
-	thread_id?: string;
-	page?: number;
-	limit?: number;
-	sortColumn?: SortColumn;
-	sortDirection?: "ASC" | "DESC";
+  folder?: string;
+  thread_id?: string;
+  page?: number;
+  limit?: number;
+  sortColumn?: SortColumn;
+  sortDirection?: "ASC" | "DESC";
 }
 
 interface EmailData {
-	id: string;
-	subject: string;
-	sender: string;
-	recipient: string;
-	cc?: string | null;
-	bcc?: string | null;
-	date: string;
-	body: string;
-	read?: boolean;
-	starred?: boolean;
-	in_reply_to?: string | null;
-	email_references?: string | null;
-	thread_id?: string | null;
-	message_id?: string | null;
-	raw_headers?: string | null;
+  id: string;
+  subject: string;
+  sender: string;
+  recipient: string;
+  cc?: string | null;
+  bcc?: string | null;
+  date: string;
+  body: string;
+  read?: boolean;
+  starred?: boolean;
+  in_reply_to?: string | null;
+  email_references?: string | null;
+  thread_id?: string | null;
+  message_id?: string | null;
+  raw_headers?: string | null;
+}
+
+/**
+ * Payload for a new email appended to a thread via appendToThread.
+ * id is optional — a UUID is generated if omitted.
+ */
+export interface NewEmail {
+  id?: string;
+  folder_id: string;
+  subject?: string | null;
+  sender: string;
+  recipient: string;
+  cc?: string | null;
+  bcc?: string | null;
+  date: string;
+  body?: string | null;
+  in_reply_to?: string | null;
+  email_references?: string | null;
+  message_id?: string | null;
+  raw_headers?: string | null;
+  read?: boolean;
+}
+
+// ── Thread CAS error classes ───────────────────────────────────────
+
+/**
+ * Thrown when the referenced thread does not exist in the mailbox.
+ * Maps to HTTP 404 at the route layer.
+ */
+export class ThreadNotFoundError extends Error {
+  readonly threadId: string;
+  constructor(threadId: string) {
+    super(`Thread not found: ${threadId}`);
+    this.name = "ThreadNotFoundError";
+    this.threadId = threadId;
+  }
+}
+
+/**
+ * Thrown when the CAS version guard fails (optimistic concurrency conflict).
+ * Maps to HTTP 409 at the route layer.
+ * current_tip / current_version reflect the state that won the race.
+ */
+export class ConflictError extends Error {
+  readonly current_tip: string | null;
+  readonly current_version: number;
+  constructor(currentTip: string | null, currentVersion: number) {
+    super(`Thread version conflict — current version is ${currentVersion}`);
+    this.name = "ConflictError";
+    this.current_tip = currentTip;
+    this.current_version = currentVersion;
+  }
 }
 
 interface AttachmentData {
-	id: string;
-	email_id: string;
-	filename: string;
-	mimetype: string;
-	size: number;
-	content_id?: string | null;
-	disposition?: string | null;
+  id: string;
+  email_id: string;
+  filename: string;
+  mimetype: string;
+  size: number;
+  content_id?: string | null;
+  disposition?: string | null;
 }
 
 export class MailboxDO extends DurableObject<Env> {
-	declare __DURABLE_OBJECT_BRAND: never;
-	db: ReturnType<typeof drizzle>;
+  declare __DURABLE_OBJECT_BRAND: never;
+  db: ReturnType<typeof drizzle>;
 
-	constructor(state: DurableObjectState, env: Env) {
-		super(state, env);
-		this.db = drizzle(this.ctx.storage, { schema });
-		applyMigrations(this.ctx.storage.sql, mailboxMigrations, this.ctx.storage);
-	}
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env);
+    this.db = drizzle(this.ctx.storage, { schema });
+    applyMigrations(this.ctx.storage.sql, mailboxMigrations, this.ctx.storage);
+  }
 
-	// ── Email CRUD (Drizzle) ───────────────────────────────────────
+  // ── Email CRUD (Drizzle) ───────────────────────────────────────
 
-	async getEmails(options: GetEmailsOptions = {}) {
-		const {
-			folder,
-			thread_id,
-			page = 1,
-			limit: rawLimit = 25,
-			sortColumn: rawSortColumn = "date",
-			sortDirection = "DESC",
-		} = options;
+  async getEmails(options: GetEmailsOptions = {}) {
+    const {
+      folder,
+      thread_id,
+      page = 1,
+      limit: rawLimit = 25,
+      sortColumn: rawSortColumn = "date",
+      sortDirection = "DESC",
+    } = options;
 
-		// Cap pagination limit to prevent unbounded queries
-		const limit = Math.min(Math.max(rawLimit, 1), 100);
+    // Cap pagination limit to prevent unbounded queries
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
 
-		const sortColumn: SortColumn = ALLOWED_SORT_COLUMNS.includes(
-			rawSortColumn as SortColumn,
-		)
-			? rawSortColumn
-			: "date";
+    const sortColumn: SortColumn = ALLOWED_SORT_COLUMNS.includes(
+      rawSortColumn as SortColumn,
+    )
+      ? rawSortColumn
+      : "date";
 
-		const offset = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
-		const conditions: SQL[] = [];
-		if (folder) {
-			conditions.push(
-				sql`${schema.emails.folder_id} = (SELECT id FROM folders WHERE name = ${folder} OR id = ${folder} LIMIT 1)`,
-			);
-		}
-		if (thread_id) {
-			conditions.push(eq(schema.emails.thread_id, thread_id));
-		}
+    const conditions: SQL[] = [];
+    if (folder) {
+      conditions.push(
+        sql`${schema.emails.folder_id} = (SELECT id FROM folders WHERE name = ${folder} OR id = ${folder} LIMIT 1)`,
+      );
+    }
+    if (thread_id) {
+      conditions.push(eq(schema.emails.thread_id, thread_id));
+    }
 
-		const orderCol = SORT_COLUMN_MAP[sortColumn];
-		const orderDir = sortDirection === "ASC" ? asc(orderCol) : desc(orderCol);
+    const orderCol = SORT_COLUMN_MAP[sortColumn];
+    const orderDir = sortDirection === "ASC" ? asc(orderCol) : desc(orderCol);
 
-		const result = this.db
-			.select({
-				id: schema.emails.id,
-				subject: schema.emails.subject,
-				sender: schema.emails.sender,
-				recipient: schema.emails.recipient,
-				cc: schema.emails.cc,
-				bcc: schema.emails.bcc,
-				date: schema.emails.date,
-				read: schema.emails.read,
-				starred: schema.emails.starred,
-				in_reply_to: schema.emails.in_reply_to,
-				email_references: schema.emails.email_references,
-				thread_id: schema.emails.thread_id,
-				folder_id: schema.emails.folder_id,
-				snippet: sql<string>`SUBSTR(${schema.emails.body}, 1, 300)`,
-			})
-			.from(schema.emails)
-			.where(conditions.length > 0 ? and(...conditions) : undefined)
-			.orderBy(orderDir)
-			.limit(limit)
-			.offset(offset)
-			.all();
+    const result = this.db
+      .select({
+        id: schema.emails.id,
+        subject: schema.emails.subject,
+        sender: schema.emails.sender,
+        recipient: schema.emails.recipient,
+        cc: schema.emails.cc,
+        bcc: schema.emails.bcc,
+        date: schema.emails.date,
+        read: schema.emails.read,
+        starred: schema.emails.starred,
+        in_reply_to: schema.emails.in_reply_to,
+        email_references: schema.emails.email_references,
+        thread_id: schema.emails.thread_id,
+        folder_id: schema.emails.folder_id,
+        snippet: sql<string>`SUBSTR(${schema.emails.body}, 1, 300)`,
+      })
+      .from(schema.emails)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(orderDir)
+      .limit(limit)
+      .offset(offset)
+      .all();
 
-		return result.map((email) => ({
-			...email,
-			read: !!email.read,
-			starred: !!email.starred,
-		}));
-	}
+    return result.map((email) => ({
+      ...email,
+      read: !!email.read,
+      starred: !!email.starred,
+    }));
+  }
 
-	/**
-	 * Count total emails matching the given filters (for pagination).
-	 */
-	async countEmails(options: { folder?: string; thread_id?: string } = {}) {
-		const { folder, thread_id } = options;
-		const conditions: string[] = [];
-		const params: (string | number)[] = [];
+  /**
+   * Count total emails matching the given filters (for pagination).
+   */
+  async countEmails(options: { folder?: string; thread_id?: string } = {}) {
+    const { folder, thread_id } = options;
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
 
-		if (folder) {
-			conditions.push(
-				"folder_id = (SELECT id FROM folders WHERE name = ?1 OR id = ?1 LIMIT 1)",
-			);
-			params.push(folder);
-		}
+    if (folder) {
+      conditions.push(
+        "folder_id = (SELECT id FROM folders WHERE name = ?1 OR id = ?1 LIMIT 1)",
+      );
+      params.push(folder);
+    }
 
-		if (thread_id) {
-			conditions.push(`thread_id = ?${params.length + 1}`);
-			params.push(thread_id);
-		}
+    if (thread_id) {
+      conditions.push(`thread_id = ?${params.length + 1}`);
+      params.push(thread_id);
+    }
 
-		const where =
-			conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-		const row = [
-			...this.ctx.storage.sql.exec(
-				`SELECT COUNT(*) as total FROM emails ${where}`,
-				...params,
-			),
-		][0] as { total: number } | undefined;
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const row = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT COUNT(*) as total FROM emails ${where}`,
+        ...params,
+      ),
+    ][0] as { total: number } | undefined;
 
-		return row?.total ?? 0;
-	}
+    return row?.total ?? 0;
+  }
 
-	// ── Threaded queries (raw SQL — too complex for Drizzle's builder) ──
+  // ── Threaded queries (raw SQL — too complex for Drizzle's builder) ──
 
-	async getThreadedEmails(options: GetEmailsOptions = {}) {
-		const {
-			folder,
-			page = 1,
-			limit: rawLimit = 25,
-		} = options;
-		const limit = Math.min(Math.max(rawLimit, 1), 100);
+  async getThreadedEmails(options: GetEmailsOptions = {}) {
+    const { folder, page = 1, limit: rawLimit = 25 } = options;
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
 
-		if (!folder) {
-			// Fallback to regular getEmails if no folder specified
-			return this.getEmails(options);
-		}
+    if (!folder) {
+      // Fallback to regular getEmails if no folder specified
+      return this.getEmails(options);
+    }
 
-		const offset = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
-		// Thread grouping strategy:
-		// For DRAFT folder: group by in_reply_to (the email being replied to).
-		//   This ensures reply-drafts to different emails stay separate, even if
-		//   they share a thread_id or subject. New drafts (no in_reply_to) each
-		//   get their own group via their unique id.
-		// For other folders:
-		//   1. Primary: group by thread_id (from email threading headers)
-		//   2. Fallback: group by normalized subject (strips Re:/Fwd:/FW: prefixes)
-		//      for legacy emails that lack threading headers (thread_id IS NULL).
-		const isDraftFolder = folder === Folders.DRAFT;
+    // Thread grouping strategy:
+    // For DRAFT folder: group by in_reply_to (the email being replied to).
+    //   This ensures reply-drafts to different emails stay separate, even if
+    //   they share a thread_id or subject. New drafts (no in_reply_to) each
+    //   get their own group via their unique id.
+    // For other folders:
+    //   1. Primary: group by thread_id (from email threading headers)
+    //   2. Fallback: group by normalized subject (strips Re:/Fwd:/FW: prefixes)
+    //      for legacy emails that lack threading headers (thread_id IS NULL).
+    const isDraftFolder = folder === Folders.DRAFT;
 
-		if (isDraftFolder) {
-			const result = this.ctx.storage.sql.exec(
-				`WITH
+    if (isDraftFolder) {
+      const result = this.ctx.storage.sql.exec(
+        `WITH
 				folder_emails AS (
 					SELECT *,
 						COALESCE(in_reply_to, id) as draft_group_key
@@ -274,23 +325,25 @@ export class MailboxDO extends DurableObject<Env> {
 				WHERE lp.rn = 1
 				ORDER BY lp.date DESC
 				LIMIT ?2 OFFSET ?3`,
-				folder, limit, offset
-			);
+        folder,
+        limit,
+        offset,
+      );
 
-			const rows = [...result];
-			return rows.map((row: any) => ({
-				...row,
-				read: !!row.read,
-				starred: !!row.starred,
-				thread_count: row.thread_count || 1,
-				thread_unread_count: row.thread_unread_count || 0,
-				participants: row.participants || row.sender,
-			}));
-		}
+      const rows = [...result];
+      return rows.map((row: any) => ({
+        ...row,
+        read: !!row.read,
+        starred: !!row.starred,
+        thread_count: row.thread_count || 1,
+        thread_unread_count: row.thread_unread_count || 0,
+        participants: row.participants || row.sender,
+      }));
+    }
 
-		// Non-draft folders: full threading logic
-		const result = this.ctx.storage.sql.exec(
-			`WITH
+    // Non-draft folders: full threading logic
+    const result = this.ctx.storage.sql.exec(
+      `WITH
 			folder_emails AS (
 				SELECT *,
 					COALESCE(thread_id, id) as raw_thread_id,
@@ -369,44 +422,46 @@ export class MailboxDO extends DurableObject<Env> {
 			WHERE lif.rn = 1
 			ORDER BY lif.date DESC
 			LIMIT ?2 OFFSET ?3`,
-			folder, limit, offset
-		);
+      folder,
+      limit,
+      offset,
+    );
 
-		const rows = [...result];
-		return rows.map((row: any) => ({
-			...row,
-			read: !!row.read,
-			starred: !!row.starred,
-			thread_count: row.thread_count || 1,
-			thread_unread_count: row.thread_unread_count || 0,
-			participants: row.participants || row.sender,
-			needs_reply: !!row.needs_reply,
-			has_draft: !!row.has_draft,
-		}));
-	}
+    const rows = [...result];
+    return rows.map((row: any) => ({
+      ...row,
+      read: !!row.read,
+      starred: !!row.starred,
+      thread_count: row.thread_count || 1,
+      thread_unread_count: row.thread_unread_count || 0,
+      participants: row.participants || row.sender,
+      needs_reply: !!row.needs_reply,
+      has_draft: !!row.has_draft,
+    }));
+  }
 
-	/**
-	 * Count threaded conversations in a folder (for pagination).
-	 * Returns the number of conversation groups, not individual emails.
-	 */
-	async countThreadedEmails(folder: string) {
-		const isDraftFolder = folder === Folders.DRAFT;
+  /**
+   * Count threaded conversations in a folder (for pagination).
+   * Returns the number of conversation groups, not individual emails.
+   */
+  async countThreadedEmails(folder: string) {
+    const isDraftFolder = folder === Folders.DRAFT;
 
-		if (isDraftFolder) {
-			const row = [
-				...this.ctx.storage.sql.exec(
-					`SELECT COUNT(DISTINCT COALESCE(in_reply_to, id)) as total
+    if (isDraftFolder) {
+      const row = [
+        ...this.ctx.storage.sql.exec(
+          `SELECT COUNT(DISTINCT COALESCE(in_reply_to, id)) as total
 					 FROM emails
 					 WHERE folder_id = (SELECT id FROM folders WHERE name = ?1 OR id = ?1 LIMIT 1)`,
-					folder,
-				),
-			][0] as { total: number } | undefined;
-			return row?.total ?? 0;
-		}
+          folder,
+        ),
+      ][0] as { total: number } | undefined;
+      return row?.total ?? 0;
+    }
 
-		const row = [
-			...this.ctx.storage.sql.exec(
-				`WITH
+    const row = [
+      ...this.ctx.storage.sql.exec(
+        `WITH
 				folder_emails AS (
 					SELECT
 						COALESCE(thread_id, id) as raw_thread_id,
@@ -428,281 +483,326 @@ export class MailboxDO extends DurableObject<Env> {
 				)
 				SELECT COUNT(DISTINCT conversation_id) as total
 				FROM thread_to_conversation`,
-				folder,
-			),
-		][0] as { total: number } | undefined;
-		return row?.total ?? 0;
-	}
+        folder,
+      ),
+    ][0] as { total: number } | undefined;
+    return row?.total ?? 0;
+  }
 
-	// ── Single email operations (Drizzle) ──────────────────────────
+  // ── Single email operations (Drizzle) ──────────────────────────
 
-	async getEmail(id: string) {
-		const email = this.db
-			.select()
-			.from(schema.emails)
-			.where(eq(schema.emails.id, id))
-			.get();
+  async getEmail(id: string) {
+    const email = this.db
+      .select()
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id))
+      .get();
 
-		if (!email) return null;
+    if (!email) return null;
 
-		const emailAttachments = this.db
-			.select()
-			.from(schema.attachments)
-			.where(eq(schema.attachments.email_id, id))
-			.all();
+    const emailAttachments = this.db
+      .select()
+      .from(schema.attachments)
+      .where(eq(schema.attachments.email_id, id))
+      .all();
 
-		return {
-			...email,
-			read: !!email.read,
-			starred: !!email.starred,
-			attachments: emailAttachments,
-		};
-	}
+    return {
+      ...email,
+      read: !!email.read,
+      starred: !!email.starred,
+      attachments: emailAttachments,
+    };
+  }
 
-	/**
-	 * Fetch all emails in a thread with full bodies and attachments in
-	 * two queries (one for emails, one for attachments) instead of
-	 * N+1 individual getEmail calls.
-	 */
-	async getThreadEmails(threadId: string) {
-		const emailRows = [
-			...this.ctx.storage.sql.exec(
-				`SELECT * FROM emails WHERE thread_id = ?1 ORDER BY date ASC`,
-				threadId,
-			),
-		] as any[];
+  /**
+   * Fetch all emails in a thread with full bodies and attachments in
+   * two queries (one for emails, one for attachments) instead of
+   * N+1 individual getEmail calls.
+   */
+  async getThreadEmails(threadId: string) {
+    const emailRows = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT * FROM emails WHERE thread_id = ?1 ORDER BY date ASC`,
+        threadId,
+      ),
+    ] as any[];
 
-		if (emailRows.length === 0) return [];
+    if (emailRows.length === 0) return [];
 
-		const emailIds = emailRows.map((e) => e.id as string);
+    const emailIds = emailRows.map((e) => e.id as string);
 
-		// Batch-fetch all attachments for the thread in a single query
-		const placeholders = emailIds.map((_, i) => `?${i + 1}`).join(",");
-		const attachmentRows = [
-			...this.ctx.storage.sql.exec(
-				`SELECT * FROM attachments WHERE email_id IN (${placeholders})`,
-				...emailIds,
-			),
-		] as any[];
+    // Batch-fetch all attachments for the thread in a single query
+    const placeholders = emailIds.map((_, i) => `?${i + 1}`).join(",");
+    const attachmentRows = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT * FROM attachments WHERE email_id IN (${placeholders})`,
+        ...emailIds,
+      ),
+    ] as any[];
 
-		// Group attachments by email_id
-		const attachmentsByEmail = new Map<string, any[]>();
-		for (const att of attachmentRows) {
-			const list = attachmentsByEmail.get(att.email_id) || [];
-			list.push(att);
-			attachmentsByEmail.set(att.email_id, list);
-		}
+    // Group attachments by email_id
+    const attachmentsByEmail = new Map<string, any[]>();
+    for (const att of attachmentRows) {
+      const list = attachmentsByEmail.get(att.email_id) || [];
+      list.push(att);
+      attachmentsByEmail.set(att.email_id, list);
+    }
 
-		return emailRows.map((email) => ({
-			...email,
-			read: !!email.read,
-			starred: !!email.starred,
-			attachments: attachmentsByEmail.get(email.id) || [],
-		}));
-	}
+    return emailRows.map((email) => ({
+      ...email,
+      read: !!email.read,
+      starred: !!email.starred,
+      attachments: attachmentsByEmail.get(email.id) || [],
+    }));
+  }
 
-	async updateEmail(
-		id: string,
-		{ read, starred }: { read?: boolean; starred?: boolean },
-	) {
-		const data: { read?: number; starred?: number } = {};
-		if (read !== undefined) {
-			data.read = read ? 1 : 0;
-		}
-		if (starred !== undefined) {
-			data.starred = starred ? 1 : 0;
-		}
+  async updateEmail(
+    id: string,
+    { read, starred }: { read?: boolean; starred?: boolean },
+  ) {
+    const data: { read?: number; starred?: number } = {};
+    if (read !== undefined) {
+      data.read = read ? 1 : 0;
+    }
+    if (starred !== undefined) {
+      data.starred = starred ? 1 : 0;
+    }
 
-		if (Object.keys(data).length === 0) {
-			return this.getEmail(id);
-		}
+    if (Object.keys(data).length === 0) {
+      return this.getEmail(id);
+    }
 
-		this.db
-			.update(schema.emails)
-			.set(data)
-			.where(eq(schema.emails.id, id))
-			.run();
+    this.db
+      .update(schema.emails)
+      .set(data)
+      .where(eq(schema.emails.id, id))
+      .run();
 
-		return this.getEmail(id);
-	}
+    return this.getEmail(id);
+  }
 
-	async markThreadRead(threadId: string) {
-		this.ctx.storage.sql.exec(
-			`UPDATE emails SET read = 1 WHERE thread_id = ? AND read = 0`,
-			threadId,
-		);
-		return { threadId, markedRead: true };
-	}
+  async markThreadRead(threadId: string) {
+    this.ctx.storage.sql.exec(
+      `UPDATE emails SET read = 1 WHERE thread_id = ? AND read = 0`,
+      threadId,
+    );
+    return { threadId, markedRead: true };
+  }
 
-	async deleteEmail(id: string) {
-		const email = this.db
-			.select({ id: schema.emails.id })
-			.from(schema.emails)
-			.where(eq(schema.emails.id, id))
-			.get();
+  async deleteEmail(id: string) {
+    const email = this.db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id))
+      .get();
 
-		if (!email) return null;
+    if (!email) return null;
 
-		const emailAttachments = this.db
-			.select({
-				id: schema.attachments.id,
-				filename: schema.attachments.filename,
-			})
-			.from(schema.attachments)
-			.where(eq(schema.attachments.email_id, id))
-			.all();
+    const emailAttachments = this.db
+      .select({
+        id: schema.attachments.id,
+        filename: schema.attachments.filename,
+      })
+      .from(schema.attachments)
+      .where(eq(schema.attachments.email_id, id))
+      .all();
 
-		this.db
-			.delete(schema.emails)
-			.where(eq(schema.emails.id, id))
-			.run();
+    this.db.delete(schema.emails).where(eq(schema.emails.id, id)).run();
 
-		return emailAttachments;
-	}
+    return emailAttachments;
+  }
 
-	async getAttachment(id: string) {
-		return (
-			this.db
-				.select()
-				.from(schema.attachments)
-				.where(eq(schema.attachments.id, id))
-				.get() ?? null
-		);
-	}
+  async getAttachment(id: string) {
+    return (
+      this.db
+        .select()
+        .from(schema.attachments)
+        .where(eq(schema.attachments.id, id))
+        .get() ?? null
+    );
+  }
 
-	// ── Folders (Drizzle) ──────────────────────────────────────────
+  // ── Folders (Drizzle) ──────────────────────────────────────────
 
-	async getFolders() {
-		const result = this.db
-			.select({
-				id: schema.folders.id,
-				name: schema.folders.name,
-				unreadCount: sql<number>`COALESCE(SUM(CASE WHEN ${schema.emails.read} = 0 THEN 1 ELSE 0 END), 0)`.mapWith(Number),
-			})
-			.from(schema.folders)
-			.leftJoin(schema.emails, eq(schema.emails.folder_id, schema.folders.id))
-			.groupBy(schema.folders.id, schema.folders.name)
-			.all();
-		return result;
-	}
+  async getFolders() {
+    const result = this.db
+      .select({
+        id: schema.folders.id,
+        name: schema.folders.name,
+        unreadCount:
+          sql<number>`COALESCE(SUM(CASE WHEN ${schema.emails.read} = 0 THEN 1 ELSE 0 END), 0)`.mapWith(
+            Number,
+          ),
+      })
+      .from(schema.folders)
+      .leftJoin(schema.emails, eq(schema.emails.folder_id, schema.folders.id))
+      .groupBy(schema.folders.id, schema.folders.name)
+      .all();
+    return result;
+  }
 
-	async createFolder(id: string, name: string, is_deletable: number = 1) {
-		try {
-			const result = this.db
-				.insert(schema.folders)
-				.values({ id, name, is_deletable })
-				.returning({ id: schema.folders.id, name: schema.folders.name })
-				.get();
-			return { ...result, unreadCount: 0 };
-		} catch (e: unknown) {
-			if (e instanceof Error && e.message.includes("UNIQUE constraint failed")) {
-				return null;
-			}
-			throw e;
-		}
-	}
+  async createFolder(id: string, name: string, is_deletable: number = 1) {
+    try {
+      const result = this.db
+        .insert(schema.folders)
+        .values({ id, name, is_deletable })
+        .returning({ id: schema.folders.id, name: schema.folders.name })
+        .get();
+      return { ...result, unreadCount: 0 };
+    } catch (e: unknown) {
+      if (
+        e instanceof Error &&
+        e.message.includes("UNIQUE constraint failed")
+      ) {
+        return null;
+      }
+      throw e;
+    }
+  }
 
-	async updateFolder(id: string, name: string) {
-		const result = this.db
-			.update(schema.folders)
-			.set({ name })
-			.where(eq(schema.folders.id, id))
-			.returning({ id: schema.folders.id, name: schema.folders.name })
-			.get();
-		return result;
-	}
+  async updateFolder(id: string, name: string) {
+    const result = this.db
+      .update(schema.folders)
+      .set({ name })
+      .where(eq(schema.folders.id, id))
+      .returning({ id: schema.folders.id, name: schema.folders.name })
+      .get();
+    return result;
+  }
 
-	async deleteFolder(id: string) {
-		const folder = this.db
-			.select({ is_deletable: schema.folders.is_deletable })
-			.from(schema.folders)
-			.where(eq(schema.folders.id, id))
-			.get();
+  async deleteFolder(id: string) {
+    const folder = this.db
+      .select({ is_deletable: schema.folders.is_deletable })
+      .from(schema.folders)
+      .where(eq(schema.folders.id, id))
+      .get();
 
-		if (!folder || folder.is_deletable === 0) {
-			return false;
-		}
+    if (!folder || folder.is_deletable === 0) {
+      return false;
+    }
 
-		this.db
-			.delete(schema.folders)
-			.where(eq(schema.folders.id, id))
-			.run();
+    this.db.delete(schema.folders).where(eq(schema.folders.id, id)).run();
 
-		return true;
-	}
+    return true;
+  }
 
-	async moveEmail(id: string, folderId: string) {
-		const folder = this.db
-			.select({ id: schema.folders.id })
-			.from(schema.folders)
-			.where(eq(schema.folders.id, folderId))
-			.get();
+  async moveEmail(id: string, folderId: string) {
+    const folder = this.db
+      .select({ id: schema.folders.id })
+      .from(schema.folders)
+      .where(eq(schema.folders.id, folderId))
+      .get();
 
-		if (!folder) return false;
+    if (!folder) return false;
 
-		this.db
-			.update(schema.emails)
-			.set({ folder_id: folderId })
-			.where(eq(schema.emails.id, id))
-			.run();
+    this.db
+      .update(schema.emails)
+      .set({ folder_id: folderId })
+      .where(eq(schema.emails.id, id))
+      .run();
 
-		return true;
-	}
+    return true;
+  }
 
-	// ── Search (raw SQL — dynamic condition builder) ───────────────
+  // ── Search (raw SQL — dynamic condition builder) ───────────────
 
-	/**
-	 * Build WHERE conditions and params for search queries.
-	 * Shared between searchEmails and countSearchResults.
-	 */
-	#buildSearchConditions(
-		options: SearchFilterOptions,
-		tableAlias = "",
-	): { conditions: string[]; params: (string | number)[] } {
-		const { query, folder, from, to, subject, date_start, date_end, is_read, is_starred, has_attachment } = options;
-		const prefix = tableAlias ? `${tableAlias}.` : "";
-		const conditions: string[] = [];
-		const params: (string | number)[] = [];
-		let paramIdx = 0;
+  /**
+   * Build WHERE conditions and params for search queries.
+   * Shared between searchEmails and countSearchResults.
+   */
+  #buildSearchConditions(
+    options: SearchFilterOptions,
+    tableAlias = "",
+  ): { conditions: string[]; params: (string | number)[] } {
+    const {
+      query,
+      folder,
+      from,
+      to,
+      subject,
+      date_start,
+      date_end,
+      is_read,
+      is_starred,
+      has_attachment,
+    } = options;
+    const prefix = tableAlias ? `${tableAlias}.` : "";
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+    let paramIdx = 0;
 
-		const addParam = (value: string | number) => {
-			paramIdx++;
-			params.push(value);
-			return `?${paramIdx}`;
-		};
+    const addParam = (value: string | number) => {
+      paramIdx++;
+      params.push(value);
+      return `?${paramIdx}`;
+    };
 
-		if (query) {
-			const p1 = addParam(`%${query}%`);
-			const p2 = addParam(`%${query}%`);
-			const p3 = addParam(`%${query}%`);
-			const p4 = addParam(`%${query}%`);
-			conditions.push(`(${prefix}subject LIKE ${p1} OR ${prefix}body LIKE ${p2} OR ${prefix}sender LIKE ${p3} OR ${prefix}recipient LIKE ${p4} OR ${prefix}cc LIKE ${p4} OR ${prefix}bcc LIKE ${p4})`);
-		}
-		if (folder) {
-			const p = addParam(folder);
-			conditions.push(`${prefix}folder_id = (SELECT id FROM folders WHERE name = ${p} OR id = ${p} LIMIT 1)`);
-		}
-		if (from) { const p = addParam(`%${from}%`); conditions.push(`${prefix}sender LIKE ${p}`); }
-		if (to) { const p = addParam(`%${to}%`); conditions.push(`(${prefix}recipient LIKE ${p} OR ${prefix}cc LIKE ${p} OR ${prefix}bcc LIKE ${p})`); }
-		if (subject) { const p = addParam(`%${subject}%`); conditions.push(`${prefix}subject LIKE ${p}`); }
-		if (date_start) { const p = addParam(date_start); conditions.push(`${prefix}date >= ${p}`); }
-		if (date_end) { const p = addParam(date_end); conditions.push(`${prefix}date <= ${p}`); }
-		if (is_read !== undefined) { const p = addParam(is_read ? 1 : 0); conditions.push(`${prefix}read = ${p}`); }
-		if (is_starred !== undefined) { const p = addParam(is_starred ? 1 : 0); conditions.push(`${prefix}starred = ${p}`); }
-		if (has_attachment) { conditions.push(`${prefix}id IN (SELECT DISTINCT email_id FROM attachments)`); }
+    if (query) {
+      const p1 = addParam(`%${query}%`);
+      const p2 = addParam(`%${query}%`);
+      const p3 = addParam(`%${query}%`);
+      const p4 = addParam(`%${query}%`);
+      conditions.push(
+        `(${prefix}subject LIKE ${p1} OR ${prefix}body LIKE ${p2} OR ${prefix}sender LIKE ${p3} OR ${prefix}recipient LIKE ${p4} OR ${prefix}cc LIKE ${p4} OR ${prefix}bcc LIKE ${p4})`,
+      );
+    }
+    if (folder) {
+      const p = addParam(folder);
+      conditions.push(
+        `${prefix}folder_id = (SELECT id FROM folders WHERE name = ${p} OR id = ${p} LIMIT 1)`,
+      );
+    }
+    if (from) {
+      const p = addParam(`%${from}%`);
+      conditions.push(`${prefix}sender LIKE ${p}`);
+    }
+    if (to) {
+      const p = addParam(`%${to}%`);
+      conditions.push(
+        `(${prefix}recipient LIKE ${p} OR ${prefix}cc LIKE ${p} OR ${prefix}bcc LIKE ${p})`,
+      );
+    }
+    if (subject) {
+      const p = addParam(`%${subject}%`);
+      conditions.push(`${prefix}subject LIKE ${p}`);
+    }
+    if (date_start) {
+      const p = addParam(date_start);
+      conditions.push(`${prefix}date >= ${p}`);
+    }
+    if (date_end) {
+      const p = addParam(date_end);
+      conditions.push(`${prefix}date <= ${p}`);
+    }
+    if (is_read !== undefined) {
+      const p = addParam(is_read ? 1 : 0);
+      conditions.push(`${prefix}read = ${p}`);
+    }
+    if (is_starred !== undefined) {
+      const p = addParam(is_starred ? 1 : 0);
+      conditions.push(`${prefix}starred = ${p}`);
+    }
+    if (has_attachment) {
+      conditions.push(
+        `${prefix}id IN (SELECT DISTINCT email_id FROM attachments)`,
+      );
+    }
 
-		return { conditions, params };
-	}
+    return { conditions, params };
+  }
 
-	async searchEmails(options: SearchFilterOptions & { page?: number; limit?: number }) {
-		const { page = 1, limit: rawLimit = 25 } = options;
-		const limit = Math.min(Math.max(rawLimit, 1), 100);
-		const { conditions, params } = this.#buildSearchConditions(options, "e");
+  async searchEmails(
+    options: SearchFilterOptions & { page?: number; limit?: number },
+  ) {
+    const { page = 1, limit: rawLimit = 25 } = options;
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
+    const { conditions, params } = this.#buildSearchConditions(options, "e");
 
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-		const offset = (page - 1) * limit;
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const offset = (page - 1) * limit;
 
-		const query = `
+    const query = `
 			SELECT e.id, e.subject, e.sender, e.recipient, e.cc, e.bcc, e.date,
 				e.read, e.starred, e.in_reply_to, e.email_references,
 				e.thread_id, e.folder_id,
@@ -712,43 +812,47 @@ export class MailboxDO extends DurableObject<Env> {
 			LEFT JOIN folders f ON e.folder_id = f.id
 			${where}
 			ORDER BY e.date DESC LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`;
-		params.push(limit, offset);
+    params.push(limit, offset);
 
-		const result = this.ctx.storage.sql.exec(query, ...params);
-		return [...result].map((row: any) => ({
-			...row,
-			read: !!row.read,
-			starred: !!row.starred,
-		}));
-	}
+    const result = this.ctx.storage.sql.exec(query, ...params);
+    return [...result].map((row: any) => ({
+      ...row,
+      read: !!row.read,
+      starred: !!row.starred,
+    }));
+  }
 
-	/**
-	 * Count total search results matching the given filters (for pagination).
-	 */
-	async countSearchResults(options: SearchFilterOptions) {
-		const { conditions, params } = this.#buildSearchConditions(options);
+  /**
+   * Count total search results matching the given filters (for pagination).
+   */
+  async countSearchResults(options: SearchFilterOptions) {
+    const { conditions, params } = this.#buildSearchConditions(options);
 
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-		const query = `SELECT COUNT(*) as total FROM emails ${where}`;
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const query = `SELECT COUNT(*) as total FROM emails ${where}`;
 
-		const row = [...this.ctx.storage.sql.exec(query, ...params)][0] as
-			| { total: number }
-			| undefined;
-		return row?.total ?? 0;
-	}
+    const row = [...this.ctx.storage.sql.exec(query, ...params)][0] as
+      | { total: number }
+      | undefined;
+    return row?.total ?? 0;
+  }
 
-	// ── Threading helpers (raw SQL) ────────────────────────────────
+  // ── Threading helpers (raw SQL) ────────────────────────────────
 
-	async findThreadBySubject(subject: string, senderAddress?: string): Promise<string | null> {
-		const normalized = subject
-			.replace(/^(?:(?:re|fwd?|fw|aw|wg|r[eé]f|sv)\s*:\s*)+/i, "")
-			.trim()
-			.toLowerCase();
+  async findThreadBySubject(
+    subject: string,
+    senderAddress?: string,
+  ): Promise<string | null> {
+    const normalized = subject
+      .replace(/^(?:(?:re|fwd?|fw|aw|wg|r[eé]f|sv)\s*:\s*)+/i, "")
+      .trim()
+      .toLowerCase();
 
-		if (!normalized) return null;
+    if (!normalized) return null;
 
-		const result = this.ctx.storage.sql.exec(
-			`SELECT thread_id, subject,
+    const result = this.ctx.storage.sql.exec(
+      `SELECT thread_id, subject,
 			        GROUP_CONCAT(DISTINCT LOWER(sender)) as senders,
 			        GROUP_CONCAT(DISTINCT LOWER(recipient)) as recipients
 			 FROM emails
@@ -758,115 +862,268 @@ export class MailboxDO extends DurableObject<Env> {
 			 GROUP BY thread_id
 			 ORDER BY MAX(date) DESC
 			 LIMIT 50`,
-		);
+    );
 
-		const normalizedSender = senderAddress?.toLowerCase().trim();
+    const normalizedSender = senderAddress?.toLowerCase().trim();
 
-		for (const row of result) {
-			const rowSubject = String((row as any).subject || "")
-				.replace(/^(?:(?:re|fwd?|fw|aw|wg|r[eé]f|sv)\s*:\s*)+/i, "")
-				.trim()
-				.toLowerCase();
-			if (rowSubject !== normalized) continue;
+    for (const row of result) {
+      const rowSubject = String((row as any).subject || "")
+        .replace(/^(?:(?:re|fwd?|fw|aw|wg|r[eé]f|sv)\s*:\s*)+/i, "")
+        .trim()
+        .toLowerCase();
+      if (rowSubject !== normalized) continue;
 
-			if (normalizedSender) {
-				const threadSenders = String((row as any).senders || "");
-				const threadRecipients = String((row as any).recipients || "");
-				const allParticipants = `${threadSenders},${threadRecipients}`;
-				if (!allParticipants.includes(normalizedSender)) {
-					continue;
-				}
-			}
+      if (normalizedSender) {
+        const threadSenders = String((row as any).senders || "");
+        const threadRecipients = String((row as any).recipients || "");
+        const allParticipants = `${threadSenders},${threadRecipients}`;
+        if (!allParticipants.includes(normalizedSender)) {
+          continue;
+        }
+      }
 
-			return String((row as any).thread_id);
-		}
-		return null;
-	}
+      return String((row as any).thread_id);
+    }
+    return null;
+  }
 
-	// ── Rate limiting (raw SQL) ────────────────────────────────────
+  // ── Rate limiting (raw SQL) ────────────────────────────────────
 
-	/**
-	 * Check if the mailbox has exceeded the send rate limit.
-	 * Limits: 20 emails per hour, 100 per day per mailbox.
-	 * Returns null if under limit, or an error message string if exceeded.
-	 */
-	async checkSendRateLimit(): Promise<string | null> {
-		const hourRow = [...this.ctx.storage.sql.exec(
-			`SELECT COUNT(*) as cnt FROM emails
+  /**
+   * Check if the mailbox has exceeded the send rate limit.
+   * Limits: 20 emails per hour, 100 per day per mailbox.
+   * Returns null if under limit, or an error message string if exceeded.
+   */
+  async checkSendRateLimit(): Promise<string | null> {
+    const hourRow = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT COUNT(*) as cnt FROM emails
 			 WHERE folder_id = ?1
 			   AND date >= datetime('now', '-1 hour')`,
-			Folders.SENT,
-		)][0] as { cnt: number } | undefined;
+        Folders.SENT,
+      ),
+    ][0] as { cnt: number } | undefined;
 
-		if ((hourRow?.cnt ?? 0) >= 20) {
-			return "Rate limit exceeded: max 20 emails per hour per mailbox";
-		}
+    if ((hourRow?.cnt ?? 0) >= 20) {
+      return "Rate limit exceeded: max 20 emails per hour per mailbox";
+    }
 
-		const dayRow = [...this.ctx.storage.sql.exec(
-			`SELECT COUNT(*) as cnt FROM emails
+    const dayRow = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT COUNT(*) as cnt FROM emails
 			 WHERE folder_id = ?1
 			   AND date >= datetime('now', '-1 day')`,
-			Folders.SENT,
-		)][0] as { cnt: number } | undefined;
+        Folders.SENT,
+      ),
+    ][0] as { cnt: number } | undefined;
 
-		if ((dayRow?.cnt ?? 0) >= 100) {
-			return "Rate limit exceeded: max 100 emails per day per mailbox";
-		}
+    if ((dayRow?.cnt ?? 0) >= 100) {
+      return "Rate limit exceeded: max 100 emails per day per mailbox";
+    }
 
-		return null;
-	}
+    return null;
+  }
 
-	// ── Email creation (Drizzle) ───────────────────────────────────
+  // ── Email creation (Drizzle) ───────────────────────────────────
 
-	async createEmail(
-		folder: string,
-		email: EmailData,
-		attachments: AttachmentData[],
-	) {
-		// Resolve folder name or ID to the actual folder ID.
-		const folderRow = this.db
-			.select({ id: schema.folders.id })
-			.from(schema.folders)
-			.where(or(eq(schema.folders.id, folder), eq(schema.folders.name, folder)))
-			.limit(1)
-			.get();
+  async createEmail(
+    folder: string,
+    email: EmailData,
+    attachments: AttachmentData[],
+  ) {
+    // Resolve folder name or ID to the actual folder ID.
+    const folderRow = this.db
+      .select({ id: schema.folders.id })
+      .from(schema.folders)
+      .where(or(eq(schema.folders.id, folder), eq(schema.folders.name, folder)))
+      .limit(1)
+      .get();
 
-		if (!folderRow) {
-			throw new Error(
-				`createEmail: folder "${folder}" not found. ` +
-					"Ensure the folder exists before inserting an email.",
-			);
-		}
+    if (!folderRow) {
+      throw new Error(
+        `createEmail: folder "${folder}" not found. ` +
+          "Ensure the folder exists before inserting an email.",
+      );
+    }
 
-		const folderId = folderRow.id;
-		const isSent = folderId === Folders.SENT;
+    const folderId = folderRow.id;
+    const isSent = folderId === Folders.SENT;
 
-		// Sent emails are always read — the sender obviously knows what they wrote.
-		// This prevents sent replies from inflating thread_unread_count.
-		this.db
-			.insert(schema.emails)
-			.values({
-				id: email.id,
-				folder_id: folderId,
-				subject: email.subject,
-				sender: email.sender,
-				recipient: email.recipient,
-				cc: email.cc ?? null,
-				bcc: email.bcc ?? null,
-				date: email.date,
-				read: isSent ? 1 : (email.read ? 1 : 0),
-				starred: email.starred ? 1 : 0,
-				body: email.body,
-				in_reply_to: email.in_reply_to ?? null,
-				email_references: email.email_references ?? null,
-				thread_id: email.thread_id ?? null,
-				message_id: email.message_id ?? null,
-				raw_headers: email.raw_headers ?? null,
-			})
-			.run();
+    // Sent emails are always read — the sender obviously knows what they wrote.
+    // This prevents sent replies from inflating thread_unread_count.
+    this.db
+      .insert(schema.emails)
+      .values({
+        id: email.id,
+        folder_id: folderId,
+        subject: email.subject,
+        sender: email.sender,
+        recipient: email.recipient,
+        cc: email.cc ?? null,
+        bcc: email.bcc ?? null,
+        date: email.date,
+        read: isSent ? 1 : email.read ? 1 : 0,
+        starred: email.starred ? 1 : 0,
+        body: email.body,
+        in_reply_to: email.in_reply_to ?? null,
+        email_references: email.email_references ?? null,
+        thread_id: email.thread_id ?? null,
+        message_id: email.message_id ?? null,
+        raw_headers: email.raw_headers ?? null,
+      })
+      .run();
 
-		if (attachments.length > 0) {
-			this.db.insert(schema.attachments).values(attachments).run();
-		}
-	}
+    if (attachments.length > 0) {
+      this.db.insert(schema.attachments).values(attachments).run();
+    }
+  }
+
+  // ── Thread management (ff-only CAS) ───────────────────────────────
+
+  /**
+   * Create a new thread in this mailbox.
+   * Returns the created thread row.
+   */
+  async createThread(
+    threadId: string,
+    subject: string | null,
+    parentThreadId?: string | null,
+  ): Promise<{ id: string; version: number }> {
+    const now = Date.now();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO threads (id, subject, tip_message_id, version, created_at, updated_at, parent_thread_id)
+       VALUES (?, ?, NULL, 0, ?, ?, ?)`,
+      threadId,
+      subject ?? null,
+      now,
+      now,
+      parentThreadId ?? null,
+    );
+    return { id: threadId, version: 0 };
+  }
+
+  /**
+   * Fetch a thread by id. Returns null if not found.
+   */
+  async getThread(threadId: string): Promise<{
+    id: string;
+    subject: string | null;
+    version: number;
+    tip_message_id: string | null;
+    created_at: number;
+    updated_at: number;
+    parent_thread_id: string | null;
+  } | null> {
+    const row = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT id, subject, tip_message_id, version, created_at, updated_at, parent_thread_id
+         FROM threads WHERE id = ?`,
+        threadId,
+      ),
+    ][0] as
+      | {
+          id: string;
+          subject: string | null;
+          tip_message_id: string | null;
+          version: number;
+          created_at: number;
+          updated_at: number;
+          parent_thread_id: string | null;
+        }
+      | undefined;
+    return row ?? null;
+  }
+
+  /**
+   * Append a message to a thread using ff-only CAS (USR-directive-1).
+   *
+   * Reads the current thread state, checks expectedVersion, then atomically
+   * UPDATEs threads with a version guard. If the guard fails (another writer
+   * won the race), re-reads and throws ConflictError so the caller can return
+   * 409 with current_version + current_tip.
+   *
+   * The new email's parent_id is set to the previous tip_message_id to
+   * maintain the in-thread linear predecessor chain (D-PLAT-3).
+   */
+  async appendToThread(
+    threadId: string,
+    expectedVersion: number,
+    message: NewEmail,
+  ): Promise<{ version: number; tip_message_id: string }> {
+    // Read current thread state.
+    const current = [
+      ...this.ctx.storage.sql.exec(
+        `SELECT version, tip_message_id FROM threads WHERE id = ?`,
+        threadId,
+      ),
+    ][0] as { version: number; tip_message_id: string | null } | undefined;
+
+    if (!current) {
+      throw new ThreadNotFoundError(threadId);
+    }
+
+    if (current.version !== expectedVersion) {
+      throw new ConflictError(current.tip_message_id, current.version);
+    }
+
+    const newId = message.id ?? crypto.randomUUID();
+    const previousTip = current.tip_message_id;
+    const now = Date.now();
+
+    // Insert the new email with parent_id = previous tip.
+    this.ctx.storage.sql.exec(
+      `INSERT INTO emails
+         (id, folder_id, subject, sender, recipient, cc, bcc, date,
+          read, starred, body, in_reply_to, email_references, thread_id,
+          message_id, raw_headers, parent_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      newId,
+      message.folder_id,
+      message.subject ?? null,
+      message.sender,
+      message.recipient,
+      message.cc ?? null,
+      message.bcc ?? null,
+      message.date,
+      message.read ? 1 : 0,
+      0,
+      message.body ?? null,
+      message.in_reply_to ?? null,
+      message.email_references ?? null,
+      threadId,
+      message.message_id ?? null,
+      message.raw_headers ?? null,
+      previousTip,
+    );
+
+    // CAS UPDATE — version guard in WHERE clause ensures atomicity.
+    // rowsWritten === 0 means another writer incremented the version between
+    // our SELECT and this UPDATE (impossible in a single-threaded DO, but
+    // the guard is the formal proof of the ff-only invariant).
+    const updateResult = this.ctx.storage.sql.exec(
+      `UPDATE threads
+       SET tip_message_id = ?, version = version + 1, updated_at = ?
+       WHERE id = ? AND version = ?`,
+      newId,
+      now,
+      threadId,
+      expectedVersion,
+    );
+
+    if ((updateResult as { rowsWritten?: number }).rowsWritten === 0) {
+      // Lost the race — re-read and throw stale.
+      const refreshed = [
+        ...this.ctx.storage.sql.exec(
+          `SELECT version, tip_message_id FROM threads WHERE id = ?`,
+          threadId,
+        ),
+      ][0] as { version: number; tip_message_id: string | null } | undefined;
+      throw new ConflictError(
+        refreshed?.tip_message_id ?? null,
+        refreshed?.version ?? expectedVersion + 1,
+      );
+    }
+
+    return { version: expectedVersion + 1, tip_message_id: newId };
+  }
 }
