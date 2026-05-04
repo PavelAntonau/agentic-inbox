@@ -29,6 +29,15 @@ const PUBLIC_AUTH_PATHS = [
   // session (the loader does its own better-auth session check + 302 to
   // /login when needed). T3.5 codifies the full CF-Access removal.
   "/consent",
+  // T2.2 (mcp-oauth) — issuer-root JWKS alias. better-auth's jwt() plugin
+  // mounts JWKS at /api/auth/jwks; the discovery doc advertises /jwks per
+  // RFC convention. CF Access dashboard widening (T3.5) is the user-side
+  // cutover step that exposes this to unauthenticated MCP clients.
+  "/jwks",
+  // T2.2 (mcp-oauth) — bearer-only on /mcp per D-mcp-auth anti-pattern
+  // 0olzaspBOKxkzjp2AZRkV. CF Access JWT MUST NOT gate /mcp; the bearer
+  // middleware below validates the OAuth access token instead.
+  "/mcp",
 ];
 
 function isPublicAuthPath(pathname: string): boolean {
@@ -155,6 +164,39 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
   return auth.handler(c.req.raw);
 });
 
+// T2.2 (mcp-oauth) — RFC 8414 / RFC 9728 discovery handlers + /jwks alias.
+// MUST be registered BEFORE the CF Access JWT middleware AND covered by
+// PUBLIC_AUTH_PATHS so external MCP clients can complete OAuth discovery
+// without first holding a CF Access session. The edge-level CF Access policy
+// is the second gate the user widens via dashboard (T3.5 codifies the full
+// removal). T1.5 progress note 4 is the source of these mounts.
+app.options("/.well-known/oauth-authorization-server", async () => {
+  const { handleDiscoveryPreflight } = await import("./middleware/discovery");
+  return handleDiscoveryPreflight();
+});
+app.get("/.well-known/oauth-authorization-server", async () => {
+  const { handleAuthorizationServerMetadata } =
+    await import("./middleware/discovery");
+  return handleAuthorizationServerMetadata();
+});
+app.options("/.well-known/oauth-protected-resource", async () => {
+  const { handleDiscoveryPreflight } = await import("./middleware/discovery");
+  return handleDiscoveryPreflight();
+});
+app.get("/.well-known/oauth-protected-resource", async () => {
+  const { handleProtectedResourceMetadata } =
+    await import("./middleware/discovery");
+  return handleProtectedResourceMetadata();
+});
+app.options("/jwks", async () => {
+  const { handleDiscoveryPreflight } = await import("./middleware/discovery");
+  return handleDiscoveryPreflight();
+});
+app.get("/jwks", async (c) => {
+  const { handleJwks } = await import("./middleware/discovery");
+  return handleJwks(c.env);
+});
+
 // Cloudflare Access JWT validation middleware.
 //   CF_ACCESS_DEV_MODE=mock     → mock-Access shim (synthesized JWT shape)
 //   import.meta.env.DEV (Vite)  → bypass (legacy: react-router dev path)
@@ -220,14 +262,75 @@ app.use("*", async (c, next) => {
 app.use("*", authzContext());
 
 // MCP server endpoint — used by AI coding tools (ProtoAgent, Claude Code, Cursor, etc.)
-// Must be before API routes and React Router catch-all
+// Must be before API routes and React Router catch-all.
+//
+// T2.2 (mcp-oauth) — bearer-only authentication. The /mcp path is in
+// PUBLIC_AUTH_PATHS so the CF Access JWT middleware bypasses it; the bearer
+// middleware below validates the OAuth access token instead. Session cookies
+// are rejected outright (D-mcp-auth anti-pattern 0olzaspBOKxkzjp2AZRkV).
+// Streamable HTTP is the default transport (`McpAgent.serve` per
+// `node_modules/agents/dist/index-WBy5hmm3.d.ts:344`).
+//
+// Per-tool scope enforcement is intentionally deferred — TODO(T3.6): wire
+// per-tool scope-to-required map at the EmailMCP dispatch layer once the
+// e2e suite drives the four named clients.
 const mcpHandler = EmailMCP.serve("/mcp", { binding: "EMAIL_MCP" });
-app.all("/mcp", async (c) => {
-  return mcpHandler.fetch(c.req.raw, c.env, c.executionCtx as ExecutionContext);
-});
-app.all("/mcp/*", async (c) => {
-  return mcpHandler.fetch(c.req.raw, c.env, c.executionCtx as ExecutionContext);
-});
+
+async function dispatchMcpRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  // OPTIONS preflight: bypass auth so browser-based MCP clients can probe.
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
+
+  const { validateBearer, bearerChallengeResponse } =
+    await import("./middleware/oauth-bearer");
+  const { extractMcpMethod, buildAuditRow, writeMcpAuditRow } =
+    await import("./middleware/audit-log-mcp");
+
+  const startedAt = Date.now();
+  const bearer = await validateBearer(request, env);
+  if (!bearer.ok) {
+    return bearerChallengeResponse(bearer.reason, bearer.bearer_error);
+  }
+
+  // Extract MCP method/tool BEFORE consuming the body downstream — clones the
+  // request internally so the McpAgent still gets the original body.
+  const { method, tool } = await extractMcpMethod(request);
+
+  const response = await mcpHandler.fetch(request, env, ctx);
+
+  const duration_ms = Date.now() - startedAt;
+  const auditRow = buildAuditRow({
+    bearer,
+    request,
+    http_status: response.status,
+    duration_ms,
+    mcp_method: method,
+    tool_name: tool,
+  });
+  ctx.waitUntil(writeMcpAuditRow(env, auditRow));
+
+  return response;
+}
+app.all("/mcp", (c) =>
+  dispatchMcpRequest(c.req.raw, c.env, c.executionCtx as ExecutionContext),
+);
+app.all("/mcp/*", (c) =>
+  dispatchMcpRequest(c.req.raw, c.env, c.executionCtx as ExecutionContext),
+);
 
 // GET /api/admin/me — lightweight "who am I" for the admin UI client-side guard
 app.get("/api/admin/me", (c) => {
