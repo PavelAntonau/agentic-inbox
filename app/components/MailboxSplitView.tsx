@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import ComposePanel from "~/components/ComposePanel";
 import EmailPanel from "~/components/EmailPanel";
 import ResizablePanel from "~/components/shell/ResizablePanel";
-import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
 
 interface MailboxSplitViewProps {
   selectedEmailId: string | null;
@@ -17,12 +16,6 @@ interface MailboxSplitViewProps {
 function NoSelectionPlaceholder() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-12 text-center">
-      <img
-        src={heroUrl}
-        alt=""
-        className="h-56 w-auto opacity-90"
-        draggable={false}
-      />
       <h2 className="text-xl font-semibold text-text-bright">
         Select an email or compose
       </h2>

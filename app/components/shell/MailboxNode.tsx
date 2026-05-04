@@ -7,11 +7,9 @@
 // permission predicates evaluated client-side from the node's ownership.
 
 import { Badge } from "~/ui";
-import {
-  EnvelopeIcon,
-  ShareNetworkIcon,
-  UserIcon,
-} from "@phosphor-icons/react";
+import { ShareNetworkIcon, UserIcon } from "@phosphor-icons/react";
+import mailboxPrivateUrl from "~/assets/branding/mailbox-private.png?url";
+import mailboxSharedUrl from "~/assets/branding/mailbox-shared.png?url";
 import { NavLink, useNavigate } from "react-router";
 import { useState, useRef } from "react";
 import type { MailboxNode as MailboxNodeData } from "~/routes/_app/api.tree";
@@ -83,7 +81,14 @@ export default function MailboxNode({
             }`
           }
         >
-          <EnvelopeIcon size={16} className="shrink-0 text-text-muted" />
+          <img
+            src={inGroup ? mailboxSharedUrl : mailboxPrivateUrl}
+            alt=""
+            width={18}
+            height={18}
+            className="shrink-0 block h-[18px] w-[18px] object-contain select-none"
+            draggable={false}
+          />
           <span className="truncate flex-1">{displayName}</span>
           {isOwner ? (
             <Badge

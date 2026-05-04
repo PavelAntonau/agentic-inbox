@@ -11,11 +11,12 @@ import {
   EnvelopeSimpleIcon,
   FileIcon,
   PaperPlaneTiltIcon,
-  PencilSimpleIcon,
   StarIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
+import ComposeIcon from "~/components/branding/ComposeIcon";
+import emailReadUrl from "~/assets/branding/email-read.png?url";
+import emailUnreadUrl from "~/assets/branding/email-unread.png?url";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -46,14 +47,7 @@ const FOLDER_EMPTY_STATES: Record<
   }
 > = {
   [Folders.INBOX]: {
-    icon: (
-      <img
-        src={heroUrl}
-        alt=""
-        className="h-48 w-auto opacity-90"
-        draggable={false}
-      />
-    ),
+    icon: null,
     title: "Inbox zero!",
     description:
       "Nothing in your inbox right now. New emails will land here when they arrive.",
@@ -137,7 +131,7 @@ function FolderEmptyState({
         <Button
           variant="primary"
           size="sm"
-          icon={<PencilSimpleIcon size={16} />}
+          icon={<ComposeIcon size={18} />}
           onClick={onCompose}
         >
           Compose
@@ -353,10 +347,22 @@ export default function EmailListRoute() {
                   } ${isSelected ? "bg-tx-card-hover" : "hover:bg-tx-card-hover"}`}
                 >
                   {/* Unread dot */}
-                  <div className="w-2.5 shrink-0 flex justify-center">
-                    {hasUnread(email) && (
-                      <div className="h-2 w-2 rounded-full bg-kumo-brand" />
-                    )}
+                  {/* Read/unread envelope — closed for unread, open for read.
+                     Uses the round-2 brand PNGs (email-unread.png, email-
+                     read.png). Phosphor envelope icons are still imported
+                     above for the toolbar/menu actions; the row indicator
+                     uses the brand artwork. */}
+                  <div className="shrink-0 flex justify-center">
+                    <img
+                      src={hasUnread(email) ? emailUnreadUrl : emailReadUrl}
+                      alt={hasUnread(email) ? "Unread" : "Read"}
+                      width={18}
+                      height={18}
+                      className={`block h-[18px] w-[18px] object-contain select-none ${
+                        hasUnread(email) ? "" : "opacity-60"
+                      }`}
+                      draggable={false}
+                    />
                   </div>
 
                   {/* Star */}

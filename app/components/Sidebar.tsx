@@ -18,11 +18,11 @@ import {
   FileIcon,
   FolderIcon,
   PaperPlaneTiltIcon,
-  PencilSimpleIcon,
   PlusIcon,
   TrashIcon,
   TrayIcon,
 } from "@phosphor-icons/react";
+import ComposeIcon from "~/components/branding/ComposeIcon";
 import { useMemo, useState } from "react";
 import { NavLink, useParams } from "react-router";
 import { Folders, SYSTEM_FOLDER_IDS } from "shared/folders";
@@ -121,7 +121,7 @@ export default function Sidebar() {
       <div className="px-3 py-3 pt-4">
         <Button
           variant="primary"
-          icon={<PencilSimpleIcon size={16} />}
+          icon={<ComposeIcon size={20} />}
           onClick={() => startCompose()}
           className="w-full"
         >
