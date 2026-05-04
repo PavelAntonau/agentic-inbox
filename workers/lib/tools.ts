@@ -34,6 +34,7 @@ import { getEmailBinding } from "./mocks/email-binding";
 import { decideSendPolicy, deliverInternal } from "./internal-delivery";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
+import type { AuthzContext } from "../db/control-plane/forGroup";
 
 // ── Type casts for DO methods not on the base stub type ────────────
 type MailboxSearchStub = {
@@ -49,8 +50,8 @@ type RateLimitStub = {
 
 // ── list_mailboxes ─────────────────────────────────────────────────
 
-export async function toolListMailboxes(env: Env) {
-  return listMailboxes(env.BUCKET);
+export async function toolListMailboxes(env: Env, authzContext?: AuthzContext) {
+  return listMailboxes(env, authzContext);
 }
 
 // ── list_emails ────────────────────────────────────────────────────

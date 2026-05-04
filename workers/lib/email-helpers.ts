@@ -9,7 +9,7 @@
  * threading, HTML utilities, and tool-logic (getFullEmail / getFullThread).
  */
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import type { MailboxDO } from "../durableObject";
 import type { EmailFull } from "./schemas";
@@ -36,16 +36,107 @@ export function getMailboxStub(
 // ── Mailbox Listing ────────────────────────────────────────────────
 
 /**
- * List all mailboxes from R2 bucket metadata.
+ * List mailboxes from both the D1 control-plane and the legacy R2 bucket,
+ * returning a unified deduplicated list.
+ *
+ * - When `authzContext` is provided, D1 results are filtered to only the
+ *   mailboxes in `authzContext.authorized_mailbox_ids` (JWT-gated path used
+ *   by MCP and authenticated API routes).
+ * - When `authzContext` is absent, ALL D1 mailboxes are returned (trusted
+ *   internal callers such as admin routes or tests).
+ * - R2-only mailboxes (legacy v1) are always appended after D1 results.
+ * - On address collision (same lowercase address in both stores) the D1 row
+ *   wins and the R2 object is dropped.
+ *
+ * The returned shape is a superset of the old R2-only `{ id, email }` so
+ * existing callers continue to work without changes.
  */
 export async function listMailboxes(
-  bucket: R2Bucket,
-): Promise<{ id: string; email: string }[]> {
+  bucketOrEnv: R2Bucket | Env,
+  authzContext?: import("../db/control-plane/forGroup").AuthzContext,
+): Promise<
+  {
+    id: string;
+    email: string;
+    address: string;
+    owner_user_id?: string;
+    kind: "d1" | "r2";
+  }[]
+> {
+  // Support both the legacy `listMailboxes(bucket)` call-style (workers/index.ts)
+  // and the new `listMailboxes(env, authzContext)` call-style (tools.ts / mcp).
+  // Distinguish: R2Bucket has a `.list` method; Env has `.BUCKET`.
+  const bucket: R2Bucket =
+    "BUCKET" in bucketOrEnv
+      ? (bucketOrEnv as Env).BUCKET
+      : (bucketOrEnv as R2Bucket);
+  const db: D1Database | undefined =
+    "DB" in bucketOrEnv ? (bucketOrEnv as Env).DB : undefined;
+
+  const results: {
+    id: string;
+    email: string;
+    address: string;
+    owner_user_id?: string;
+    kind: "d1" | "r2";
+  }[] = [];
+
+  // Seen set keyed by lowercase address — D1 rows are inserted first so they
+  // win on collision.
+  const seen = new Set<string>();
+
+  // ── D1 path ────────────────────────────────────────────────────────────────
+  if (db) {
+    const orm = drizzle(db, { schema });
+
+    let d1Rows: (typeof schema.mailboxes.$inferSelect)[];
+
+    if (authzContext && authzContext.authorized_mailbox_ids.length > 0) {
+      // JWT-filtered: only return mailboxes the caller is authorized for.
+      d1Rows = await orm
+        .select()
+        .from(schema.mailboxes)
+        .where(
+          inArray(schema.mailboxes.id, authzContext.authorized_mailbox_ids),
+        )
+        .all();
+    } else if (authzContext) {
+      // Caller is authenticated but has no authorized mailboxes — return empty.
+      d1Rows = [];
+    } else {
+      // No authzContext — trusted internal caller; return everything.
+      d1Rows = await orm.select().from(schema.mailboxes).all();
+    }
+
+    for (const row of d1Rows) {
+      const key = row.address.toLowerCase();
+      seen.add(key);
+      results.push({
+        id: row.id,
+        email: row.address,
+        address: row.address,
+        owner_user_id: row.owner_user_id,
+        kind: "d1",
+      });
+    }
+  }
+
+  // ── R2 path (legacy v1) ────────────────────────────────────────────────────
   const list = await bucket.list({ prefix: "mailboxes/" });
-  return list.objects.map((obj) => {
-    const id = obj.key.replace("mailboxes/", "").replace(".json", "");
-    return { id, email: id };
-  });
+  for (const obj of list.objects) {
+    const address = obj.key.replace("mailboxes/", "").replace(".json", "");
+    const key = address.toLowerCase();
+    if (seen.has(key)) continue; // D1 row already covers this address
+    seen.add(key);
+    results.push({
+      id: address,
+      email: address,
+      address,
+      kind: "r2",
+    });
+  }
+
+  return results;
 }
 
 // ── Backend Resolution ─────────────────────────────────────────────
