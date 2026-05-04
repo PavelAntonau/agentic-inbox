@@ -207,9 +207,41 @@ loaded; real Cloudflare Access JWTs are validated upstream.
 ## Deploy to production (Cloudflare) — CANONICAL
 
 **Read this. Do not invent another path. Do not run `wrangler login`.**
-This procedure is the documented, supported deploy method. Every prior
-session that reached for `wrangler login` lost time before circling back
-here — keep us honest.
+
+**The mandatory deploy path is the `cloudflare-deploy` global skill
+(`~/.claude/skills/cloudflare-deploy/SKILL.md`) or its companion Python
+script `release/python/scripts/deploy_cloudflare.py`.** This is enforced by
+the system-prompt rule `CLOUDFLARE DEPLOYMENT — USE THE cloudflare-deploy
+SKILL ONLY` (reprimand-level). Every prior session that reached for
+`wrangler login` lost time before circling back here.
+
+### Agent path (in-session)
+
+Use the `cloudflare-deploy` skill. The skill body has the exact tool
+sequence: `mcp__key__tool_get_secret` → `mcp__process__run_task` with the
+token in `env_vars`. Total: ~50–60 s wall-clock.
+
+### Script path (human or agent)
+
+```bash
+# Default: deploy agentic-inbox with all gates
+python3 /Users/dev/ActionNowAI/release/python/scripts/deploy_cloudflare.py
+
+# Fast path (skip pre-deploy gates):
+python3 /Users/dev/ActionNowAI/release/python/scripts/deploy_cloudflare.py \
+    --skip-gates --verify https://mail.actionnow.ai/
+
+# Dry-run (fetch token + check gates, don't actually deploy):
+python3 /Users/dev/ActionNowAI/release/python/scripts/deploy_cloudflare.py --dry-run
+```
+
+The script does the 3-step Streamable HTTP MCP handshake against the Key
+MCP (`initialize` → `notifications/initialized` → `tools/call
+tool_get_secret`), exports the token as `CLOUDFLARE_API_TOKEN`, and runs
+`npm run deploy`. Token never touches disk; structured `[STEP N/M]` /
+`[OK]` / `[FAIL]` output for agent-parseable runs.
+
+### Below this point, the historical detail (kept as belt-and-suspenders):
 
 ### One-command deploy
 
