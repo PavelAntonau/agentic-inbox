@@ -1037,6 +1037,11 @@ app.route("/api/users/me/sessions", sessionsRouter);
 const { default: clientsRouter } = await import("./routes/clients");
 app.route("/api/users/me/clients", clientsRouter);
 
+// Agent-authorizations router (Phase 2 / T2.3 mcp-oauth — Connected Agents API)
+const { default: agentAuthorizationsRouter } =
+  await import("./routes/agent-authorizations");
+app.route("/api/users/me/agent-authorizations", agentAuthorizationsRouter);
+
 // Inbox-policies router (Phase 2 — external/internal inbound policy)
 const { default: inboxPoliciesRouter } =
   await import("./routes/inbox-policies");
