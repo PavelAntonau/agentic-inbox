@@ -15,7 +15,6 @@ import { PlusIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import api from "~/services/api";
-import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
 import { useCreateMailbox, useMailboxes } from "~/queries/mailboxes";
 import { queryKeys } from "~/queries/keys";
 
@@ -127,15 +126,6 @@ export default function HomeRoute() {
         ) : (
           <div className="rounded-panel border border-border bg-card py-20 px-10 md:px-12">
             <div className="flex flex-col items-center text-center">
-              {/* Hero image */}
-              <div className="mb-8">
-                <img
-                  src={heroUrl}
-                  alt=""
-                  className="h-80 w-auto"
-                  draggable={false}
-                />
-              </div>
               {/* Show Create CTA only when there are no mailboxes yet and the
                   app is not in managed-address mode. */}
               {!isConfigured && mailboxes.length === 0 && (
