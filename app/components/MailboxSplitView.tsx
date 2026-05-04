@@ -21,7 +21,7 @@ function NoSelectionPlaceholder() {
           mailbox; duplicating the asset was the round-3 batch-2 mistake.
           Large (~360 px) decorative mark using the original transparent
           PNG (863×651) shipped in assets_new. */}
-      <ComposeIcon size={360} className="max-w-[60vw] max-h-[40vh] h-auto" />
+      <ComposeIcon size={240} className="max-w-[55vw] max-h-[36vh] h-auto" />
       <h2 className="text-xl font-semibold text-text-bright">
         Select an email or compose
       </h2>
@@ -85,7 +85,11 @@ export default function MailboxSplitView({
         // right. We don't attach a divider here because there's nothing to
         // resize against.
         <>
-          <div className="flex flex-col w-full md:w-[380px] shrink-0 min-w-0 md:border-r md:border-border">
+          {/* No-selection state: list panel is intentionally slim
+              (md:w-[260px]) so the central robot island has room to breathe
+              and the user isn't tempted to resize a list with nothing to
+              the right of it. UAT batch-5 directive. */}
+          <div className="flex flex-col w-full md:w-[260px] shrink-0 min-w-0 md:border-r md:border-border">
             {children}
           </div>
           <div className="hidden md:flex flex-1 flex-col min-w-0 overflow-hidden">

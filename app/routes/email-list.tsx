@@ -276,17 +276,22 @@ export default function EmailListRoute() {
       selectedEmailId={selectedEmailId}
       isComposing={isComposing}
     >
-      {/* Folder header — UAT round-3 batch-4: mailbox-scoped controls live
-          here now (Compose, Settings, Agent toggle, Refresh). The global
-          header at the top stays workspace-scoped. */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-border shrink-0 md:px-5">
-        <h1 className="text-lg font-semibold text-text-bright">{folderName}</h1>
-        <div className="flex items-center gap-2">
+      {/* Folder header — UAT batch-5: stack title above a small subtitle so
+          the conversation count never fights the action cluster for width
+          (was wrapping into a "Inbox¹conversation" superscript glitch on
+          narrow panels). Mailbox-scoped actions on the right. */}
+      <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-border shrink-0 md:px-5">
+        <div className="min-w-0 flex flex-col">
+          <h1 className="text-lg font-semibold text-text-bright leading-tight">
+            {folderName}
+          </h1>
           {totalCount > 0 && (
-            <span className="text-sm text-text-muted mr-2 hidden sm:inline">
+            <span className="text-xs text-text-muted whitespace-nowrap mt-0.5">
               {totalCount} conversation{totalCount !== 1 ? "s" : ""}
             </span>
           )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="primary"
             size="sm"

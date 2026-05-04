@@ -204,31 +204,12 @@ body::after {
   background-repeat: no-repeat;
 }
 
-/* UAT round-3 batch-3: gradients further desaturated AND shrunk
- * (28vh→20vh top, 32vh→22vh bottom). Top opacity halved again. */
+/* UAT batch-5: gradient bumped back up slightly (~50 % stronger than
+ * batch-3, still well below the original) and heights restored to 24vh /
+ * 26vh — the shrunken version was too subtle to register. */
 body::before {
-  height: 20vh;
+  height: 24vh;
   top: 0;
-  background-image: radial-gradient(
-    ellipse 50% 100% at 50% 0%,
-    rgba(78, 195, 255, 0.04) 0%,
-    rgba(78, 195, 255, 0.015) 45%,
-    transparent 85%
-  );
-}
-
-body::after {
-  height: 22vh;
-  bottom: 0;
-  background-image: radial-gradient(
-    ellipse 50% 100% at 50% 100%,
-    rgba(10, 18, 38, 0.08) 0%,
-    rgba(10, 18, 38, 0.025) 45%,
-    transparent 85%
-  );
-}
-
-:root.theme-dark body::before {
   background-image: radial-gradient(
     ellipse 55% 100% at 50% 0%,
     rgba(78, 195, 255, 0.07) 0%,
@@ -237,11 +218,31 @@ body::after {
   );
 }
 
-:root.theme-dark body::after {
+body::after {
+  height: 26vh;
+  bottom: 0;
   background-image: radial-gradient(
     ellipse 55% 100% at 50% 100%,
-    rgba(0, 0, 0, 0.32) 0%,
-    rgba(0, 0, 0, 0.1) 45%,
+    rgba(10, 18, 38, 0.12) 0%,
+    rgba(10, 18, 38, 0.04) 45%,
+    transparent 85%
+  );
+}
+
+:root.theme-dark body::before {
+  background-image: radial-gradient(
+    ellipse 60% 100% at 50% 0%,
+    rgba(78, 195, 255, 0.11) 0%,
+    rgba(78, 195, 255, 0.04) 45%,
+    transparent 85%
+  );
+}
+
+:root.theme-dark body::after {
+  background-image: radial-gradient(
+    ellipse 60% 100% at 50% 100%,
+    rgba(0, 0, 0, 0.42) 0%,
+    rgba(0, 0, 0, 0.14) 45%,
     transparent 85%
   );
 }
@@ -546,19 +547,19 @@ body {
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 1px;
+  /* UAT batch-5: 2 px wide (was 1 px) — slightly thicker, signature
+   * turquoise hairline. Visible at rest but NOT highlighted; hover
+   * brightens to full saturation. */
+  width: 2px;
   transform: translateX(-50%);
-  /* UAT round-3 batch-4: a quiet hairline at REST — barely-there cyan tint
-   * matching the standard border. Round-3 batch-2 cranked this to 0.55
-   * which read as "always highlighted". Hover bumps to the bright cyan. */
-  background-color: rgba(78, 195, 255, 0.18);
+  background-color: rgba(78, 195, 255, 0.32);
   transition:
     background-color 140ms ease,
     box-shadow 140ms ease;
 }
 
 :root.theme-dark .resizable-divider__line {
-  background-color: rgba(120, 215, 255, 0.22);
+  background-color: rgba(120, 215, 255, 0.32);
 }
 
 /* Hover / active drag — neon cyan glow + slightly thicker visible line. */
@@ -656,38 +657,31 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 22px;
+  /* UAT batch-5: shadow widened 22 → 28 px and made noticeably stronger
+   * (peak alpha 0.16 → 0.32) — round-3 batch-3 was too subtle to register
+   * against the light card background. */
+  width: 28px;
   pointer-events: none;
   z-index: 9;
-  background:
-    linear-gradient(
-      to right,
-      rgba(10, 18, 38, 0.16) 0%,
-      rgba(10, 18, 38, 0.06) 45%,
-      transparent 100%
-    ),
-    /* vertical mask: denser middle, transparent at top + bottom */
-    linear-gradient(
-        to bottom,
-        transparent 0%,
-        rgba(0, 0, 0, 0.55) 30%,
-        rgba(0, 0, 0, 1) 50%,
-        rgba(0, 0, 0, 0.55) 70%,
-        transparent 100%
-      );
-  background-blend-mode: multiply;
+  background: linear-gradient(
+    to right,
+    rgba(10, 18, 38, 0.32) 0%,
+    rgba(10, 18, 38, 0.14) 40%,
+    rgba(10, 18, 38, 0.04) 70%,
+    transparent 100%
+  );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    black 28%,
-    black 72%,
+    black 24%,
+    black 76%,
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    black 28%,
-    black 72%,
+    black 24%,
+    black 76%,
     transparent 100%
   );
 }
@@ -698,8 +692,9 @@ body {
   right: 100%;
   background: linear-gradient(
     to left,
-    rgba(10, 18, 38, 0.16) 0%,
-    rgba(10, 18, 38, 0.06) 45%,
+    rgba(10, 18, 38, 0.32) 0%,
+    rgba(10, 18, 38, 0.14) 40%,
+    rgba(10, 18, 38, 0.04) 70%,
     transparent 100%
   );
 }
@@ -770,6 +765,16 @@ body {
     rgba(0, 0, 0, 0.2) 45%,
     transparent 100%
   );
+}
+
+/* UAT batch-5: email-panel toolbar (Reply / Forward / Star / etc.) ghost
+ * buttons inherit kumo-default which bakes near-black, so the icons read
+ * dark-on-dark in dark theme. Force the bright text token here. */
+:root.theme-dark [data-email-toolbar] button {
+  color: var(--color-text-bright);
+}
+:root.theme-dark [data-email-toolbar] button svg {
+  color: inherit;
 }
 
 /* Observability tiles — elegant elevated shadow so they read as cards

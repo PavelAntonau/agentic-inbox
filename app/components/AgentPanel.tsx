@@ -448,11 +448,10 @@ function AgentChatConnected({
         )}
       </div>
 
-      {/* Input — UAT round-3 batch-4: prominent border, subtle elevated
-          shadow on the textarea "island", and the send Button vertical-
-          centered with the textarea (items-stretch + matching min-height
-          on the button so they share a baseline). */}
-      <div className="shrink-0 border-t border-border px-3 py-2.5">
+      {/* Input — UAT batch-5: lifted off the bottom edge (extra pb), send
+          button shrunk to 32 px so it sits level with the textarea card
+          rather than dwarfing it. */}
+      <div className="shrink-0 border-t border-border px-3 pt-2.5 pb-3.5">
         {isStreaming ? (
           <div className="flex justify-center">
             <Button
@@ -487,12 +486,13 @@ function AgentChatConnected({
             />
             <Button
               variant="primary"
+              size="sm"
               shape="square"
               disabled={!inputValue.trim()}
-              icon={<ArrowUpIcon size={16} weight="bold" />}
+              icon={<ArrowUpIcon size={14} weight="bold" />}
               onClick={handleSend}
               aria-label="Send message"
-              className="!h-10 !w-10 self-end shrink-0"
+              className="!h-8 !w-8 self-end shrink-0"
             />
           </div>
         )}

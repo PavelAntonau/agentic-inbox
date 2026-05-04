@@ -116,11 +116,11 @@ export default function ResizableDivider({
     ? CaretRightIcon
     : CaretLeftIcon;
 
-  // UAT round-3 (second batch): the chevron handle stays visible at all
-  // times when collapsible — at rest it's dim and small, on hover/drag it
-  // brightens AND scales up to telegraph the click affordance.
-  const showHandle = collapsible;
+  // UAT batch-5: chevron handle is HIDDEN at rest — appears only on hover
+  // or active drag. Reverts the round-3 batch-2 always-visible behaviour
+  // the user explicitly rejected on second viewing.
   const handleActive = hovered || dragging;
+  const showHandle = collapsible && handleActive;
 
   return (
     <div
