@@ -21,6 +21,13 @@ const scenario: Scenario = {
     await loginAs(ctx, TEST_USERS.alice);
 
     // The sidebar's "Create new mailbox" button lives in MailboxTreeRail.
+    // The rail renders a <Loader> until /api/mailboxes/tree resolves; on a
+    // cold-cache start (e.g. right after a browser-mcp restart) the click
+    // can race the React Query, so wait for the button to mount first.
+    await ctx.waitFor({
+      selector: '[aria-label="Create new mailbox"]',
+      timeoutMs: 8_000,
+    });
     await ctx.click({ ariaLabel: "Create new mailbox" });
     await ctx.screenshot("create-dialog-open");
 

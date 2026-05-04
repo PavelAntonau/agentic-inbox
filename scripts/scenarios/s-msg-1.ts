@@ -30,7 +30,14 @@ const scenario: Scenario = {
     // F-PHASE2-005 (the v1 send's `requireMailbox` middleware does
     // BUCKET.head('mailboxes/<id>.json'), which a D1-only seed never
     // creates). The v1 mailboxId IS the email.
-    const senderEmail = "sender@actionnow.ai";
+    //
+    // Per-run unique sender — the DO `checkSendRateLimit` counts SENT-
+    // folder rows in the last hour and `/__mock/reset` does NOT clear
+    // DO storage (only D1 control-plane + R2 outbox). After 20 cumulative
+    // runs the fixed `sender@actionnow.ai` mailbox would 429. Same
+    // pattern S-MSG-5 already uses on the recipient side.
+    const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const senderEmail = `sender-${runId}@actionnow.ai`;
     await ctx.browser.call("browser_evaluate", {
       expression: `(async () => {
         const res = await fetch('/api/v1/mailboxes', {
