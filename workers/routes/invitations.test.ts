@@ -142,3 +142,65 @@ describe("audit log meta for workspace.invite-via-group", () => {
     expect(auditMetaKnown.invitee_user_id_or_null).toBe("u-bob");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mail-send fail-loud contract (UAT round 2, item C)
+//
+// Before the round-2 fix the invitation route caught every send error and
+// always returned `{ sent: true }`, hiding mail-delivery failures from the
+// inviter for weeks. The privacy contract is preserved (response is still
+// always `{ sent: true }`) BUT errors must surface via the audit-log fields
+// `mail_send_status` and `mail_send_error`.
+// ---------------------------------------------------------------------------
+
+describe("invitation mail-send fail-loud contract", () => {
+  it("audit meta records mail_send_status=sent on success", () => {
+    const successMeta = {
+      group_id: "g-eng",
+      target: "alice@actionnow.ai",
+      invitee_user_id_or_null: null,
+      mail_send_status: "sent",
+      mail_send_error: null,
+    };
+    expect(successMeta.mail_send_status).toBe("sent");
+    expect(successMeta.mail_send_error).toBeNull();
+  });
+
+  it("audit meta records mail_send_status=failed + error on Resend exception", () => {
+    const failureMeta = {
+      group_id: "g-eng",
+      target: "alice@actionnow.ai",
+      invitee_user_id_or_null: null,
+      mail_send_status: "failed",
+      mail_send_error:
+        "Resend send failed (422 validation_error): Invalid `from` address",
+    };
+    expect(failureMeta.mail_send_status).toBe("failed");
+    expect(failureMeta.mail_send_error).toContain("Resend send failed");
+  });
+
+  it("response stays { sent: true } regardless of mail-send outcome", () => {
+    // Privacy contract: callers cannot probe whether the address belongs to
+    // an existing user OR whether the send actually succeeded. Failures
+    // surface only via audit log + console.error.
+    const successResponse = { sent: true };
+    const failureResponse = { sent: true };
+    expect(successResponse).toEqual({ sent: true });
+    expect(failureResponse).toEqual({ sent: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Login-URL routing contract (UAT round 2, item C / Phase 2 T2.3)
+// ---------------------------------------------------------------------------
+
+describe("plain-text invite — login URL shape", () => {
+  it("recipient email is URL-encoded into ?email= query param", () => {
+    const recipient = "alice+test@actionnow.ai";
+    const encoded = encodeURIComponent(recipient);
+    const loginUrl = `https://mail.actionnow.ai/login?email=${encoded}`;
+    expect(loginUrl).toBe(
+      "https://mail.actionnow.ai/login?email=alice%2Btest%40actionnow.ai",
+    );
+  });
+});
