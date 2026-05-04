@@ -30,7 +30,15 @@ const scenario: Scenario = {
 
     // Session B — open a second alias against the same worker, log in same
     // user. Different cookie jar → independent session.
-    const aliasB = `${await ctx.browser.call("browser_evaluate", { function: "() => 'session-b'" })}-${Date.now() % 1_000_000}`;
+    const aliasB = `session-b-${Date.now() % 1_000_000}`;
+    const aliasA = `scenario-s-auth-3-active-A`;
+    // Resolve the runner-opened "primary" alias before creating B; we need it
+    // to switch back.
+    const sessionsBefore = (await ctx.browser.call("session_list")) as unknown;
+    const primaryAlias = pickRunnerAlias(sessionsBefore);
+    ctx.log(`primary session alias: ${primaryAlias ?? "(unknown)"}`);
+    void aliasA;
+
     await ctx.browser.call("session_create", {
       alias: aliasB,
       viewport_width: 1280,
@@ -42,18 +50,15 @@ const scenario: Scenario = {
       await loginAs(ctx, TEST_USERS.alice);
       await ctx.screenshot("session-b-home");
 
-      // Switch back to session A and open /account.
-      await ctx.browser.call("session_connect", {
-        id_or_alias: (await ctx.browser.call(
-          "session_list",
-        )) /* find session a alias */ as unknown,
-      });
+      // Switch back to session A.
+      if (primaryAlias) {
+        await ctx.browser.call("session_connect", {
+          id_or_alias: primaryAlias,
+        });
+      }
     } catch (e) {
-      // session_connect signature: best-effort. If it fails, we still
-      // captured both sessions' login screenshots — log the gap.
       ctx.log(`session-switch deferred: ${(e as Error).message}`);
     } finally {
-      // Always clean up session B explicitly.
       await ctx.browser
         .call("session_close", { id_or_alias: aliasB })
         .catch(() => {});
@@ -78,5 +83,21 @@ const scenario: Scenario = {
     );
   },
 };
+
+function pickRunnerAlias(raw: unknown): string | null {
+  // session_list response shape: { sessions: [{ alias, ... }] } or array.
+  const list =
+    (raw as { sessions?: Array<{ alias?: string }> })?.sessions ??
+    (Array.isArray(raw) ? (raw as Array<{ alias?: string }>) : []);
+  for (const s of list) {
+    if (
+      typeof s.alias === "string" &&
+      s.alias.startsWith("scenario-s-auth-3-")
+    ) {
+      return s.alias;
+    }
+  }
+  return null;
+}
 
 export default scenario;

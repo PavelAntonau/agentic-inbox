@@ -17,54 +17,85 @@ export const TEST_USERS = {
 } as const;
 
 /**
- * Drive the OTP login flow end-to-end for `email`. Lands on the home view.
+ * Sign in via the MOCK_MODE dev identity picker. With CF_ACCESS_DEV_MODE=mock,
+ * `/login` serves a server-rendered radio-picker (workers/app.ts:renderDevLoginPicker)
+ * instead of the better-auth OTP page. POSTing identity=<email> sets
+ * `x-mock-user-email` cookie and 303s to `/`.
  *
- * Steps:
- *   1. Navigate to /login.
- *   2. Fill the email input + click "Send code".
- *   3. Wait for the OTP step to render.
- *   4. Read the OTP from /__mock/otp-latest.
- *   5. Fill it + click "Verify".
- *   6. Wait for the URL to leave /login.
+ * The better-auth OTP flow stays available behind `/login?otp=1` (TODO: not
+ * wired yet) and is exercised by a dedicated S-AUTH-OTP-* scenario when the
+ * "one-time passport" module is tested in isolation per the user's directive.
+ *
+ * Steps for mock-picker login:
+ *   1. Navigate to /login → server-rendered picker renders.
+ *   2. Click the "Custom email" radio + fill `custom_email` with `email`.
+ *      (Avoids reliance on which preset is currently mounted.)
+ *   3. Submit the form.
+ *   4. Wait for the URL to leave /login.
  */
 export async function loginAs(
   ctx: ScenarioContext,
   email: string,
 ): Promise<void> {
-  ctx.log(`login as ${email}`);
+  ctx.log(`login as ${email} (dev picker)`);
   await ctx.browser.call("browser_navigate", {
     url: `${ctx.baseUrl}/login`,
   });
-  await ctx.screenshot("login-empty");
+  await ctx.screenshot("login-picker");
 
-  await ctx.fill({ ariaLabel: "Email address" }, email);
-  await ctx.click({ text: "Send code" });
+  // Submit via a programmatic POST instead of form.submit() — submitting the
+  // form mid-browser_evaluate destroys the execution context before the
+  // serialized return value lands and Playwright throws. fetch() with
+  // redirect:'manual' lets us cookie-set then navigate ourselves.
+  await ctx.browser.call("browser_evaluate", {
+    expression: `(async () => {
+      const form = new FormData();
+      form.set('identity', 'custom');
+      form.set('custom_email', ${JSON.stringify(email)});
+      const res = await fetch('/login', { method: 'POST', body: form, redirect: 'manual' });
+      // Manual redirects from same-origin POST land as opaqueredirect (status 0)
+      // when the browser is willing to follow, OR as 303 with no body
+      // depending on fetch policy. Either way the Set-Cookie has applied.
+      return { status: res.status, type: res.type };
+    })()`,
+  });
 
-  // Wait until the OTP input mounts (aria-label flips to "Verification code").
-  await ctx.waitFor({ selector: '[aria-label="Verification code"]' });
-  await ctx.screenshot("otp-step");
-
-  // Pull the OTP from the mock tee.
-  const otp = await pollForOtp(ctx, email);
-  ctx.log(`fetched OTP ${otp.code} for ${email}`);
-
-  await ctx.fill({ ariaLabel: "Verification code" }, otp.code);
-  await ctx.click({ text: "Verify" });
-
-  // The login page redirects on success; wait until we leave it.
+  // Now navigate to the home view explicitly (cookie is set).
+  await ctx.browser.call("browser_navigate", { url: `${ctx.baseUrl}/` });
   await waitForUrlChange(ctx, /\/login(?:\?|#|$)/, { negate: true });
   await ctx.screenshot("post-login");
 }
 
-/** Clicks the sign-out link in ProfileMenu — assumes we are signed in. */
-export async function signOut(ctx: ScenarioContext): Promise<void> {
-  ctx.log("sign out via /cdn-cgi/access/logout");
-  // The link target is stable; navigating is more reliable than chasing the
-  // ProfileMenu open state across renders.
+/** Better-auth OTP login (separate from the mock picker — for the
+ *  "one-time passport" isolation scenario). Kept for future use. */
+export async function loginAsViaOtp(
+  ctx: ScenarioContext,
+  email: string,
+): Promise<void> {
+  ctx.log(`OTP login as ${email}`);
   await ctx.browser.call("browser_navigate", {
-    url: `${ctx.baseUrl}/cdn-cgi/access/logout`,
+    url: `${ctx.baseUrl}/login?otp=1`,
   });
-  // Server returns 303 → /login; the page should land there.
+  await ctx.fill({ ariaLabel: "Email address" }, email);
+  await ctx.click({ text: "Send code" });
+  await ctx.waitFor({ selector: '[aria-label="Verification code"]' });
+  const otp = await pollForOtp(ctx, email);
+  await ctx.fill({ ariaLabel: "Verification code" }, otp.code);
+  await ctx.click({ text: "Verify" });
+  await waitForUrlChange(ctx, /\/login(?:\?|#|$)/, { negate: true });
+}
+
+/**
+ * Sign out via the worker's `/logout` endpoint. In MOCK_MODE this clears the
+ * `x-mock-user-email` cookie and 303s to /login. The
+ * `/cdn-cgi/access/logout` handler is the equivalent for the ProfileMenu
+ * link path; both end up at /login.
+ */
+export async function signOut(ctx: ScenarioContext): Promise<void> {
+  ctx.log("sign out via /logout");
+  await ctx.browser.call("browser_navigate", {
+    url: `${ctx.baseUrl}/logout`,
+  });
   await waitForUrlChange(ctx, /\/login/, { negate: false });
   await ctx.screenshot("post-signout");
 }
@@ -104,7 +135,7 @@ export async function waitForUrlChange(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const url = (await ctx.browser.call("browser_evaluate", {
-      function: "() => location.href",
+      expression: "location.href",
     })) as string;
     const matches = pattern.test(url);
     if ((negate && !matches) || (!negate && matches)) {
@@ -121,7 +152,7 @@ export async function waitForUrlChange(
 /** Read current URL via browser_evaluate. */
 export async function currentUrl(ctx: ScenarioContext): Promise<string> {
   return (await ctx.browser.call("browser_evaluate", {
-    function: "() => location.href",
+    expression: "location.href",
   })) as string;
 }
 
@@ -134,7 +165,7 @@ export async function assertText(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const present = (await ctx.browser.call("browser_evaluate", {
-      function: `() => document.body.innerText.includes(${JSON.stringify(text)})`,
+      expression: `document.body && document.body.innerText.includes(${JSON.stringify(text)})`,
     })) as boolean;
     if (present) return;
     await new Promise((r) => setTimeout(r, 200));

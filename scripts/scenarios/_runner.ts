@@ -137,17 +137,31 @@ class BrowserMcp implements BrowserMcpClient {
       const txt = result.content?.[0]?.text ?? "(no error text)";
       throw new Error(`browser-mcp ${name} error: ${txt}`);
     }
-    if (result?.structuredContent !== undefined)
-      return result.structuredContent;
-    const first = result?.content?.[0];
-    if (first?.type === "text" && first.text) {
-      try {
-        return JSON.parse(first.text);
-      } catch {
-        return first.text;
+    let parsed: unknown;
+    if (result?.structuredContent !== undefined) {
+      parsed = result.structuredContent;
+    } else {
+      const first = result?.content?.[0];
+      if (first?.type === "text" && first.text) {
+        try {
+          parsed = JSON.parse(first.text);
+        } catch {
+          parsed = first.text;
+        }
       }
     }
-    return result;
+    // browser-mcp wraps every tool's return in `{result, url, session_id,
+    // session_alias}`. For most tool calls the caller wants the inner
+    // `result`; preserve the envelope only if the inner shape is missing.
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "result" in (parsed as Record<string, unknown>) &&
+      "session_id" in (parsed as Record<string, unknown>)
+    ) {
+      return (parsed as { result: unknown }).result;
+    }
+    return parsed ?? result;
   }
 
   private async notify(method: string, params: unknown): Promise<void> {
@@ -342,47 +356,57 @@ function buildContext(args: {
     },
 
     async waitFor({ text, selector, timeoutMs = STEP_TIMEOUT_MS }) {
-      const args: Record<string, unknown> = {
-        time: Math.ceil(timeoutMs / 1000),
-      };
-      if (text) args.text = text;
-      // browser_wait_for in playwright-style accepts text OR seconds; use text
-      // when given.
+      // browser-mcp's browser_wait_for is selector+state only. Poll via
+      // browser_evaluate so we can support text-on-page and CSS selectors
+      // uniformly.
+      const deadline = Date.now() + timeoutMs;
+      let predicate: string;
       if (selector) {
-        // No selector mode in browser_wait_for; poll via browser_evaluate.
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-          const present = (await browser.call("browser_evaluate", {
-            function: `() => !!document.querySelector(${JSON.stringify(selector)})`,
-          })) as boolean;
-          if (present === true) return;
-          await new Promise((r) => setTimeout(r, 250));
-        }
-        throw new Error(`waitFor timeout: selector ${selector}`);
+        predicate = `!!document.querySelector(${JSON.stringify(selector)})`;
+      } else if (text) {
+        predicate = `document.body && document.body.innerText.includes(${JSON.stringify(text)})`;
+      } else {
+        throw new Error("waitFor requires either selector or text");
       }
-      await browser.call("browser_wait_for", args);
+      while (Date.now() < deadline) {
+        const present = (await browser.call("browser_evaluate", {
+          expression: predicate,
+        })) as boolean;
+        if (present === true) return;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      throw new Error(`waitFor timeout (${timeoutMs}ms): ${selector ?? text}`);
     },
 
     async click({ ariaLabel, selector, text }) {
       if (selector) {
         await browser.call("browser_evaluate", {
-          function: `() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error('no element for ${selector}'); (el as HTMLElement).click(); }`,
+          expression: `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error('no element for ${selector.replace(/'/g, "\\'")}'); el.click(); return true; })()`,
         });
         return;
       }
-      // For aria-label / text, query in the page.
-      const expr = ariaLabel
-        ? `() => { const el = document.querySelector('[aria-label=${JSON.stringify(ariaLabel).slice(1, -1).replace(/'/g, "\\'")}' + "i".slice(0,0) + ']'); if (!el) { /* fall back to attribute scan */ const all = document.querySelectorAll('[aria-label]'); for (const e of Array.from(all)) { if (e.getAttribute('aria-label') === ${JSON.stringify(ariaLabel)}) { (e as HTMLElement).click(); return; } } throw new Error('no element with aria-label=${ariaLabel}'); } (el as HTMLElement).click(); }`
-        : `() => { const target = ${JSON.stringify(text)}; const all = Array.from(document.querySelectorAll('button, a, [role="button"], [role="link"]')); for (const el of all) { if ((el.textContent ?? '').trim() === target || (el.textContent ?? '').includes(target)) { (el as HTMLElement).click(); return; } } throw new Error('no clickable element with text=' + target); }`;
-      await browser.call("browser_evaluate", { function: expr });
+      if (ariaLabel) {
+        await browser.call("browser_evaluate", {
+          expression: `(() => { const lbl = ${JSON.stringify(ariaLabel)}; const all = document.querySelectorAll('[aria-label]'); for (const e of all) { if (e.getAttribute('aria-label') === lbl) { e.click(); return true; } } throw new Error('no element with aria-label=' + lbl); })()`,
+        });
+        return;
+      }
+      if (text) {
+        await browser.call("browser_evaluate", {
+          expression: `(() => { const target = ${JSON.stringify(text)}; const all = document.querySelectorAll('button, a, [role="button"], [role="link"], [role="menuitem"]'); for (const el of all) { const t = (el.textContent || '').trim(); if (t === target || t.includes(target)) { el.click(); return true; } } throw new Error('no clickable element with text=' + target); })()`,
+        });
+        return;
+      }
+      throw new Error("click requires selector, ariaLabel, or text");
     },
 
     async fill({ ariaLabel, selector }, value) {
       const target = selector
         ? selector
         : `[aria-label=${JSON.stringify(ariaLabel ?? "")}]`;
-      const expr = `() => { const el = document.querySelector(${JSON.stringify(target)}); if (!el) throw new Error('no input for ${target}'); const proto = Object.getPrototypeOf(el); const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set; setter?.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }`;
-      await browser.call("browser_evaluate", { function: expr });
+      await browser.call("browser_evaluate", {
+        expression: `(() => { const el = document.querySelector(${JSON.stringify(target)}); if (!el) throw new Error('no input for ${target.replace(/'/g, "\\'")}'); const proto = Object.getPrototypeOf(el); const setter = Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set; if (setter) { setter.call(el, ${JSON.stringify(value)}); } else { el.value = ${JSON.stringify(value)}; } el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`,
+      });
     },
   };
 }

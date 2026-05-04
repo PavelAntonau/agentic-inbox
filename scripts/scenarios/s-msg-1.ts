@@ -26,7 +26,7 @@ const scenario: Scenario = {
     // Ensure a mailbox exists. Easiest path: API call (avoids brittle UI
     // dependency for a non-create scenario).
     await ctx.browser.call("browser_evaluate", {
-      function: `async () => {
+      expression: `(async () => {
         const res = await fetch('/api/mailboxes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -36,7 +36,8 @@ const scenario: Scenario = {
           const body = await res.text();
           throw new Error('seed mailbox failed: ' + res.status + ' ' + body);
         }
-      }`,
+        return true;
+      })()`,
     });
 
     // Reload so the rail picks it up.
@@ -50,10 +51,10 @@ const scenario: Scenario = {
     // verify the wider compose UX); S-MSG-1 verifies the wire reaches the
     // mock outbox.
     const sendResult = (await ctx.browser.call("browser_evaluate", {
-      function: `async () => {
-        // Find the just-created mailbox id.
-        const list = await fetch('/api/mailboxes').then(r => r.json()).catch(() => ({}));
-        const mbox = (list.mailboxes ?? list.items ?? list)?.find?.(m => m.address === 'sender@actionnow.ai');
+      expression: `(async () => {
+        const tree = await fetch('/api/mailboxes/tree').then(r => r.json()).catch(() => ({}));
+        const items = [...(tree.private || []), ...(tree.followed || [])];
+        const mbox = items.find(m => m.address === 'sender@actionnow.ai');
         if (!mbox) throw new Error('seed mailbox not found in /api/mailboxes');
         const res = await fetch('/api/v1/mailboxes/' + mbox.id + '/emails', {
           method: 'POST',
@@ -65,7 +66,7 @@ const scenario: Scenario = {
           }),
         });
         return { status: res.status, body: await res.text() };
-      }`,
+      })()`,
     })) as { status: number; body: string };
 
     if (sendResult.status >= 300) {

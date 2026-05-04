@@ -28,17 +28,19 @@ const scenario: Scenario = {
     // The dialog has no explicit aria-label; pick the first text input
     // inside an open dialog.
     await ctx.browser.call("browser_evaluate", {
-      function: `() => {
+      expression: `(() => {
         const dlg = document.querySelector('[role="dialog"]');
         if (!dlg) throw new Error('no open dialog');
-        const inputs = dlg.querySelectorAll('input[type="text"], input:not([type])');
+        const inputs = dlg.querySelectorAll('input[type="text"], input:not([type]), input[type="email"]');
         if (!inputs.length) throw new Error('no text input in dialog');
         const el = inputs[0];
         const proto = Object.getPrototypeOf(el);
-        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-        setter?.call(el, 'team-test@actionnow.ai');
+        const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+        if (desc && desc.set) { desc.set.call(el, 'team-test@actionnow.ai'); } else { el.value = 'team-test@actionnow.ai'; }
         el.dispatchEvent(new Event('input', { bubbles: true }));
-      }`,
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`,
     });
     await ctx.screenshot("create-dialog-filled");
 
