@@ -11,7 +11,23 @@ import { mockAccessShim, type JwtClaims } from "./lib/mock-access";
 import { authzContext } from "./middleware/authz-context";
 import type { AuthzContext } from "./db/control-plane/forGroup";
 import { EmailMCP } from "./mcp";
+import { createAuth } from "./auth";
 import type { Env } from "./types";
+
+/**
+ * Phase 6.1 — paths that bypass the CF Access JWT requirement so the new
+ * better-auth surface is reachable while CF Access still gates everything
+ * else. Removed in Phase 6.2 once we cut over fully.
+ */
+const PUBLIC_AUTH_PATHS = [
+  "/login",
+  "/api/auth/", // better-auth handler
+  "/.well-known/", // OAuth discovery (Phase 6.3 — added now to avoid churn)
+];
+
+function isPublicAuthPath(pathname: string): boolean {
+  return PUBLIC_AUTH_PATHS.some((p) => pathname.startsWith(p));
+}
 
 export { MailboxDO } from "./durableObject";
 export { EmailAgent } from "./agent";
@@ -123,6 +139,16 @@ app.get("/logout", (c) => {
   });
 });
 
+// Phase 6.1 — better-auth handler. MUST be registered BEFORE the CF Access
+// JWT middleware so /api/auth/* requests reach the handler without first
+// requiring a CF Access token (the whole point of the new auth surface).
+// The path-allowlist below ALSO excludes /api/auth/* from the JWT check so
+// even if a request slipped through ordering, the bypass still applies.
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+  const auth = createAuth(c.env);
+  return auth.handler(c.req.raw);
+});
+
 // Cloudflare Access JWT validation middleware.
 //   CF_ACCESS_DEV_MODE=mock     → mock-Access shim (synthesized JWT shape)
 //   import.meta.env.DEV (Vite)  → bypass (legacy: react-router dev path)
@@ -132,7 +158,14 @@ app.get("/logout", (c) => {
 // (gitignored), so production deploys never carry it and always take the
 // real-JWT branch. This gate works under both `react-router dev` AND bare
 // `wrangler dev --local` (the latter doesn't set Vite's `import.meta.env.DEV`).
+//
+// Phase 6.1: bypass for /login + /api/auth/* + /.well-known/* so the new
+// better-auth surface is reachable. Everything else still requires CF Access
+// during the parallel-mode period; full cutover happens in Phase 6.2.
 app.use("*", async (c, next) => {
+  if (isPublicAuthPath(new URL(c.req.url).pathname)) {
+    return next();
+  }
   if (c.env.CF_ACCESS_DEV_MODE === "mock") {
     return mockAccessShim()(c, next);
   }

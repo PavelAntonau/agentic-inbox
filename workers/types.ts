@@ -22,4 +22,7 @@ export interface Env extends Cloudflare.Env {
   CF_ACCESS_API_TOKEN?: string;
   /** HMAC pepper for agent token secret hashing. Set via wrangler secret put. */
   TOKEN_PEPPER?: string;
+  /** better-auth signing secret — set via `wrangler secret put BETTER_AUTH_SECRET`. */
+  BETTER_AUTH_SECRET: string;
+  // BETTER_AUTH_URL is declared in wrangler.jsonc and inherited via Cloudflare.Env.
 }

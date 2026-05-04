@@ -19,7 +19,10 @@
 		// is auto-promoted to global_owner on first request via bootstrapOwner().
 		// Tracked in config (not as a secret) so the canonical owner is visible
 		// in version control.
-		"BOOTSTRAP_OWNER_EMAIL": "pavel@digifirst.org"
+		"BOOTSTRAP_OWNER_EMAIL": "pavel@digifirst.org",
+		// Phase 6.1 — better-auth base URL. BETTER_AUTH_SECRET is a secret,
+		// set via `wrangler secret put BETTER_AUTH_SECRET`.
+		"BETTER_AUTH_URL": "https://mail.actionnow.ai"
 	},
 	// EMAIL binding: prod uses real Cloudflare Email Routing automatically.
 	// `remote: true` would proxy outbound mail through prod even in `wrangler dev`,

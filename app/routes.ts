@@ -40,6 +40,9 @@ export default [
     // Phase 6: observability dashboard
     route("observability", "routes/admin/observability.tsx"),
   ]),
+  // Phase 6.1 — branded sign-in page. Public route (outside the _app shell
+  // so it does not require auth to reach).
+  route("login", "routes/login.tsx"),
   route("i/:id", "routes/i.$id.tsx"),
   route("*", "routes/not-found.tsx"),
 ] satisfies RouteConfig;

@@ -43,6 +43,13 @@ export const users = sqliteTable(
     company: text("company"),
     created_at: integer("created_at").notNull(),
     last_login_at: integer("last_login_at"),
+    // Phase 6.1: better-auth required fields. email_verified is flipped to 1
+    // when an email-OTP sign-in succeeds. updated_at is bumped on every
+    // mutation; better-auth handles this for the rows it owns.
+    email_verified: integer("email_verified", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    updated_at: integer("updated_at").notNull().default(0),
   },
   (t) => ({
     emailIdx: uniqueIndex("users_email_nocase").on(sql`lower(${t.email})`),
@@ -237,6 +244,73 @@ export const mailbox_acls = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.mailbox_id, t.user_id] }),
+  }),
+);
+
+// Phase 6.1 — better-auth tables.
+// Field names use camelCase in TS (better-auth's expected JS-side shape),
+// snake_case in DB (matches existing project convention). better-auth's
+// drizzleAdapter resolves the mapping via the column-builder name argument.
+
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: integer("expires_at").notNull(),
+    token: text("token").notNull().unique(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    userIdIdx: index("session_user_id_idx").on(t.userId),
+    tokenIdx: index("session_token_idx").on(t.token),
+    expiresAtIdx: index("session_expires_at_idx").on(t.expiresAt),
+  }),
+);
+
+export const account = sqliteTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at"),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at"),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    userIdIdx: index("account_user_id_idx").on(t.userId),
+    providerIdx: index("account_provider_idx").on(t.providerId, t.accountId),
+  }),
+);
+
+export const verification = sqliteTable(
+  "verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    identifierIdx: index("verification_identifier_idx").on(t.identifier),
+    expiresAtIdx: index("verification_expires_at_idx").on(t.expiresAt),
   }),
 );
 
