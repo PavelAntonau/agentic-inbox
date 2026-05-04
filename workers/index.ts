@@ -584,22 +584,64 @@ async function receiveEmail(
     return;
   }
 
-  // Inbox-policy gate (Phase 2 — F-PHASE3-006). When a D1 row exists for the
-  // recipient address, honour external_inbound_enabled. v1-only mailboxes
-  // (R2 key, no D1 row) keep the legacy "always-accept" behaviour because
-  // policy fields live in the D1 mailboxes table introduced by migration
-  // 0007. Failing closed for v1-only mailboxes would break every legacy
-  // address; the safer default is to enforce policy where it is configured.
+  // Inbox-policy gate (Phase 2 — F-PHASE3-006 + F-PHASE3-007). When a D1 row
+  // exists for the recipient address, honour:
+  //  • external_inbound_enabled — hard kill switch for any external inbound.
+  //  • external_allow_mode      — 'all' (default) or 'allowlist'. When
+  //    'allowlist', the sender must match an entry in
+  //    inbox_external_allowlist (kind='email' exact, kind='domain' suffix
+  //    against the sender's domain).
+  // v1-only mailboxes (R2 key, no D1 row) keep the legacy "always-accept"
+  // behaviour because policy fields live in the D1 mailboxes table
+  // introduced by migration 0007. Failing closed for v1-only mailboxes would
+  // break every legacy address; the safer default is to enforce policy
+  // where it is configured.
   const policyRow = await env.DB.prepare(
-    "SELECT external_inbound_enabled FROM mailboxes WHERE address = ?1",
+    "SELECT id, external_inbound_enabled, external_allow_mode FROM mailboxes WHERE address = ?1",
   )
     .bind(mailboxId.toLowerCase())
-    .first<{ external_inbound_enabled: number | boolean }>();
+    .first<{
+      id: string;
+      external_inbound_enabled: number | boolean;
+      external_allow_mode: string;
+    }>();
   if (policyRow && !policyRow.external_inbound_enabled) {
     console.log(
       `Bouncing email for ${mailboxId}: external_inbound_enabled=false`,
     );
     return;
+  }
+  if (policyRow && policyRow.external_allow_mode === "allowlist") {
+    const senderEmail = (parsedEmail.from?.address || "").toLowerCase();
+    if (!senderEmail) {
+      console.log(
+        `Bouncing email for ${mailboxId}: external_allow_mode=allowlist with no sender`,
+      );
+      return;
+    }
+    const senderDomain = senderEmail.includes("@")
+      ? senderEmail.split("@").pop()!
+      : "";
+    const allowlist = await env.DB.prepare(
+      "SELECT sender_pattern, kind FROM inbox_external_allowlist WHERE inbox_id = ?1",
+    )
+      .bind(policyRow.id)
+      .all<{ sender_pattern: string; kind: string }>();
+    const matched = (allowlist.results ?? []).some((entry) => {
+      const pattern = entry.sender_pattern.toLowerCase().trim();
+      if (entry.kind === "email") return pattern === senderEmail;
+      if (entry.kind === "domain") {
+        const dom = pattern.startsWith("@") ? pattern.slice(1) : pattern;
+        return senderDomain === dom;
+      }
+      return false;
+    });
+    if (!matched) {
+      console.log(
+        `Bouncing email for ${mailboxId}: external_allow_mode=allowlist, sender ${senderEmail} not on allowlist`,
+      );
+      return;
+    }
   }
 
   const stub = env.MAILBOX.get(env.MAILBOX.idFromName(mailboxId));
