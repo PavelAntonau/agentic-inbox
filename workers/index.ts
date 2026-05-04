@@ -111,7 +111,7 @@ app.get("/api/v1/config", (c) => {
 // -- Mailboxes ------------------------------------------------------
 
 app.get("/api/v1/mailboxes", async (c) => {
-  const allMailboxes = await listMailboxes(c.env.BUCKET);
+  const allMailboxes = await listMailboxes(c.env);
   return c.json(allMailboxes.map((m) => ({ ...m, name: m.id })));
 });
 
@@ -221,7 +221,8 @@ app.get("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
 });
 
 app.post("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
-  const mailboxId = c.req.param("mailboxId")!;
+  // Use the resolved address (not the raw URL segment, which may be a UUID).
+  const mailboxId = c.var.resolvedMailboxAddress ?? c.req.param("mailboxId")!;
   const body = SendEmailRequestSchema.parse(await c.req.json());
   const {
     to,
@@ -321,7 +322,7 @@ app.post("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
 });
 
 app.post("/api/v1/mailboxes/:mailboxId/drafts", async (c: AppContext) => {
-  const mailboxId = c.req.param("mailboxId")!;
+  const mailboxId = c.var.resolvedMailboxAddress ?? c.req.param("mailboxId")!;
   const { to, cc, bcc, subject, body, in_reply_to, thread_id, draft_id } =
     DraftBody.parse(await c.req.json());
   const stub = c.var.mailboxStub;

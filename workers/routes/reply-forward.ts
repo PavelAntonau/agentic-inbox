@@ -23,7 +23,8 @@ type AppContext = Context<MailboxContext>;
 type RateLimitStub = { checkSendRateLimit: () => Promise<string | null> };
 
 export async function handleReplyEmail(c: AppContext) {
-  const mailboxId = c.req.param("mailboxId") ?? "";
+  const mailboxId =
+    c.var.resolvedMailboxAddress ?? c.req.param("mailboxId") ?? "";
   const id = c.req.param("id") ?? "";
   const body = SendEmailRequestSchema.parse(await c.req.json());
   const { to, cc, bcc, from, subject, html, text, attachments } = body;
@@ -143,7 +144,8 @@ export async function handleReplyEmail(c: AppContext) {
 }
 
 export async function handleForwardEmail(c: AppContext) {
-  const mailboxId = c.req.param("mailboxId") ?? "";
+  const mailboxId =
+    c.var.resolvedMailboxAddress ?? c.req.param("mailboxId") ?? "";
   const id = c.req.param("id") ?? "";
   const body = SendEmailRequestSchema.parse(await c.req.json());
   const { to, cc, bcc, from, subject, html, text, attachments } = body;

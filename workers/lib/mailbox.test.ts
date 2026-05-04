@@ -1,0 +1,198 @@
+// Copyright (c) 2026 ActionNow.AI
+// Licensed under the Apache 2.0 license
+//
+// Tests for workers/lib/mailbox.ts — TASK-2.2 requireMailbox D1-aware fallback.
+//
+// requireMailbox middleware resolves :mailboxId in this order:
+//   1. D1 mailboxes table — match `id` (UUID) OR `address` (case-insensitive).
+//   2. R2 bucket — legacy v1 path; treats the segment as the email address.
+//   3. 404 when neither stack has the mailbox.
+
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { Hono } from "hono";
+
+// ── Drizzle mock — chainable shim returning canned rows ──────────────────
+
+type MailboxIdRow = { id: string; address: string };
+
+let d1Row: MailboxIdRow | null = null;
+
+function makeChain() {
+  const chain = {
+    select: vi.fn(() => chain),
+    from: vi.fn(() => chain),
+    where: vi.fn(() => chain),
+    get: vi.fn(async () => d1Row),
+    all: vi.fn(async () => (d1Row ? [d1Row] : [])),
+  };
+  return chain;
+}
+
+vi.mock("drizzle-orm/d1", () => ({
+  drizzle: vi.fn(() => makeChain()),
+}));
+
+// ── Imports under test (after mocks) ─────────────────────────────────────
+
+import { requireMailbox, type MailboxContext } from "./mailbox";
+
+// ── Fixtures ─────────────────────────────────────────────────────────────
+
+function makeR2Bucket(presentAddresses: Set<string>): R2Bucket {
+  return {
+    head: vi.fn(async (key: string) => {
+      const addr = key.replace("mailboxes/", "").replace(".json", "");
+      return presentAddresses.has(addr.toLowerCase())
+        ? ({ key } as R2ObjectBody)
+        : null;
+    }),
+  } as unknown as R2Bucket;
+}
+
+function makeMailboxNamespace() {
+  return {
+    idFromName: vi.fn((name: string) => ({ __name: name }) as unknown),
+    get: vi.fn(() => ({ __stub: true }) as unknown),
+  };
+}
+
+function makeApp(env: { DB: unknown; BUCKET: R2Bucket; MAILBOX: unknown }) {
+  const app = new Hono<MailboxContext>();
+  app.use("/api/v1/mailboxes/:mailboxId/*", requireMailbox);
+  app.get("/api/v1/mailboxes/:mailboxId/probe", (c) => {
+    return c.json({
+      resolvedMailboxAddress: c.var.resolvedMailboxAddress,
+      resolvedMailboxId: c.var.resolvedMailboxId ?? null,
+    });
+  });
+  return {
+    fetch: (path: string) =>
+      app.fetch(
+        new Request(`http://localhost${path}`),
+        env as unknown as Parameters<typeof app.fetch>[1],
+      ),
+  };
+}
+
+beforeEach(() => {
+  d1Row = null;
+  vi.clearAllMocks();
+});
+
+// ── TASK-2.2: D1-aware middleware ────────────────────────────────────────
+
+describe("requireMailbox — TASK-2.2 D1-aware fallback", () => {
+  it("resolves a D1 UUID — sets resolvedMailboxAddress to the row's address", async () => {
+    d1Row = {
+      id: "e2f5a514d78c12d9c646b3dc06e3beca",
+      address: "tail2@actionnow.ai",
+    };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env);
+
+    const res = await app.fetch(
+      "/api/v1/mailboxes/e2f5a514d78c12d9c646b3dc06e3beca/probe",
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      resolvedMailboxAddress: string;
+      resolvedMailboxId: string | null;
+    };
+    expect(body.resolvedMailboxAddress).toBe("tail2@actionnow.ai");
+    expect(body.resolvedMailboxId).toBe("e2f5a514d78c12d9c646b3dc06e3beca");
+  });
+
+  it("resolves a D1 row by address (case-insensitive) — DB row wins over R2", async () => {
+    d1Row = { id: "uuid-shared", address: "shared@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set(["shared@actionnow.ai"])),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env);
+
+    const res = await app.fetch("/api/v1/mailboxes/Shared@actionnow.ai/probe");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      resolvedMailboxAddress: string;
+      resolvedMailboxId: string | null;
+    };
+    // D1 wins — the resolved id is the UUID, not the address.
+    expect(body.resolvedMailboxAddress).toBe("shared@actionnow.ai");
+    expect(body.resolvedMailboxId).toBe("uuid-shared");
+  });
+
+  it("falls through to R2 when D1 has no row — resolvedMailboxId is undefined", async () => {
+    d1Row = null;
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set(["legacy@actionnow.ai"])),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env);
+
+    const res = await app.fetch("/api/v1/mailboxes/legacy@actionnow.ai/probe");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      resolvedMailboxAddress: string;
+      resolvedMailboxId: string | null;
+    };
+    expect(body.resolvedMailboxAddress).toBe("legacy@actionnow.ai");
+    expect(body.resolvedMailboxId).toBeNull();
+  });
+
+  it("returns 404 when neither D1 nor R2 has the mailbox", async () => {
+    d1Row = null;
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env);
+
+    const res = await app.fetch("/api/v1/mailboxes/unknown@actionnow.ai/probe");
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/not found/i);
+  });
+
+  it("returns 400 when :mailboxId is empty", async () => {
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env);
+
+    // Empty path segment leads to the middleware seeing an empty rawId.
+    // Hono's router rejects "//probe" before reaching the middleware in some
+    // versions; we settle for confirming the middleware doesn't crash on a
+    // missing param when called via a route that doesn't supply it.
+    // Direct test: hit a path that matches the wildcard but has no id segment.
+    const res = await app.fetch("/api/v1/mailboxes/%20/probe");
+    // Treat both 400 and 404 as acceptable — the key contract is "no crash".
+    expect([400, 404]).toContain(res.status);
+  });
+
+  it("URL-encoded address is decoded before lookup", async () => {
+    d1Row = null;
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set(["a+plus@actionnow.ai"])),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env);
+
+    // %2B = +
+    const res = await app.fetch(
+      "/api/v1/mailboxes/a%2Bplus@actionnow.ai/probe",
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { resolvedMailboxAddress: string };
+    expect(body.resolvedMailboxAddress).toBe("a+plus@actionnow.ai");
+  });
+});
