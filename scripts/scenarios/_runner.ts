@@ -76,7 +76,16 @@ function isTransportError(message: string | undefined): boolean {
     /fetch failed/i.test(message) ||
     /socket hang up/i.test(message) ||
     /\bNoSuchSession\b/i.test(message) ||
-    /\bsession\b.*\bnot found\b/i.test(message)
+    /\bsession\b.*\bnot found\b/i.test(message) ||
+    // F-PHASE3-012 — Chrome process launch failure mid-suite.
+    // browser-mcp's session_create eventually fails to launch a fresh
+    // persistent context — happens after enough cumulative session
+    // creates, leaving stale /var/folders/.../playwright-google-* dirs
+    // and orphan Chrome helper processes. Same recovery as
+    // F-PHASE3-004: restart browser-mcp + retry the scenario.
+    /BrowserType\.launch_persistent_context/i.test(message) ||
+    /Failed to launch the browser process/i.test(message) ||
+    /Connection closed while reading from the driver/i.test(message)
   );
 }
 
@@ -656,22 +665,31 @@ async function runOne(
   const consoleErrorTotal = { value: 0 };
   const screenshots: string[] = [];
 
-  // Reset mock state unless scenario opted out.
-  if (scenario.fixture !== null) {
-    log("POST /__mock/reset");
-    await mock.reset();
-  }
-
-  // Fresh browser session per scenario.
-  const alias = `scenario-${scenario.id.toLowerCase()}-${Date.now() % 1_000_000}`;
-  await browser.openSession(alias);
-  log(`opened session ${alias}`);
-
   const start = performance.now();
   let status: "pass" | "fail" = "pass";
   let failure: ScenarioResult["failure"];
+  let sessionOpened = false;
 
+  // F-PHASE3-012: pre-scenario setup (mock.reset + openSession) is
+  // wrapped in the same try/catch as scenario.run so transient
+  // transport flakes during setup land as structured fail results.
+  // runOneWithRetry classifies and retries them via the F-PHASE3-004
+  // browser-mcp restart path; F-PHASE3-011 already handles 503s in
+  // mock.reset, but a Chrome launch failure in openSession needs the
+  // restart path.
   try {
+    // Reset mock state unless scenario opted out.
+    if (scenario.fixture !== null) {
+      log("POST /__mock/reset");
+      await mock.reset();
+    }
+
+    // Fresh browser session per scenario.
+    const alias = `scenario-${scenario.id.toLowerCase()}-${Date.now() % 1_000_000}`;
+    await browser.openSession(alias);
+    sessionOpened = true;
+    log(`opened session ${alias}`);
+
     const sctx = buildContext({
       browser,
       mock,
@@ -697,7 +715,16 @@ async function runOne(
     failure = { message: e.message, stack: e.stack, findingPath };
     log(`FAIL: ${e.message}`);
   } finally {
-    await browser.closeSession();
+    if (sessionOpened) {
+      try {
+        await browser.closeSession();
+      } catch (e) {
+        // closeSession failure is benign — the session may already be
+        // dead (the same wedge that caused the scenario to fail).
+        // Don't mask the original error by throwing here.
+        log(`closeSession suppressed: ${(e as Error).message?.slice(0, 120)}`);
+      }
+    }
     writeFileSync(join(artifactsDir, "log.txt"), logLines.join("\n") + "\n");
   }
 
