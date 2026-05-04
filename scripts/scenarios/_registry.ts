@@ -29,6 +29,8 @@ import sCli4 from "./s-cli-4";
 import sCli5 from "./s-cli-5";
 import sContacts1 from "./s-contacts-1";
 import sContacts2 from "./s-contacts-2";
+import sContacts3 from "./s-contacts-3";
+import sContacts4 from "./s-contacts-4";
 import sDraft1 from "./s-draft-1";
 import sInbox3Allowlist from "./s-inbox-3-allowlist";
 import sInbox3InternalMode from "./s-inbox-3-internal-mode";
@@ -59,6 +61,8 @@ const ALL: Scenario[] = [
   sCli5,
   sContacts1,
   sContacts2,
+  sContacts3,
+  sContacts4,
   sDraft1,
 ];
 
