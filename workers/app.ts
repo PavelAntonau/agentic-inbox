@@ -807,9 +807,9 @@ app.route("/api/notifications", notificationsRouter);
 const { default: mailboxesRouter } = await import("./routes/mailboxes");
 app.route("/api/mailboxes", mailboxesRouter);
 
-// Agent token management router (Phase 5 — issue/list/revoke)
-const { default: tokensRouter } = await import("./routes/tokens");
-app.route("/api/tokens", tokensRouter);
+// Agent tokens router unmounted (user directive 2026-05-03 — phasing out the
+// entire token surface; will be replaced by a session-connection-status view).
+// Source kept at workers/routes/tokens.ts for now; safe to remove in a follow-up.
 
 // Observability router (Phase 6 — admin obs panels)
 const { default: observabilityRouter } = await import("./routes/observability");

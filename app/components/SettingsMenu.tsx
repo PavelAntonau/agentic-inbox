@@ -15,7 +15,6 @@ import {
   ChartLineIcon,
   EnvelopeIcon,
   GearSixIcon,
-  KeyIcon,
   SlidersIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -67,6 +66,10 @@ export default function SettingsMenu({
   }
 
   if (isAdmin) {
+    // Tokens link removed — entire agent-token surface is being phased out
+    // (user directive 2026-05-03). The /admin/tokens + /mailbox/:id/tokens
+    // routes + the API mount are unwired; a connection-status indicator will
+    // replace it in a follow-up.
     groups.push({
       label: "Workspace",
       items: [
@@ -83,12 +86,6 @@ export default function SettingsMenu({
           icon: <SlidersIcon size={16} />,
         },
         {
-          key: "admin-tokens",
-          label: "Tokens",
-          to: "/admin/tokens",
-          icon: <KeyIcon size={16} />,
-        },
-        {
           key: "admin-observability",
           label: "Observability",
           to: "/admin/observability",
@@ -101,9 +98,12 @@ export default function SettingsMenu({
   // No items at all — render nothing rather than an empty popover.
   if (groups.length === 0) return null;
 
+  // hover:bg-card-light (NOT bg-kumo-tint) — kumo-tint is `@theme inline` baked
+  // at the light-mode value and produces a white halo in dark mode (same root
+  // cause as the Phase 3e sun-hover bug). bg-card-light follows the active theme.
   const triggerClassName = cn(
     "inline-flex h-9 w-9 items-center justify-center rounded-lg",
-    "text-text-bright hover:bg-kumo-tint shadow-sm",
+    "text-text-bright hover:bg-card-light shadow-sm",
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-kumo-ring",
     "cursor-pointer transition-colors",
     isSettingsActive && "bg-kumo-base",
@@ -119,7 +119,10 @@ export default function SettingsMenu({
         <GearSixIcon size={20} />
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner sideOffset={8} align="end">
+        {/* z-50 wins against the sticky header's z-10 (NotificationBell uses
+         * z-40 for the same reason). Without this the popup renders behind
+         * the header bar. */}
+        <Menu.Positioner sideOffset={8} align="end" className="z-50">
           <Menu.Popup
             className={cn(
               "min-w-56 origin-top-right rounded-xl border-2 border-border bg-card p-1.5",

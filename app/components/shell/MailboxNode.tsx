@@ -9,14 +9,12 @@
 import { Badge } from "~/ui";
 import {
   EnvelopeIcon,
-  KeyIcon,
   ShareNetworkIcon,
   UserIcon,
 } from "@phosphor-icons/react";
 import { NavLink, useNavigate } from "react-router";
 import { useState, useRef } from "react";
 import type { MailboxNode as MailboxNodeData } from "~/routes/_app/api.tree";
-import { canIssueToken } from "shared/permissions/agent-tokens";
 import AddToGroupDialog from "~/components/mailbox/AddToGroupDialog";
 import RemoveFromGroupDialog from "~/components/mailbox/RemoveFromGroupDialog";
 import TransferMailboxOwnershipDialog from "~/components/mailbox/TransferMailboxOwnershipDialog";
@@ -60,11 +58,6 @@ export default function MailboxNode({
   const canUnshare = (isOwner || isGlobal) && inGroup;
   const canTransfer = isOwner || isGlobal;
   const canDelete = isOwner || isGlobal;
-  // Phase 7 T7.7: server + client share one predicate (no more copy-paste drift).
-  const canTokens = canIssueToken(
-    { user_id: actorUserId, role: actorRole },
-    { id: mailbox.id, owner_user_id: mailbox.owner_user_id },
-  ).ok;
 
   const displayName =
     mailbox.display_name || mailbox.address.split("@")[0] || mailbox.address;
@@ -162,19 +155,6 @@ export default function MailboxNode({
               >
                 <UserIcon size={14} />
                 Transfer ownership
-              </button>
-            )}
-            {canTokens && (
-              <button
-                type="button"
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text hover:bg-tx-card-hover transition-colors"
-                onClick={() => {
-                  closeMenu();
-                  navigate(`/mailbox/${mailbox.id}/tokens`);
-                }}
-              >
-                <KeyIcon size={14} />
-                Tokens
               </button>
             )}
             {canDelete && (
