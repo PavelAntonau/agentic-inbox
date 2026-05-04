@@ -2,11 +2,10 @@
 // Licensed under the Apache 2.0 license
 
 import { Button } from "~/ui";
-import { CaretRightIcon, ListIcon, RobotIcon } from "@phosphor-icons/react";
+import { ListIcon, RobotIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
-import { useMailbox } from "~/queries/mailboxes";
 import GlobalSearch from "~/components/GlobalSearch";
 import Logo from "~/components/Logo";
 import NotificationBell from "~/components/notifications/NotificationBell";
@@ -33,9 +32,6 @@ const HEADER_GHOST_BTN_CLASS = "text-text-bright shadow-sm hover:bg-card-light";
 
 export default function Header() {
   const { mailboxId } = useParams<{ mailboxId: string }>();
-  // Breadcrumb: resolve mailbox display name so header shows context
-  // even though the rail now owns full mailbox identity on desktop.
-  const { data: currentMailbox } = useMailbox(mailboxId);
   const location = useLocation();
   const { toggleSidebar, toggleAgentPanel, isAgentPanelOpen } = useUIStore();
 
@@ -96,23 +92,11 @@ export default function Header() {
   );
 
   return (
-    <header className="flex items-center gap-3 px-3 py-2.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
-      {/* Logo — always visible. Height 77 (~20 % smaller than the 96 px
-          Phase 1 size — top bar was looking too tall). */}
-      <Logo height={77} className="shrink-0 mr-2" />
-
-      {/* Breadcrumb — shows current mailbox context on desktop. */}
-      {mailboxId && currentMailbox && (
-        <div className="hidden md:flex items-center gap-1 text-sm text-text-muted shrink-0">
-          <CaretRightIcon size={12} aria-hidden />
-          <span className="font-medium text-text-bright max-w-[180px] truncate">
-            {currentMailbox.settings?.fromName ||
-              (currentMailbox.name !== currentMailbox.email
-                ? currentMailbox.name
-                : currentMailbox.email.split("@")[0])}
-          </span>
-        </div>
-      )}
+    <header className="flex items-center gap-3 px-3 py-1.5 bg-card border-b border-border sticky top-0 z-10 md:px-5 md:gap-4">
+      {/* Logo — always visible. Height 58 (25% shorter — Phase 4 UAT round
+          1 item 3 trim; the breadcrumb that previously sat to the right of
+          the logo and the open-inbox indicator have both been removed). */}
+      <Logo height={58} className="shrink-0 mr-2" />
 
       {/* Mobile sidebar toggle — only when in a mailbox. */}
       {mailboxId && (

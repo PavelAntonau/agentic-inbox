@@ -15,7 +15,7 @@ import {
   StarIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import logoUrl from "~/assets/branding/anai-mail-logo.png?url";
+import heroUrl from "~/assets/branding/anai-mail-login-hero.png?url";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -47,7 +47,12 @@ const FOLDER_EMPTY_STATES: Record<
 > = {
   [Folders.INBOX]: {
     icon: (
-      <img src={logoUrl} alt="" className="h-24 w-auto" draggable={false} />
+      <img
+        src={heroUrl}
+        alt=""
+        className="h-48 w-auto opacity-90"
+        draggable={false}
+      />
     ),
     title: "Inbox zero!",
     description:
