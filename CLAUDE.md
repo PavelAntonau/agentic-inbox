@@ -326,6 +326,57 @@ CLAUDE.md is the durable fix.
 
 ---
 
+## Send policy — internal-delivery short-circuit + external_send_enabled
+
+The send path lives in `workers/lib/tools.ts` (`toolSendEmail`, `toolSendReply`)
+and `workers/lib/internal-delivery.ts`. Decision tree per outbound message:
+
+1. **Resolve destination** via `resolveMailboxBackend(env, toAddress)`
+   (`workers/lib/email-helpers.ts`). Hits D1 first, R2 v1 second.
+2. **Internal → bypass Cloudflare Email Routing entirely.** If the destination
+   address is registered in either D1 or R2, `deliverInternal()` writes
+   straight to the destination MailboxDO INBOX (`workers/durableObject/`) and
+   appends an `audit_log` row. One round trip; no per-destination CF
+   verification required; mirrors the inbound catch-all email handler.
+3. **External → gated by per-mailbox `external_send_enabled`.**
+   `mailboxes.external_send_enabled` (D1, migration 0010) defaults to `0`.
+   When false, the send is rejected with a clear error pointing the user to
+   `/mailbox/:id/settings → Outbound`. When true, the send falls through to
+   `env.EMAIL.send()` (Cloudflare Email Routing).
+4. **CF Email Routing destinations must still be pre-verified.** This is the
+   one limitation we did not paper over — see `D-AIPH-5` in the Phase 3
+   action plan. With `external_send_enabled=true` and an unverified
+   destination, the user sees the standard `"destination address is not a
+   verified address"` message. In-app delivery covers every internal route,
+   so the verification surprise only surfaces for genuinely external sends.
+
+### Dual-stack reconciliation (D1 + R2 v1)
+
+Two mailbox stacks coexist: D1 (`mailboxes` table; UUID-keyed; per-user
+ACLs) and the legacy R2 v1 bucket (`mailboxes/<address>.json`; address-keyed;
+no ACL). The system unifies them at the **request layer**, never the data
+layer (`D-AIPH-1`). Three reconciliation points landed in Phase 3:
+
+| Surface | File | What it does |
+|---|---|---|
+| `requireMailbox` middleware | `workers/index.ts` | Resolves `:mailboxId` from D1 (UUID OR address) before falling back to R2; sets `c.var.resolvedMailboxAddress` for downstream `/api/v1/mailboxes/:mailboxId/*` handlers. |
+| `lookupMailboxV1()` | `workers/index.ts` | Same resolution for the bare `GET /api/v1/mailboxes/:mailboxId` (root, no sub-path). |
+| `verifyMailbox()` (MCP) | `workers/mcp/index.ts` | Returns the resolved address; each tool reassigns its `mailboxId` parameter so `getMailboxStub` keys the correct DurableObject (DOs are address-keyed). |
+| `/api/mailboxes/tree` extension | `workers/routes/mailboxes.ts` | Appends R2-only mailboxes to `tree.private` after de-duplication, so the home sidebar shows the union. |
+
+DOs are keyed by **address** via `idFromName(address)`. Always resolve UUID
+→ address before constructing a stub.
+
+### MCP tools that expose send/list/etc.
+
+`workers/mcp/index.ts` registers 13 tools. Every one except `list_mailboxes`
+goes through `verifyMailbox` for the mailboxId it receives — which now
+accepts D1 UUIDs, D1 addresses, and R2 addresses interchangeably. If you add
+a new tool, follow the same pattern (`const __vm = await verifyMailbox(...);
+if ("isError" in __vm) return __vm; mailboxId = __vm.address;`).
+
+---
+
 ## D1 schema (foundation Phase 2.1, in production)
 
 11 tables — `users`, `contacts`, `groups`, `group_members`, `group_invitations`,
