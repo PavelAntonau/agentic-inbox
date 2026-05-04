@@ -18,6 +18,7 @@ import { EyeIcon, SignOutIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { authClient } from "~/lib/auth-client";
 import ClientsPanel from "~/components/clients/ClientsPanel";
+import ConnectedAgentsCard from "~/components/ConnectedAgentsCard";
 
 type Visibility = "everyone" | "contacts" | "nobody";
 
@@ -221,6 +222,17 @@ export default function AccountRoute() {
             ))}
           </fieldset>
         </section>
+
+        {/* Connected MCP Agents — OAuth-provider grants (Phase 2 mcp-oauth, T2.4)
+          Backed by /api/users/me/agent-authorizations (T2.3). Scoped to OAuth
+          consent rows minted by @better-auth/oauth-provider so the consent
+          flow has a clean RFC-7009 user-side revocation surface.
+
+          Open question for Phase 3: this panel and ClientsPanel below currently
+          double-render OAuth clients (ClientsPanel projects oauth_client rows
+          as kind='mcp', this card surfaces oauth_consent rows). Reconciliation
+          tracked in action-plan-mail-actionnowai-mcp-oauth.md Phase 3. */}
+        <ConnectedAgentsCard />
 
         {/* Connected Agents — unified Clients panel (Phase 2, D-PLAT-7)
           Replaces the Phase-1 Devices card. Browser sessions are projected as
