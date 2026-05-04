@@ -848,6 +848,19 @@ app.route("/api/mailboxes", mailboxesRouter);
 const { default: sessionsRouter } = await import("./routes/sessions");
 app.route("/api/users/me/sessions", sessionsRouter);
 
+// Clients router (Phase 2 — unified client + grant management)
+const { default: clientsRouter } = await import("./routes/clients");
+app.route("/api/users/me/clients", clientsRouter);
+
+// Inbox-policies router (Phase 2 — external/internal inbound policy)
+const { default: inboxPoliciesRouter } =
+  await import("./routes/inbox-policies");
+app.route("/api/mailboxes", inboxPoliciesRouter);
+
+// Threads router (Phase 2 — ff-only CAS thread writes, D-PLAT-5)
+const { default: threadsRouter } = await import("./routes/threads");
+app.route("/api/mailboxes", threadsRouter);
+
 // Observability router (Phase 6 — admin obs panels)
 const { default: observabilityRouter } = await import("./routes/observability");
 app.route("/api/admin/obs", observabilityRouter);
