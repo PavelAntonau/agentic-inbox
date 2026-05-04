@@ -63,7 +63,7 @@ export default function LastLoginPanel() {
   }, []);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
+    <div className="obs-tile rounded-lg border border-border bg-card p-5">
       <h2 className="text-sm font-semibold text-text-bright mb-4">
         Last Login
       </h2>

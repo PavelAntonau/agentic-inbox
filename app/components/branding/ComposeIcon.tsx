@@ -10,33 +10,39 @@ import lightUrl from "~/assets/branding/compose-mailbox-light.png?url";
 import darkUrl from "~/assets/branding/compose-mailbox-dark.png?url";
 
 interface ComposeIconProps {
+  /** Pixel HEIGHT of the rendered icon. Width follows the asset's
+   *  intrinsic 863:651 aspect (~4:3). */
   size?: number;
   className?: string;
 }
+
+// Asset is 863 × 651 (transparent PNG, anai_mailbox_light original).
+const ASPECT = 863 / 651;
 
 export default function ComposeIcon({
   size = 18,
   className,
 }: ComposeIconProps) {
+  const width = Math.round(size * ASPECT);
   return (
     <span
       className={`relative inline-block shrink-0 ${className ?? ""}`.trim()}
-      style={{ width: size, height: size }}
+      style={{ width, height: size }}
     >
       <img
         src={lightUrl}
         alt=""
-        width={size}
+        width={width}
         height={size}
-        className="absolute inset-0 h-full w-full object-contain select-none dark:hidden"
+        className="block h-full w-full object-contain select-none dark:hidden"
         draggable={false}
       />
       <img
         src={darkUrl}
         alt=""
-        width={size}
+        width={width}
         height={size}
-        className="absolute inset-0 hidden h-full w-full object-contain select-none dark:block"
+        className="hidden h-full w-full object-contain select-none dark:block"
         draggable={false}
       />
     </span>

@@ -65,7 +65,7 @@ export default function ActiveSessionsPanel() {
   );
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
+    <div className="obs-tile rounded-lg border border-border bg-card p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-text-bright">
           Active Agent Sessions

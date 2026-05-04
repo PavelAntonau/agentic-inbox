@@ -20,9 +20,10 @@ export default function AppShell() {
   return (
     // flex-1 fills remaining height below the global Header rendered in root.tsx.
     // overflow-hidden prevents double scrollbars; inner panes scroll independently.
-    // UAT round-3 (second batch): horizontal gutter so panels don't slam
-    // against the browser edge on either side.
-    <div className="flex flex-1 min-h-0 overflow-hidden md:px-[10px]">
+    // Panels are FLUSH against the viewport edges (no outer gutter) per
+    // UAT round-3 batch-3 directive — the prior 10 px padding read as an
+    // unwanted inset, especially in dark mode.
+    <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left rail — resizable + collapsible. data-shell-sidebar paints
           a curved-paper drop shadow on the RIGHT edge (see app/index.css
           → [data-shell-sidebar][data-shadow-side="right"]). */}

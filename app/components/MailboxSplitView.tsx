@@ -16,14 +16,12 @@ interface MailboxSplitViewProps {
 
 function NoSelectionPlaceholder() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8 py-12 text-center">
-      {/* Standalone robot pair — the brand mark belongs HERE, not on a
-          button. Two mailbox-as-robot images mirrored, large and decorative.
-          UAT round-3 second batch directive. */}
-      <div className="flex items-end justify-center gap-4">
-        <ComposeIcon size={72} className="opacity-95" />
-        <ComposeIcon size={72} className="opacity-95 -scale-x-100" />
-      </div>
+    <div className="flex flex-1 flex-col items-center justify-center gap-8 px-8 py-12 text-center">
+      {/* ONE robot image — the artwork already shows two robots flanking a
+          mailbox; duplicating the asset was the round-3 batch-2 mistake.
+          Large (~360 px) decorative mark using the original transparent
+          PNG (863×651) shipped in assets_new. */}
+      <ComposeIcon size={360} className="max-w-[60vw] max-h-[40vh] h-auto" />
       <h2 className="text-xl font-semibold text-text-bright">
         Select an email or compose
       </h2>

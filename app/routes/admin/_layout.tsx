@@ -52,10 +52,16 @@ export default function AdminLayout() {
 
   if (!allowed) return null;
 
+  // The root shell pins height: 100vh + overflow:hidden, so admin pages
+  // need their OWN scroll container — without it, long routes (Observability
+  // audit-log) just clip and the user has no way to reach the rest of the
+  // page (UAT round-3 batch-3 finding).
   return (
-    <div className="min-h-screen bg-bg">
-      <div className="mx-auto max-w-5xl px-4 py-8 md:px-6 md:py-12">
-        <Outlet />
+    <div className="flex flex-col h-full bg-bg overflow-hidden">
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-4 py-8 md:px-6 md:py-12">
+          <Outlet />
+        </div>
       </div>
     </div>
   );

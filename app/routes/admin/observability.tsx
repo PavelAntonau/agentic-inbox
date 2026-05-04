@@ -15,8 +15,11 @@ export function meta() {
 }
 
 export default function AdminObservabilityRoute() {
+  // Scroll lives on the admin layout's flex-1 container now, NOT on this
+  // route — `h-full overflow-y-auto` on a content-driven parent collapsed
+  // to 0 and trapped scrolling inside an unreachable region.
   return (
-    <div className="px-4 py-4 md:px-8 md:py-6 h-full overflow-y-auto">
+    <div className="px-4 py-4 md:px-8 md:py-6">
       <h1 className="text-lg font-semibold text-text-bright mb-1">
         Observability
       </h1>

@@ -124,7 +124,15 @@ export default function GlobalSearch() {
           (lg → custom 38 rem), taller results pane (max-h-96 → max-h-[28rem]),
           and a subtle low-saturation spinner during background fetch. */}
       <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog size="lg" className="p-0 overflow-hidden sm:!min-w-[38rem]">
+        {/* UAT round-3 batch-3: pin the dialog vertically (top:15vh,
+            translate-y:0) and lock its HEIGHT so the modal does NOT
+            recentre every time the result list grows or shrinks. The
+            input row stays exactly where it appeared on open; only the
+            inner results list moves. */}
+        <Dialog
+          size="lg"
+          className="p-0 overflow-hidden sm:!min-w-[38rem] !top-[15vh] !translate-y-0 !h-[32rem] flex flex-col"
+        >
           <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
             <MagnifyingGlassIcon
               size={20}
@@ -156,7 +164,7 @@ export default function GlobalSearch() {
             </kbd>
           </div>
 
-          <div className="max-h-[28rem] overflow-y-auto p-2">
+          <div className="flex-1 min-h-0 overflow-y-auto p-2">
             {filtered.length === 0 ? (
               <div className="px-3 py-12 text-center text-sm text-text-muted">
                 {mailboxes.length === 0

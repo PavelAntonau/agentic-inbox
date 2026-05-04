@@ -204,46 +204,44 @@ body::after {
   background-repeat: no-repeat;
 }
 
-/* UAT round-3 (second batch): top gradient was the most eye-catching
- * fixed-position layer — softened by ~50 % opacity AND tightened to
- * 28 vh so it doesn't dominate the chrome. Bottom dimmed slightly too
- * for visual balance. */
+/* UAT round-3 batch-3: gradients further desaturated AND shrunk
+ * (28vh→20vh top, 32vh→22vh bottom). Top opacity halved again. */
 body::before {
-  height: 28vh;
+  height: 20vh;
   top: 0;
   background-image: radial-gradient(
-    ellipse 55% 100% at 50% 0%,
-    rgba(78, 195, 255, 0.08) 0%,
-    rgba(78, 195, 255, 0.03) 45%,
+    ellipse 50% 100% at 50% 0%,
+    rgba(78, 195, 255, 0.04) 0%,
+    rgba(78, 195, 255, 0.015) 45%,
     transparent 85%
   );
 }
 
 body::after {
-  height: 32vh;
+  height: 22vh;
   bottom: 0;
   background-image: radial-gradient(
-    ellipse 55% 100% at 50% 100%,
-    rgba(10, 18, 38, 0.14) 0%,
-    rgba(10, 18, 38, 0.05) 45%,
+    ellipse 50% 100% at 50% 100%,
+    rgba(10, 18, 38, 0.08) 0%,
+    rgba(10, 18, 38, 0.025) 45%,
     transparent 85%
   );
 }
 
 :root.theme-dark body::before {
   background-image: radial-gradient(
-    ellipse 60% 100% at 50% 0%,
-    rgba(78, 195, 255, 0.13) 0%,
-    rgba(78, 195, 255, 0.05) 45%,
+    ellipse 55% 100% at 50% 0%,
+    rgba(78, 195, 255, 0.07) 0%,
+    rgba(78, 195, 255, 0.025) 45%,
     transparent 85%
   );
 }
 
 :root.theme-dark body::after {
   background-image: radial-gradient(
-    ellipse 60% 100% at 50% 100%,
-    rgba(0, 0, 0, 0.45) 0%,
-    rgba(0, 0, 0, 0.16) 45%,
+    ellipse 55% 100% at 50% 100%,
+    rgba(0, 0, 0, 0.32) 0%,
+    rgba(0, 0, 0, 0.1) 45%,
     transparent 85%
   );
 }
@@ -657,7 +655,7 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 14px;
+  width: 22px;
   pointer-events: none;
   z-index: 9;
   background:
@@ -710,7 +708,7 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 14px;
+  width: 22px;
   pointer-events: none;
   z-index: 9;
   -webkit-mask-image: linear-gradient(
@@ -771,4 +769,32 @@ body {
     rgba(0, 0, 0, 0.2) 45%,
     transparent 100%
   );
+}
+
+/* Observability tiles — elegant elevated shadow so they read as cards
+ * lifted off the page, not flat panels (UAT round-3 batch-3). */
+.obs-tile {
+  box-shadow:
+    0 1px 2px rgba(10, 18, 38, 0.04),
+    0 6px 16px -6px rgba(10, 18, 38, 0.12),
+    0 14px 32px -12px rgba(10, 18, 38, 0.1);
+  transition: box-shadow 220ms ease;
+}
+.obs-tile:hover {
+  box-shadow:
+    0 1px 2px rgba(10, 18, 38, 0.05),
+    0 10px 24px -8px rgba(10, 18, 38, 0.16),
+    0 22px 48px -16px rgba(10, 18, 38, 0.14);
+}
+:root.theme-dark .obs-tile {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 8px 20px -6px rgba(0, 0, 0, 0.5),
+    0 18px 40px -14px rgba(0, 0, 0, 0.45);
+}
+:root.theme-dark .obs-tile:hover {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.35),
+    0 12px 28px -8px rgba(0, 0, 0, 0.6),
+    0 26px 56px -18px rgba(0, 0, 0, 0.55);
 }
