@@ -26,7 +26,10 @@ import sCli1 from "./s-cli-1";
 import sCli2 from "./s-cli-2";
 import sCli3 from "./s-cli-3";
 import sCli4 from "./s-cli-4";
+import sCli5 from "./s-cli-5";
 import sContacts1 from "./s-contacts-1";
+import sContacts2 from "./s-contacts-2";
+import sDraft1 from "./s-draft-1";
 import sInbox3Allowlist from "./s-inbox-3-allowlist";
 import sInbox3InternalMode from "./s-inbox-3-internal-mode";
 
@@ -53,7 +56,10 @@ const ALL: Scenario[] = [
   sCli2,
   sCli3,
   sCli4,
+  sCli5,
   sContacts1,
+  sContacts2,
+  sDraft1,
 ];
 
 export async function loadScenarios(): Promise<RegistryEntry[]> {
