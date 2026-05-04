@@ -885,6 +885,16 @@ app.all("/agents/*", async (c) => {
 const { default: testRoutes } = await import("./routes/__test__/email-ingest");
 app.route("/api/__test__", testRoutes);
 
+// /__mock/* router — autonomous-local-testing harness. Self-gates on MOCK_MODE
+// (defensive depth — see workers/routes/__mock__.ts), so safe to mount
+// unconditionally. The /cdn-cgi/access/logout handler is mounted alongside
+// since the ProfileMenu sign-out link normally hits Cloudflare Access; in
+// MOCK_MODE there is no Access layer so we serve it ourselves.
+const { default: mockRouter, mockAccessLogoutHandler } =
+  await import("./routes/__mock__");
+app.route("/__mock", mockRouter);
+app.all("/cdn-cgi/access/logout", mockAccessLogoutHandler());
+
 // React Router catch-all: serves the SPA for all non-API routes
 app.all("*", (c) => {
   return requestHandler(c.req.raw, {
