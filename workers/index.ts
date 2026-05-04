@@ -148,16 +148,54 @@ app.post("/api/v1/mailboxes", async (c) => {
   return c.json({ id: email, email, name, settings: finalSettings }, 201);
 });
 
+async function lookupMailboxV1(
+  env: Env,
+  mailboxId: string,
+): Promise<Record<string, unknown> | null> {
+  const obj = await env.BUCKET.get(`mailboxes/${mailboxId}.json`);
+  if (obj) {
+    return {
+      id: mailboxId,
+      name: mailboxId,
+      email: mailboxId,
+      kind: "r2",
+      settings: await obj.json(),
+    };
+  }
+  if (env.DB) {
+    const lowered = mailboxId.toLowerCase();
+    const raw = (await env.DB.prepare(
+      "SELECT id, address, display_name, owner_user_id, created_at FROM mailboxes WHERE id = ?1 OR lower(address) = ?2 LIMIT 1",
+    )
+      .bind(mailboxId, lowered)
+      .first()) as {
+      id: string;
+      address: string;
+      display_name: string | null;
+      owner_user_id: string;
+      created_at: number;
+    } | null;
+    if (raw) {
+      return {
+        id: raw.id,
+        name: raw.display_name ?? raw.address,
+        email: raw.address,
+        address: raw.address,
+        owner_user_id: raw.owner_user_id,
+        created_at: raw.created_at,
+        kind: "d1",
+        settings: {},
+      };
+    }
+  }
+  return null;
+}
+
 app.get("/api/v1/mailboxes/:mailboxId", async (c) => {
   const mailboxId = c.req.param("mailboxId")!;
-  const obj = await c.env.BUCKET.get(`mailboxes/${mailboxId}.json`);
-  if (!obj) return c.json({ error: "Not found" }, 404);
-  return c.json({
-    id: mailboxId,
-    name: mailboxId,
-    email: mailboxId,
-    settings: await obj.json(),
-  });
+  const found = await lookupMailboxV1(c.env, mailboxId);
+  if (!found) return c.json({ error: "Not found" }, 404);
+  return c.json(found);
 });
 
 app.put("/api/v1/mailboxes/:mailboxId", async (c) => {

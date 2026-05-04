@@ -23,6 +23,7 @@ import { forGroup, type AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
 import { appendAudit } from "../lib/audit-log";
 import { buildMailboxTree } from "../lib/mailbox-tree";
+import { listMailboxes } from "../lib/email-helpers";
 import {
   canShare,
   canUnshare,
@@ -100,6 +101,37 @@ async function fetchGroup(
 router.get("/tree", async (c) => {
   const ctx = c.var.authzContext!;
   const tree = await buildMailboxTree(c.env.DB, ctx);
+
+  // Phase 3 — append R2-only legacy mailboxes (e.g. testbox@actionnow.ai)
+  // that have no D1 row, so the sidebar shows the union and F-PROD-UI-1
+  // is fully resolved (not just "stranded card removed" — the v1 mailbox
+  // is rendered alongside D1 mailboxes).
+  const knownIds = new Set<string>([
+    ...tree.private.map((m) => m.id),
+    ...tree.followed.map((m) => m.id),
+    ...tree.groups.flatMap((g) => g.mailboxes.map((m) => m.id)),
+  ]);
+  const knownAddrs = new Set<string>([
+    ...tree.private.map((m) => m.address.toLowerCase()),
+    ...tree.followed.map((m) => m.address.toLowerCase()),
+    ...tree.groups.flatMap((g) =>
+      g.mailboxes.map((m) => m.address.toLowerCase()),
+    ),
+  ]);
+  const all = await listMailboxes(c.env);
+  for (const m of all) {
+    if (m.kind !== "r2") continue;
+    if (knownIds.has(m.id)) continue;
+    if (knownAddrs.has(m.address.toLowerCase())) continue;
+    tree.private.push({
+      id: m.id,
+      address: m.address,
+      display_name: null,
+      owner_user_id: ctx.user_id,
+      created_at: 0,
+    });
+  }
+
   return c.json(tree);
 });
 
