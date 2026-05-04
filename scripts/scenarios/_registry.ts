@@ -20,6 +20,7 @@ import sMsg2 from "./s-msg-2";
 import sMsg5 from "./s-msg-5";
 import sCli1 from "./s-cli-1";
 import sCli2 from "./s-cli-2";
+import sCli3 from "./s-cli-3";
 
 export interface RegistryEntry {
   scenario: Scenario;
@@ -36,6 +37,7 @@ const ALL: Scenario[] = [
   sMsg5,
   sCli1,
   sCli2,
+  sCli3,
 ];
 
 export async function loadScenarios(): Promise<RegistryEntry[]> {
