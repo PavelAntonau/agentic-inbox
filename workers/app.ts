@@ -1042,6 +1042,10 @@ const { default: agentAuthorizationsRouter } =
   await import("./routes/agent-authorizations");
 app.route("/api/users/me/agent-authorizations", agentAuthorizationsRouter);
 
+// PAT router (Phase 3 / T3.1 mcp-oauth — Personal Access Tokens, display-once)
+const { default: patsRouter } = await import("./routes/pats");
+app.route("/api/users/me/pats", patsRouter);
+
 // Inbox-policies router (Phase 2 — external/internal inbound policy)
 const { default: inboxPoliciesRouter } =
   await import("./routes/inbox-policies");

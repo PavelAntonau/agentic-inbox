@@ -615,3 +615,37 @@ export const oauth_access_token = sqliteTable(
     expiresAtIdx: index("oauth_access_token_expires_at_idx").on(t.expiresAt),
   }),
 );
+
+// Phase 3 (mcp-oauth) — Personal Access Tokens (PATs).
+// Migration 0012. v0.1 headless-agent auth (D-mcp-auth-2). Display-once
+// flow: POST returns the full token ONCE, GET shows token_prefix/token_suffix
+// only. token_hash = HMAC-SHA-256(TOKEN_PEPPER, plaintext) hex (matches the
+// agent_tokens pattern). T3.3 wires the bearer middleware to look up by hash.
+export const oauth_personal_access_token = sqliteTable(
+  "oauth_personal_access_token",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    tokenPrefix: text("token_prefix").notNull(),
+    tokenSuffix: text("token_suffix").notNull(),
+    scopes: text("scopes").notNull(),
+    mailboxId: text("mailbox_id").references(() => mailboxes.id, {
+      onDelete: "cascade",
+    }),
+    ipAllowlist: text("ip_allowlist"),
+    createdAt: integer("created_at").notNull(),
+    lastUsedAt: integer("last_used_at"),
+    expiresAt: integer("expires_at"),
+    revokedAt: integer("revoked_at"),
+  },
+  (t) => ({
+    userIdIdx: index("oauth_personal_access_token_user_id_idx").on(t.userId),
+    tokenHashIdx: index("oauth_personal_access_token_token_hash_idx").on(
+      t.tokenHash,
+    ),
+  }),
+);
