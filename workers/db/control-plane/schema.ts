@@ -160,6 +160,22 @@ export const mailboxes = sqliteTable(
       .references(() => users.id),
     created_at: integer("created_at").notNull(),
     created_by: text("created_by").references(() => users.id),
+    // Phase 2 — inbox policy columns (migration 0007)
+    external_inbound_enabled: integer("external_inbound_enabled", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(true),
+    external_allow_mode: text("external_allow_mode", {
+      enum: ["all", "allowlist"],
+    })
+      .notNull()
+      .default("all"),
+    internal_inbound_mode: text("internal_inbound_mode", {
+      enum: ["everyone", "contacts_only", "none"],
+    })
+      .notNull()
+      .default("everyone"),
   },
   (t) => ({
     addressIdx: uniqueIndex("mailboxes_address_nocase").on(
@@ -187,6 +203,7 @@ export const mailbox_groups = sqliteTable(
 );
 
 // 8. agent_tokens — Cloudflare Access service-token mirror
+// Phase 3 will drop this table after the client_id backfill soak (D-PLAT-6).
 export const agent_tokens = sqliteTable("agent_tokens", {
   id: text("id").primaryKey(),
   cf_service_token_id: text("cf_service_token_id").unique(),
@@ -203,6 +220,12 @@ export const agent_tokens = sqliteTable("agent_tokens", {
   created_at: integer("created_at").notNull(),
   last_seen_at: integer("last_seen_at"),
   revoked_at: integer("revoked_at"),
+  // Phase 2 (migration 0009): FK pointing at the backfilled clients row.
+  // NULL until the backfill runs; read-only after that.
+  // Note: clients table is defined later in this file; the lazy () => clients.id
+  // reference is the standard Drizzle pattern for forward references.
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+  client_id: text("client_id").references(() => clients.id),
 });
 
 // 9. agent_instances — 1:N enforcement
@@ -352,5 +375,80 @@ export const audit_log = sqliteTable(
   },
   (t) => ({
     atIdx: index("audit_log_at").on(t.at),
+  }),
+);
+
+// Phase 2 — Inbox external allowlist (migration 0007)
+// Entries for mailboxes where external_allow_mode = 'allowlist'.
+// kind = 'email' → exact match; kind = 'domain' → suffix match.
+export const inboxExternalAllowlist = sqliteTable(
+  "inbox_external_allowlist",
+  {
+    id: text("id").primaryKey(),
+    inbox_id: text("inbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    sender_pattern: text("sender_pattern").notNull(),
+    kind: text("kind", { enum: ["email", "domain"] }).notNull(),
+    created_at: integer("created_at").notNull(),
+  },
+  (t) => ({
+    inboxIdx: index("idx_inbox_external_allowlist_inbox").on(t.inbox_id),
+  }),
+);
+
+// Phase 2 — Clients table (migration 0008)
+// Persists non-browser clients (mcp, ios, desktop, other).
+// Browser sessions are projected as kind='browser' at read-time from the
+// better-auth session table; they are NOT stored here (D-PLAT-7).
+export const clients = sqliteTable(
+  "clients",
+  {
+    id: text("id").primaryKey(),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["browser", "mcp", "ios", "desktop", "other"],
+    }).notNull(),
+    name: text("name").notNull(),
+    oauth_client_id: text("oauth_client_id"),
+    last_seen_at: integer("last_seen_at"),
+    ip_address: text("ip_address"),
+    user_agent: text("user_agent"),
+    revoked_at: integer("revoked_at"),
+    created_at: integer("created_at").notNull(),
+  },
+  (t) => ({
+    userIdx: index("idx_clients_user").on(t.user_id),
+    userActiveIdx: index("idx_clients_user_active")
+      .on(t.user_id)
+      .where(sql`${t.revoked_at} IS NULL`),
+  }),
+);
+
+// Phase 2 — Client grants table (migration 0008)
+// Per-client per-inbox scope grants. UNIQUE on (client_id, inbox_id, scope)
+// where revoked_at IS NULL enforces only one active grant per triple.
+export const clientGrants = sqliteTable(
+  "client_grants",
+  {
+    id: text("id").primaryKey(),
+    client_id: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    inbox_id: text("inbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    scope: text("scope", { enum: ["read", "write"] }).notNull(),
+    granted_at: integer("granted_at").notNull(),
+    revoked_at: integer("revoked_at"),
+  },
+  (t) => ({
+    activeIdx: uniqueIndex("idx_client_grants_active")
+      .on(t.client_id, t.inbox_id, t.scope)
+      .where(sql`${t.revoked_at} IS NULL`),
+    clientIdx: index("idx_client_grants_client").on(t.client_id),
+    inboxIdx: index("idx_client_grants_inbox").on(t.inbox_id),
   }),
 );
