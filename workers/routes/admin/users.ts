@@ -11,6 +11,8 @@ import { canAct } from "../../lib/peer-protection";
 import { appendAudit } from "../../lib/audit-log";
 import { upsertEmail } from "../../lib/cloudflare-access-policy";
 import { getSettings } from "../../lib/settings-cache";
+import { getEmailBinding } from "../../lib/mocks/email-binding";
+import { plainTextInvite } from "../../lib/email-templates";
 
 // Re-export type for the router
 type AppVariables = {
@@ -165,6 +167,43 @@ router.post("/invite", async (c) => {
       },
     );
   }
+
+  // Send the invitation email. Plain-text spec: one paragraph, one URL
+  // (`/login?email=<urlencoded>`), one signature line. Sender is the apex
+  // `noreply@actionnow.ai` (DKIM-aligned via Resend). Errors are logged +
+  // recorded in the audit row but do NOT change the response — the privacy
+  // contract (always return `ok: true`) stays intact.
+  const host = new URL(c.req.url).host;
+  const loginUrl = `https://${host}/login?email=${encodeURIComponent(email)}`;
+  let mailSendError: string | null = null;
+  try {
+    const binding = getEmailBinding(c.env);
+    await binding.send({
+      to: email,
+      from: { name: "ActionNow", email: "noreply@actionnow.ai" },
+      subject: "You've been invited to ActionNow",
+      text: plainTextInvite({ loginUrl }),
+    });
+  } catch (e) {
+    mailSendError = (e as Error).message;
+    console.error(
+      "[admin/users/invite] send failed",
+      JSON.stringify({ recipient: email, error: mailSendError }),
+    );
+  }
+
+  await appendAudit(
+    db,
+    actor,
+    "workspace.invite-mail",
+    { kind: "user", id: existingUser?.id ?? "pending" },
+    {
+      method: "admin-invite",
+      email,
+      mail_send_status: mailSendError ? "failed" : "sent",
+      mail_send_error: mailSendError,
+    },
+  );
 
   // Always return ok: true — privacy (E15/E16)
   return c.json({ ok: true });

@@ -36,11 +36,6 @@ interface UIState {
   // Agent panel
   isAgentPanelOpen: boolean;
   toggleAgentPanel: () => void;
-  // True once the user has manually re-opened the agent panel during the
-  // currently-selected email view. Sticky for the lifetime of that email
-  // view so subsequent re-renders don't auto-close again. Resets when the
-  // selected email changes or is cleared.
-  userOpenedAgentDuringEmail: boolean;
 
   // Legacy dialog support (kept for non-split views)
   isComposeModalOpen: boolean;
@@ -56,29 +51,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   isComposeModalOpen: false,
   isSidebarOpen: false,
   isAgentPanelOpen: true,
-  userOpenedAgentDuringEmail: false,
 
-  selectEmail: (id) =>
-    set((state) => {
-      // Opening or switching emails: auto-collapse the agent panel unless the
-      // user already manually re-opened it during this email view (sticky).
-      if (id !== null && id !== state.selectedEmailId) {
-        const shouldAutoCollapse =
-          state.isAgentPanelOpen && !state.userOpenedAgentDuringEmail;
-        return {
-          selectedEmailId: id,
-          isComposing: false,
-          isAgentPanelOpen: shouldAutoCollapse ? false : state.isAgentPanelOpen,
-          userOpenedAgentDuringEmail: false,
-        };
-      }
-      // Clearing the selection (or selecting same id) resets the sticky flag.
-      return {
-        selectedEmailId: id,
-        isComposing: false,
-        userOpenedAgentDuringEmail: false,
-      };
-    }),
+  selectEmail: (id) => set({ selectedEmailId: id, isComposing: false }),
 
   startCompose: (options) =>
     set((state) => {
@@ -101,7 +75,6 @@ export const useUIStore = create<UIState>((set, get) => ({
       isComposing: false,
       _previousEmailId: null,
       composeOptions: { mode: "new" as const, originalEmail: null },
-      userOpenedAgentDuringEmail: false,
     }),
 
   closeCompose: () =>
@@ -117,17 +90,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   toggleSidebar: () => set({ isSidebarOpen: !get().isSidebarOpen }),
 
   toggleAgentPanel: () =>
-    set((state) => {
-      const next = !state.isAgentPanelOpen;
-      // If the user is manually re-opening the panel while an email is open,
-      // mark the sticky flag so a subsequent selectEmail/refresh doesn't
-      // auto-close it again.
-      const sticky =
-        next && state.selectedEmailId !== null
-          ? true
-          : state.userOpenedAgentDuringEmail;
-      return { isAgentPanelOpen: next, userOpenedAgentDuringEmail: sticky };
-    }),
+    set((state) => ({ isAgentPanelOpen: !state.isAgentPanelOpen })),
 
   openComposeModal: (options) =>
     set({
