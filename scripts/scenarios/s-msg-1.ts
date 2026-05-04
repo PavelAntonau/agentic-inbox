@@ -23,46 +23,55 @@ const scenario: Scenario = {
   async run(ctx) {
     await loginAs(ctx, TEST_USERS.alice);
 
-    // Ensure a mailbox exists. Easiest path: API call (avoids brittle UI
-    // dependency for a non-create scenario).
+    // Seed via the v1 (R2-backed) endpoint — the SAME stack that
+    // `/api/v1/mailboxes/:id/emails` POST will read from. The control-
+    // plane `/api/mailboxes` (D1) and the legacy `/api/v1/mailboxes`
+    // (R2) are separate worlds; mixing them is what produced the 404 in
+    // F-PHASE2-005 (the v1 send's `requireMailbox` middleware does
+    // BUCKET.head('mailboxes/<id>.json'), which a D1-only seed never
+    // creates). The v1 mailboxId IS the email.
+    const senderEmail = "sender@actionnow.ai";
     await ctx.browser.call("browser_evaluate", {
       expression: `(async () => {
-        const res = await fetch('/api/mailboxes', {
+        const res = await fetch('/api/v1/mailboxes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: 'sender@actionnow.ai', display_name: 'Sender' }),
+          body: JSON.stringify({ name: 'Sender', email: ${JSON.stringify(senderEmail)} }),
         });
         if (!res.ok && res.status !== 409) {
           const body = await res.text();
-          throw new Error('seed mailbox failed: ' + res.status + ' ' + body);
+          throw new Error('v1 seed mailbox failed: ' + res.status + ' ' + body);
         }
         return true;
       })()`,
     });
 
-    // Reload so the rail picks it up.
+    // Reload so the rail picks up any client-plane changes (the v1 seed
+    // doesn't touch D1, so the rail tree may stay empty — that's fine
+    // for this scenario, which exercises the v1 send wire).
     await ctx.browser.call("browser_navigate", { url: `${ctx.baseUrl}/` });
     await ctx.screenshot("home-with-mailbox");
 
     const outboxBefore = await ctx.mock.outbox(50);
 
-    // Send through the API surface — this is what the UI's Send button
-    // ultimately POSTs. UI-driven send is a follow-up scenario (S-MSG-2/3
-    // verify the wider compose UX); S-MSG-1 verifies the wire reaches the
-    // mock outbox.
+    // Send through the v1 API surface. Body must satisfy
+    // SendEmailRequestSchema (workers/lib/schemas.ts:61): `from` is
+    // required, body content goes in `text` or `html` (NOT `body_text`).
+    // The original scenario sent `{to, subject, body_text}` — both
+    // missing-`from` and the body-field rename were silently masked by
+    // the upstream 404 from requireMailbox.
     const sendResult = (await ctx.browser.call("browser_evaluate", {
       expression: `(async () => {
-        const tree = await fetch('/api/mailboxes/tree').then(r => r.json()).catch(() => ({}));
-        const items = [...(tree.private || []), ...(tree.followed || [])];
-        const mbox = items.find(m => m.address === 'sender@actionnow.ai');
-        if (!mbox) throw new Error('seed mailbox not found in /api/mailboxes');
-        const res = await fetch('/api/v1/mailboxes/' + mbox.id + '/emails', {
+        const senderEmail = ${JSON.stringify(senderEmail)};
+        const mid = encodeURIComponent(senderEmail);
+        const res = await fetch('/api/v1/mailboxes/' + mid + '/emails', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: ['recipient@example.com'],
+            from: senderEmail,
             subject: 'S-MSG-1 smoke',
-            body_text: 'sent by S-MSG-1',
+            text: 'sent by S-MSG-1',
           }),
         });
         return { status: res.status, body: await res.text() };
