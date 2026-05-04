@@ -176,6 +176,12 @@ export const mailboxes = sqliteTable(
     })
       .notNull()
       .default("everyone"),
+    // Outbound policy (migration 0010). Default 0 = internal-only; flip to 1
+    // to allow toolSendEmail / toolSendReply to fall through to env.EMAIL.send()
+    // when the destination address is external.
+    external_send_enabled: integer("external_send_enabled", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (t) => ({
     addressIdx: uniqueIndex("mailboxes_address_nocase").on(
