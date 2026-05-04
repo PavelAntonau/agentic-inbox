@@ -71,6 +71,104 @@ mockRouter.get("/otp-latest", async (c) => {
   return c.json(otp);
 });
 
+/**
+ * POST /__mock/seed-session — directly insert a row into the better-auth `session`
+ * table for an existing user, with a caller-supplied `expires_at`.
+ *
+ * The dev-mode picker (`/login` POST identity=...) sets the `x-mock-user-email`
+ * cookie but does NOT create a row in the `session` table — that table is only
+ * populated by the better-auth OTP flow. As a result, the
+ * `GET /api/users/me/sessions` and `GET /api/users/me/clients` endpoints have
+ * no test surface in MOCK_MODE without a way to seed sessions directly.
+ *
+ * This endpoint exists ONLY to give scenarios that need a controlled set of
+ * sessions (S-AUTH-4 expired-session filter, future S-AUTH-* multi-session
+ * tests) a deterministic seed path. Production never sees /__mock/* — the
+ * router is only mounted when MOCK_MODE=1 (workers/app.ts) AND every route
+ * defends with isMockMode(c.env) above.
+ *
+ * Body: { email: string, expires_at: number, ip_address?: string, user_agent?: string }
+ *  - email       — must resolve to an existing users row (caller logs in first)
+ *  - expires_at  — epoch ms; pass a past value to seed an expired session
+ *  - ip_address  — optional, defaults to "127.0.0.1"
+ *  - user_agent  — optional, defaults to "S-AUTH-4-seed/1.0"
+ *
+ * Returns: { id, user_id, expires_at, ip_address, user_agent, created_at, updated_at }
+ */
+mockRouter.post("/seed-session", async (c) => {
+  let body: {
+    email?: unknown;
+    expires_at?: unknown;
+    ip_address?: unknown;
+    user_agent?: unknown;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { email, expires_at, ip_address, user_agent } = body;
+  if (typeof email !== "string" || email.trim().length === 0) {
+    return c.json({ error: "email is required" }, 400);
+  }
+  if (typeof expires_at !== "number" || !Number.isFinite(expires_at)) {
+    return c.json(
+      { error: "expires_at must be a finite number (epoch ms)" },
+      400,
+    );
+  }
+  const ipAddress =
+    typeof ip_address === "string" && ip_address.length > 0
+      ? ip_address
+      : "127.0.0.1";
+  const userAgent =
+    typeof user_agent === "string" && user_agent.length > 0
+      ? user_agent
+      : "S-AUTH-4-seed/1.0";
+
+  // Look up the user row.
+  const userRow = await c.env.DB.prepare(
+    "SELECT id FROM users WHERE email = ?1",
+  )
+    .bind(email)
+    .first<{ id: string }>();
+  if (!userRow) {
+    return c.json(
+      { error: `no users row for email=${email} (caller must log in first)` },
+      404,
+    );
+  }
+
+  // Build a session row. Hex-from-random for id + token (ASCII-safe and
+  // unique enough for a test seed; never used as a real auth credential).
+  const rand = (n: number): string => {
+    const buf = new Uint8Array(n);
+    crypto.getRandomValues(buf);
+    return Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+  };
+  const id = `seed-${rand(8)}`;
+  const token = `seedtok-${rand(16)}`;
+  const now = Date.now();
+
+  await c.env.DB.prepare(
+    `INSERT INTO session (id, user_id, expires_at, token, ip_address, user_agent, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)`,
+  )
+    .bind(id, userRow.id, expires_at, token, ipAddress, userAgent, now)
+    .run();
+
+  return c.json({
+    id,
+    user_id: userRow.id,
+    expires_at,
+    ip_address: ipAddress,
+    user_agent: userAgent,
+    created_at: now,
+    updated_at: now,
+  });
+});
+
 mockRouter.post("/inbox", async (c) => {
   const body = await c.req.json<{
     to: string;
