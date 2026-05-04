@@ -105,6 +105,7 @@ router.get("/:id/policies", async (c) => {
 
   return c.json({
     external_inbound_enabled: mailbox.external_inbound_enabled,
+    external_send_enabled: mailbox.external_send_enabled,
     external_allow_mode: mailbox.external_allow_mode,
     internal_inbound_mode: mailbox.internal_inbound_mode,
     allowlist: allowlist.map((e) => ({
@@ -120,8 +121,9 @@ router.get("/:id/policies", async (c) => {
 // PATCH /api/mailboxes/:id/policies — update any subset of policy fields
 // ---------------------------------------------------------------------------
 //
-// Accepts any combination of: external_inbound_enabled, external_allow_mode,
-// internal_inbound_mode. Unknown fields are ignored. Returns the updated state.
+// Accepts any combination of: external_inbound_enabled, external_send_enabled,
+// external_allow_mode, internal_inbound_mode. Unknown fields are ignored.
+// Returns the updated state.
 
 router.patch("/:id/policies", async (c) => {
   const ctx = c.var.authzContext!;
@@ -133,6 +135,7 @@ router.patch("/:id/policies", async (c) => {
 
   let body: {
     external_inbound_enabled?: unknown;
+    external_send_enabled?: unknown;
     external_allow_mode?: unknown;
     internal_inbound_mode?: unknown;
   };
@@ -144,6 +147,7 @@ router.patch("/:id/policies", async (c) => {
 
   const updates: {
     external_inbound_enabled?: boolean;
+    external_send_enabled?: boolean;
     external_allow_mode?: "all" | "allowlist";
     internal_inbound_mode?: "everyone" | "contacts_only" | "none";
   } = {};
@@ -157,6 +161,14 @@ router.patch("/:id/policies", async (c) => {
       );
     }
     updates.external_inbound_enabled = v;
+  }
+
+  if ("external_send_enabled" in body) {
+    const v = body.external_send_enabled;
+    if (typeof v !== "boolean") {
+      return c.json({ error: "external_send_enabled must be a boolean" }, 400);
+    }
+    updates.external_send_enabled = v;
   }
 
   if ("external_allow_mode" in body) {
@@ -198,6 +210,7 @@ router.patch("/:id/policies", async (c) => {
   const updated = await orm
     .select({
       external_inbound_enabled: schema.mailboxes.external_inbound_enabled,
+      external_send_enabled: schema.mailboxes.external_send_enabled,
       external_allow_mode: schema.mailboxes.external_allow_mode,
       internal_inbound_mode: schema.mailboxes.internal_inbound_mode,
     })
@@ -213,6 +226,7 @@ router.patch("/:id/policies", async (c) => {
 
   return c.json({
     external_inbound_enabled: updated!.external_inbound_enabled,
+    external_send_enabled: updated!.external_send_enabled,
     external_allow_mode: updated!.external_allow_mode,
     internal_inbound_mode: updated!.internal_inbound_mode,
     allowlist: allowlist.map((e) => ({

@@ -26,6 +26,7 @@ interface MailboxPolicyRow {
   id: string;
   owner_user_id: string;
   external_inbound_enabled: boolean;
+  external_send_enabled: boolean;
   external_allow_mode: "all" | "allowlist";
   internal_inbound_mode: "everyone" | "contacts_only" | "none";
 }
@@ -49,6 +50,7 @@ function makeMailbox(
 ): MailboxPolicyRow {
   return {
     external_inbound_enabled: true,
+    external_send_enabled: false,
     external_allow_mode: "all",
     internal_inbound_mode: "everyone",
     ...overrides,
@@ -100,6 +102,7 @@ function validatePolicyUpdates(body: Record<string, unknown>):
       ok: true;
       updates: {
         external_inbound_enabled?: boolean;
+        external_send_enabled?: boolean;
         external_allow_mode?: "all" | "allowlist";
         internal_inbound_mode?: "everyone" | "contacts_only" | "none";
       };
@@ -107,6 +110,7 @@ function validatePolicyUpdates(body: Record<string, unknown>):
   | { ok: false; error: string } {
   const updates: {
     external_inbound_enabled?: boolean;
+    external_send_enabled?: boolean;
     external_allow_mode?: "all" | "allowlist";
     internal_inbound_mode?: "everyone" | "contacts_only" | "none";
   } = {};
@@ -116,6 +120,13 @@ function validatePolicyUpdates(body: Record<string, unknown>):
       return { ok: false, error: "external_inbound_enabled must be a boolean" };
     }
     updates.external_inbound_enabled = body.external_inbound_enabled;
+  }
+
+  if ("external_send_enabled" in body) {
+    if (typeof body.external_send_enabled !== "boolean") {
+      return { ok: false, error: "external_send_enabled must be a boolean" };
+    }
+    updates.external_send_enabled = body.external_send_enabled;
   }
 
   if ("external_allow_mode" in body) {
@@ -167,6 +178,7 @@ describe("GET policies — default state", () => {
     const resolved = resolveOwnedMailbox(mailbox, [], ctx.user_id);
     expect(resolved).not.toBeNull();
     expect(resolved!.external_inbound_enabled).toBe(true);
+    expect(resolved!.external_send_enabled).toBe(false);
     expect(resolved!.external_allow_mode).toBe("all");
     expect(resolved!.internal_inbound_mode).toBe("everyone");
   });
@@ -324,6 +336,92 @@ describe("PATCH policies — field updates", () => {
   it("ignores unknown keys and rejects if no valid keys present", () => {
     const result = validatePolicyUpdates({ unknown_field: "foo" });
     expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH policies — external_send_enabled (TASK-2.3)
+// ---------------------------------------------------------------------------
+
+describe("PATCH policies — external_send_enabled round-trip", () => {
+  it("default is false on a fresh mailbox", () => {
+    const mailbox = makeMailbox({ id: "m-1", owner_user_id: "u-alice" });
+    expect(mailbox.external_send_enabled).toBe(false);
+  });
+
+  it("PATCH external_send_enabled=true is accepted and applied", () => {
+    const mailbox = makeMailbox({ id: "m-1", owner_user_id: "u-alice" });
+    const result = validatePolicyUpdates({ external_send_enabled: true });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.updates.external_send_enabled).toBe(true);
+      const updated = { ...mailbox, ...result.updates };
+      expect(updated.external_send_enabled).toBe(true);
+      // Other fields unchanged
+      expect(updated.external_inbound_enabled).toBe(true);
+      expect(updated.internal_inbound_mode).toBe("everyone");
+    }
+  });
+
+  it("PATCH external_send_enabled=false toggles back to default", () => {
+    const mailbox = makeMailbox({
+      id: "m-1",
+      owner_user_id: "u-alice",
+      external_send_enabled: true,
+    });
+    const result = validatePolicyUpdates({ external_send_enabled: false });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.updates.external_send_enabled).toBe(false);
+      const updated = { ...mailbox, ...result.updates };
+      expect(updated.external_send_enabled).toBe(false);
+    }
+  });
+
+  it("rejects non-boolean external_send_enabled → 400 path", () => {
+    const result = validatePolicyUpdates({ external_send_enabled: "yes" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/external_send_enabled.*boolean/);
+    }
+  });
+
+  it("rejects null external_send_enabled → 400 path", () => {
+    const result = validatePolicyUpdates({ external_send_enabled: null });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/external_send_enabled.*boolean/);
+    }
+  });
+
+  it("accepts external_send_enabled alongside external_inbound_enabled in one PATCH", () => {
+    const result = validatePolicyUpdates({
+      external_send_enabled: true,
+      external_inbound_enabled: false,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.updates.external_send_enabled).toBe(true);
+      expect(result.updates.external_inbound_enabled).toBe(false);
+    }
+  });
+
+  it("GET response shape includes external_send_enabled", () => {
+    const mailbox = makeMailbox({
+      id: "m-1",
+      owner_user_id: "u-alice",
+      external_send_enabled: true,
+    });
+    // Mirror the route's GET response shape
+    const response = {
+      external_inbound_enabled: mailbox.external_inbound_enabled,
+      external_send_enabled: mailbox.external_send_enabled,
+      external_allow_mode: mailbox.external_allow_mode,
+      internal_inbound_mode: mailbox.internal_inbound_mode,
+      allowlist: [],
+    };
+    expect(response.external_send_enabled).toBe(true);
+    expect(Object.keys(response)).toContain("external_send_enabled");
   });
 });
 
