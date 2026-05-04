@@ -23,6 +23,12 @@ const PUBLIC_AUTH_PATHS = [
   "/login",
   "/api/auth/", // better-auth handler
   "/.well-known/", // OAuth discovery (Phase 6.3 — added now to avoid churn)
+  // T2.1 (mcp-oauth) — branded OAuth consent screen. External MCP clients
+  // (Claude Code etc.) hit /consent through the plugin's authorize redirect;
+  // they MUST be able to reach the route without first holding a CF Access
+  // session (the loader does its own better-auth session check + 302 to
+  // /login when needed). T3.5 codifies the full CF-Access removal.
+  "/consent",
 ];
 
 function isPublicAuthPath(pathname: string): boolean {

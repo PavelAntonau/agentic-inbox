@@ -43,6 +43,10 @@ export default [
   // Phase 6.1 — branded sign-in page. Public route (outside the _app shell
   // so it does not require auth to reach).
   route("login", "routes/login.tsx"),
+  // T2.1 (mcp-oauth) — branded OAuth consent page. Public-route shell so
+  // external MCP clients (Claude Code etc.) can reach it via the plugin's
+  // authorize redirect; the loader handles its own session check.
+  route("consent", "routes/consent.tsx"),
   route("i/:id", "routes/i.$id.tsx"),
   route("*", "routes/not-found.tsx"),
 ] satisfies RouteConfig;
