@@ -15,6 +15,7 @@ import sAuth2 from "./s-auth-2";
 import sAuth3 from "./s-auth-3";
 import sInbox1 from "./s-inbox-1";
 import sInbox2 from "./s-inbox-2";
+import sInbox4 from "./s-inbox-4";
 import sMsg1 from "./s-msg-1";
 import sMsg2 from "./s-msg-2";
 import sMsg5 from "./s-msg-5";
@@ -32,6 +33,7 @@ const ALL: Scenario[] = [
   sAuth3,
   sInbox1,
   sInbox2,
+  sInbox4,
   sMsg1,
   sMsg2,
   sMsg5,
