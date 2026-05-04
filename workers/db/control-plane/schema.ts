@@ -35,6 +35,7 @@ export const users = sqliteTable(
     })
       .notNull()
       .default("everyone"),
+    avatar_url: text("avatar_url"),
     created_at: integer("created_at").notNull(),
     last_login_at: integer("last_login_at"),
   },

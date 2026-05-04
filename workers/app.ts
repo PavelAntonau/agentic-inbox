@@ -197,7 +197,7 @@ app.get("/api/admin/me", (c) => {
   return c.json({ user_id: ctx.user_id, role: ctx.role });
 });
 
-// GET /api/users/me — current user including visibility (Phase 6)
+// GET /api/users/me — current user including visibility (Phase 6) and avatar (Phase 3b)
 app.get("/api/users/me", async (c) => {
   const ctx = c.var.authzContext;
   if (!ctx) return c.json({ error: "Unauthorized" }, 401);
@@ -212,12 +212,183 @@ app.get("/api/users/me", async (c) => {
       display_name: schema.users.display_name,
       role: schema.users.role,
       visibility: schema.users.visibility,
+      avatar_url: schema.users.avatar_url,
     })
     .from(schema.users)
     .where(eq(schema.users.id, ctx.user_id))
     .get();
   if (!user) return c.json({ error: "User not found" }, 404);
-  return c.json(user);
+  // Expose a worker-served URL with content-hash cache-buster, not the raw R2 key.
+  const avatarKey = user.avatar_url;
+  const avatarUrl = avatarKey
+    ? `/avatars/${user.id}?v=${avatarKey.split("/").pop()?.split(".")[0]?.slice(0, 8) ?? "0"}`
+    : null;
+  return c.json({ ...user, avatar_url: avatarUrl });
+});
+
+// POST /api/users/me/avatar — upload + persist (Phase 3b)
+//
+// Multipart form, single field 'file'. Validates png/jpeg/webp ≤ 2 MB.
+// Stores at R2 key avatars/<user_id>/<sha256>.<ext> (content-addressed,
+// natural cache-busting). Replaces any prior avatar; deletes the old R2
+// object best-effort in waitUntil. Returns the worker-served URL.
+app.post("/api/users/me/avatar", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch {
+    return c.json({ error: "expected multipart/form-data" }, 400);
+  }
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return c.json({ error: "file required (multipart field 'file')" }, 400);
+  }
+
+  const allowedExt: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+  };
+  const ext = allowedExt[file.type];
+  if (!ext) {
+    return c.json({ error: "unsupported type — png, jpeg, or webp only" }, 415);
+  }
+  if (file.size === 0) {
+    return c.json({ error: "empty file" }, 400);
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return c.json({ error: "file too large — max 2 MB" }, 413);
+  }
+
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  const hash = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  const objectKey = `avatars/${ctx.user_id}/${hash}.${ext}`;
+
+  await c.env.BUCKET.put(objectKey, buf, {
+    httpMetadata: { contentType: file.type },
+  });
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const { appendAudit } = await import("./lib/audit-log");
+  const orm = drizzle(c.env.DB, { schema });
+
+  const prev = await orm
+    .select({ avatar_url: schema.users.avatar_url })
+    .from(schema.users)
+    .where(eq(schema.users.id, ctx.user_id))
+    .get();
+
+  await orm
+    .update(schema.users)
+    .set({ avatar_url: objectKey })
+    .where(eq(schema.users.id, ctx.user_id))
+    .run();
+
+  if (prev?.avatar_url && prev.avatar_url !== objectKey) {
+    c.executionCtx.waitUntil(
+      c.env.BUCKET.delete(prev.avatar_url).catch(() => {}),
+    );
+  }
+
+  await appendAudit(
+    c.env.DB,
+    ctx,
+    "avatar.set",
+    { kind: "user", id: ctx.user_id },
+    { object_key: objectKey, size: file.size, content_type: file.type },
+  );
+
+  return c.json({
+    ok: true,
+    avatar_url: `/avatars/${ctx.user_id}?v=${hash.slice(0, 8)}`,
+  });
+});
+
+// DELETE /api/users/me/avatar — clear avatar (Phase 3b)
+app.delete("/api/users/me/avatar", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const { appendAudit } = await import("./lib/audit-log");
+  const orm = drizzle(c.env.DB, { schema });
+
+  const prev = await orm
+    .select({ avatar_url: schema.users.avatar_url })
+    .from(schema.users)
+    .where(eq(schema.users.id, ctx.user_id))
+    .get();
+
+  await orm
+    .update(schema.users)
+    .set({ avatar_url: null })
+    .where(eq(schema.users.id, ctx.user_id))
+    .run();
+
+  if (prev?.avatar_url) {
+    c.executionCtx.waitUntil(
+      c.env.BUCKET.delete(prev.avatar_url).catch(() => {}),
+    );
+  }
+
+  await appendAudit(
+    c.env.DB,
+    ctx,
+    "avatar.clear",
+    { kind: "user", id: ctx.user_id },
+    {},
+  );
+
+  return c.json({ ok: true });
+});
+
+// GET /avatars/:userId — fetch a user's avatar (Phase 3b)
+//
+// Any authenticated session may fetch any user's avatar. Visibility-
+// gated access is a Phase 4/5 concern when the field starts driving
+// discovery; for now any user with a set avatar is fetchable.
+app.get("/avatars/:userId", async (c) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  const userId = c.req.param("userId");
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const orm = drizzle(c.env.DB, { schema });
+
+  const user = await orm
+    .select({ avatar_url: schema.users.avatar_url })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
+  if (!user?.avatar_url) {
+    return c.json({ error: "no avatar" }, 404);
+  }
+
+  const obj = await c.env.BUCKET.get(user.avatar_url);
+  if (!obj) {
+    return c.json({ error: "no avatar" }, 404);
+  }
+
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": obj.httpMetadata?.contentType ?? "image/png",
+      "Cache-Control": "public, max-age=86400, must-revalidate",
+      ETag: obj.httpEtag,
+    },
+  });
 });
 
 // PATCH /api/users/me/visibility — update own visibility setting (Phase 6)
