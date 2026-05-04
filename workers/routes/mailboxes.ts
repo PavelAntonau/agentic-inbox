@@ -34,6 +34,12 @@ import {
 } from "../lib/mailbox-permissions";
 import { getSettings } from "../lib/settings-cache";
 import {
+  PRIMARY_MAIL_DOMAIN,
+  isValidLocalPart,
+  composeAddress,
+  addressIsPrimaryDomain,
+} from "../../shared/mail-domain";
+import {
   filterVisibleUsers,
   sortByRelevance,
   type UserRef,
@@ -136,13 +142,67 @@ router.get("/tree", async (c) => {
 });
 
 // -----------------------------------------------------------------------
+// GET /api/mailboxes/availability — pre-flight uniqueness check
+// -----------------------------------------------------------------------
+//
+// Lightweight check the New-Mailbox dialog calls (debounced) while the
+// user types the local-part. Returns whether `<local_part>@actionnow.ai`
+// is currently free. Definitive race safety still lives in the POST
+// handler below (UNIQUE-constraint catch); this endpoint just gives the
+// UI an early signal.
+
+router.get("/availability", async (c) => {
+  const actor = c.var.authzContext!;
+  const localPart = (c.req.query("local_part") ?? "").trim().toLowerCase();
+
+  if (!localPart) {
+    return c.json({ error: "Missing local_part" }, 400);
+  }
+  if (!isValidLocalPart(localPart)) {
+    return c.json({
+      address: composeAddress(localPart),
+      available: false,
+      reason: "invalid_local_part",
+    });
+  }
+
+  const address = composeAddress(localPart);
+  const { db } = forGroup(c.env.DB, actor);
+  const existing = await db
+    .select({ id: schema.mailboxes.id })
+    .from(schema.mailboxes)
+    .where(eq(schema.mailboxes.address, address))
+    .get();
+
+  return c.json({
+    address,
+    available: !existing,
+    reason: existing ? "taken" : null,
+  });
+});
+
+// -----------------------------------------------------------------------
 // POST /api/mailboxes — create personal mailbox
 // -----------------------------------------------------------------------
+//
+// Domain is HARDCODED to PRIMARY_MAIL_DOMAIN. Clients may submit either
+// `local_part` (preferred) or a full `address` ending in @<domain> (legacy
+// callers); both are normalised through composeAddress before insert.
+//
+// Race safety: the SELECT pre-check is a fast-path only; the authoritative
+// uniqueness guarantee is the `mailboxes_address_nocase` UNIQUE INDEX in
+// schema.ts. Two concurrent INSERTs of the same address result in one
+// success and one UNIQUE-constraint violation, which we map to a 409.
 
-const CreateMailboxSchema = z.object({
-  address: z.string().email(),
-  display_name: z.string().min(1).max(120).optional(),
-});
+const CreateMailboxSchema = z
+  .object({
+    local_part: z.string().min(1).max(64).optional(),
+    address: z.string().email().optional(),
+    display_name: z.string().min(1).max(120).optional(),
+  })
+  .refine((v) => v.local_part || v.address, {
+    message: "Either local_part or address is required",
+  });
 
 router.post("/", async (c) => {
   const actor = c.var.authzContext!;
@@ -156,15 +216,44 @@ router.post("/", async (c) => {
     );
   }
 
-  const { address, display_name } = body.data;
+  // Resolve local-part, regardless of which field the client sent.
+  let localPart: string;
+  if (body.data.local_part) {
+    localPart = body.data.local_part.trim().toLowerCase();
+  } else {
+    const addr = body.data.address!.trim().toLowerCase();
+    if (!addressIsPrimaryDomain(addr)) {
+      return c.json(
+        {
+          error: `Mailbox addresses must end with @${PRIMARY_MAIL_DOMAIN}.`,
+        },
+        400,
+      );
+    }
+    localPart = addr.slice(0, addr.lastIndexOf("@"));
+  }
+
+  if (!isValidLocalPart(localPart)) {
+    return c.json(
+      {
+        error:
+          "Invalid local-part. Use a-z, 0-9, dots, underscores, plus or hyphen; no leading/trailing or consecutive dots.",
+      },
+      400,
+    );
+  }
+
+  const address = composeAddress(localPart);
+  const { display_name } = body.data;
   const { db } = forGroup(c.env.DB, actor);
   const now = Date.now();
 
-  // Check address uniqueness
+  // Fast-path uniqueness check — purely advisory; the UNIQUE INDEX is
+  // the authoritative guard against the race condition.
   const existing = await db
     .select({ id: schema.mailboxes.id })
     .from(schema.mailboxes)
-    .where(eq(schema.mailboxes.address, address.toLowerCase()))
+    .where(eq(schema.mailboxes.address, address))
     .get();
   if (existing) {
     return c.json({ error: "Address already in use" }, 409);
@@ -172,18 +261,28 @@ router.post("/", async (c) => {
 
   const mailboxId = newId();
 
-  // Insert mailbox
-  await db
-    .insert(schema.mailboxes)
-    .values({
-      id: mailboxId,
-      address: address.toLowerCase(),
-      display_name: display_name ?? null,
-      owner_user_id: actor.user_id,
-      created_at: now,
-      created_by: actor.user_id,
-    })
-    .run();
+  // Insert mailbox — wrapped to translate UNIQUE-constraint races into 409.
+  try {
+    await db
+      .insert(schema.mailboxes)
+      .values({
+        id: mailboxId,
+        address,
+        display_name: display_name ?? null,
+        owner_user_id: actor.user_id,
+        created_at: now,
+        created_by: actor.user_id,
+      })
+      .run();
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("UNIQUE constraint failed")
+    ) {
+      return c.json({ error: "Address already in use" }, 409);
+    }
+    throw err;
+  }
 
   // Insert mailbox_acl owner row (Phase 4: one row per mailbox at creation)
   const ormRaw = drizzle(c.env.DB, { schema });
@@ -211,7 +310,7 @@ router.post("/", async (c) => {
   return c.json(
     {
       id: mailboxId,
-      address: address.toLowerCase(),
+      address,
       display_name: display_name ?? null,
     },
     201,
