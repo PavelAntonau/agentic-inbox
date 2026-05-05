@@ -27,6 +27,11 @@ export default defineConfig({
       // lifecycle, revocation latency. Runs in the same vitest pool as
       // unit tests; integration via in-memory stand-ins for D1.
       "tests/e2e/**/*.test.ts",
+      // T3.7 (mcp-oauth) — security regression suite: cookie-not-mcp-auth,
+      // wrong-aud, consent-csrf, sanitize. Boundary-level assertions that
+      // the security invariants hold across refactors of the underlying
+      // helpers. Independent of the unit suites in workers/ and app/.
+      "tests/security/**/*.test.ts",
     ],
     setupFiles: ["./test/setup.ts"],
   },
