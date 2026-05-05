@@ -82,6 +82,7 @@ describe("extractMcpMethod", () => {
 describe("buildAuditRow", () => {
   const bearer: BearerOk = {
     ok: true,
+    source: "jwt",
     jti: "deadbeef",
     user_id: "user_xyz",
     client_id: "claude-code",

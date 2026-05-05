@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license
 //
 // T2.2 (mcp-oauth) — Bearer-token validation for /mcp.
+// T3.3 (mcp-oauth) — Added PAT-by-hash fallback path.
 //
 // Strict-MUSTs (research §2.1, action-plan-mail-actionnowai-mcp-oauth.md):
 //   - WWW-Authenticate: Bearer realm="mcp", resource_metadata="..." on 401.
@@ -14,6 +15,18 @@
 //   - Bearer-only on /mcp. Session cookies (`__Host-anai.session_token`) are
 //     rejected outright per D-mcp-auth anti-pattern `0olzaspBOKxkzjp2AZRkV`.
 //
+// Bearer dispatch (T3.3):
+//   - Tokens prefixed `pat_` route to the PAT path: HMAC-SHA-256 hash with
+//     env.TOKEN_PEPPER → `getActivePatByHash` → mcp:* scope check → succeed
+//     with `source="pat"`. `last_used_at` is updated fire-and-forget via
+//     ctx.waitUntil when an ExecutionContext is supplied; otherwise awaited
+//     inline (test-friendly).
+//   - Anything else routes to the JWT path (existing logic).
+//   - The two surfaces are non-overlapping by construction: PATs are
+//     `pat_<base64url>` (no dots), JWTs are `<header>.<payload>.<signature>`
+//     (mandatory dots). A token shape that satisfies neither falls through
+//     the JWT path's existing `verify-failed` rejection.
+//
 // JWT shape (verified against `node_modules/@better-auth/oauth-provider/dist/index.mjs:320–344`):
 //   sub:   user.id
 //   aud:   "https://mail.actionnow.ai/mcp"  (single string when scopes omit openid)
@@ -25,6 +38,14 @@
 //          We compute a synthetic short hash of the token string for audit.
 
 import { createLocalJWKSet, jwtVerify, type JWTPayload } from "jose";
+import { drizzle } from "drizzle-orm/d1";
+import * as schema from "../db/control-plane/schema";
+import {
+  getActivePatByHash,
+  touchPatLastUsedAt,
+  type ActivePatRow,
+} from "../db/queries/pats";
+import { hashPat, PAT_PREFIX } from "../lib/pat-tokens";
 import type { Env } from "../types";
 
 export const REQUIRED_AUDIENCE = "https://mail.actionnow.ai/mcp";
@@ -44,16 +65,33 @@ export type BearerRejectReason =
   | "no-mcp-scope"
   | "expired"
   | "missing-sub"
-  | "missing-azp";
+  | "missing-azp"
+  // PAT path (T3.3)
+  | "pat-not-found"
+  | "pat-no-mcp-scope"
+  | "pepper-missing";
+
+/** Discriminator on a successful bearer validation. */
+export type BearerSource = "jwt" | "pat";
 
 export interface BearerOk {
   ok: true;
+  /** "jwt" for OAuth access tokens; "pat" for hash-looked-up PATs. */
+  source: BearerSource;
   /** Synthetic short hash of the token (8 hex chars) — proxy for jti. */
   jti: string;
   user_id: string;
+  /** OAuth client_id for JWTs; "pat:<id>" for PATs (audit-row correlator). */
   client_id: string;
   scopes: string[];
+  /** Unix seconds for JWTs; epoch ms (PAT.expires_at) for PATs; 0 if no expiry. */
   expires_at: number;
+  /** Present when source === "pat". Caller wires per-row policy downstream. */
+  pat_id?: string;
+  /** Optional PAT mailbox scope. T3.6 enforces; surfaced here for audit. */
+  mailbox_id?: string | null;
+  /** Optional PAT IP allowlist. T3.6 enforces; surfaced here for audit. */
+  ip_allowlist?: string[] | null;
 }
 
 export interface BearerErr {
@@ -149,15 +187,135 @@ async function syntheticJti(token: string): Promise<string> {
 }
 
 /**
+ * Optional dependency injection for testability and side-effect routing.
+ *
+ * Production wiring uses the defaults (real D1 ORM via `drizzle(env.DB)`).
+ * Tests inject in-memory stubs for `lookupPatByHash` + `touchPatLastUsed`
+ * to exercise the PAT path without spinning up a D1 fixture.
+ *
+ * `ctx.waitUntil` is honored when present so the `last_used_at` write
+ * doesn't block the /mcp response. Without `ctx`, the touch is awaited
+ * inline (deterministic for tests).
+ */
+export interface BearerDeps {
+  lookupPatByHash?: (
+    env: Env,
+    hash: string,
+    now: number,
+  ) => Promise<ActivePatRow | null>;
+  touchPatLastUsed?: (env: Env, patId: string, now: number) => Promise<void>;
+  now?: () => number;
+  ctx?: { waitUntil(p: Promise<unknown>): void };
+}
+
+async function defaultLookupPatByHash(
+  env: Env,
+  hash: string,
+  now: number,
+): Promise<ActivePatRow | null> {
+  const orm = drizzle(env.DB, { schema });
+  return getActivePatByHash(orm, hash, now);
+}
+
+async function defaultTouchPatLastUsed(
+  env: Env,
+  patId: string,
+  now: number,
+): Promise<void> {
+  const orm = drizzle(env.DB, { schema });
+  await touchPatLastUsedAt(orm, patId, now);
+}
+
+/**
+ * Validate an incoming PAT bearer (T3.3).
+ *
+ * Pre-conditions: caller has already verified the token has the `pat_`
+ * prefix and stripped the `Bearer ` scheme. Returns a discriminated
+ * BearerResult; the caller surfaces failures via `bearerChallengeResponse`.
+ *
+ * Side effects: on success, schedules a `last_used_at` update via
+ * `ctx.waitUntil` (if provided) or awaits it inline. Failures of the touch
+ * write are logged and swallowed — they MUST NOT invalidate the bearer.
+ */
+async function validatePatBearer(
+  token: string,
+  env: Env,
+  deps: BearerDeps,
+): Promise<BearerResult> {
+  const pepper = env.TOKEN_PEPPER;
+  if (!pepper) {
+    return {
+      ok: false,
+      reason: "pepper-missing",
+      bearer_error: "invalid_token",
+      detail: "TOKEN_PEPPER unset — PAT auth disabled",
+    };
+  }
+
+  const now = (deps.now ?? Date.now)();
+  const hash = await hashPat(token, pepper);
+  const lookup = deps.lookupPatByHash ?? defaultLookupPatByHash;
+  const pat = await lookup(env, hash, now);
+
+  // Single failure mode — "no active row matched". Covers unknown hash,
+  // revoked, and expired uniformly so the /mcp surface never leaks which
+  // class of failure occurred (RFC 6750 §3 invalid_token discipline).
+  if (!pat) {
+    return {
+      ok: false,
+      reason: "pat-not-found",
+      bearer_error: "invalid_token",
+    };
+  }
+
+  if (!pat.scopes.some((s) => s.startsWith("mcp:"))) {
+    return {
+      ok: false,
+      reason: "pat-no-mcp-scope",
+      bearer_error: "insufficient_scope",
+      detail: `scopes=${pat.scopes.join(",")}`,
+    };
+  }
+
+  // Fire-and-forget: never block the /mcp response on the touch write.
+  const touch = deps.touchPatLastUsed ?? defaultTouchPatLastUsed;
+  const touchPromise = touch(env, pat.id, now).catch((e) => {
+    console.error("mcp.pat.touch_failed", (e as Error).message);
+  });
+  if (deps.ctx) {
+    deps.ctx.waitUntil(touchPromise);
+  } else {
+    await touchPromise;
+  }
+
+  return {
+    ok: true,
+    source: "pat",
+    jti: await syntheticJti(token),
+    user_id: pat.user_id,
+    client_id: `pat:${pat.id}`,
+    scopes: pat.scopes,
+    expires_at: pat.expires_at ?? 0,
+    pat_id: pat.id,
+    mailbox_id: pat.mailbox_id,
+    ip_allowlist: pat.ip_allowlist,
+  };
+}
+
+/**
  * Validate the incoming /mcp request's bearer token.
  *
  * Returns a discriminated result the caller surfaces via
  * `bearerChallengeResponse(...)`. The caller is responsible for responding
- * with the challenge — this function is pure.
+ * with the challenge — this function is pure for the JWT path; the PAT
+ * path issues a fire-and-forget `last_used_at` write (see BearerDeps).
+ *
+ * Dispatch by prefix: `pat_*` → PAT-by-hash; otherwise → JWT verify.
  */
 export async function validateBearer(
   request: Request,
   env: Env,
+  deps: BearerDeps = {},
 ): Promise<BearerResult> {
   // Anti-pattern guard: session cookies on /mcp are forbidden (D-mcp-auth
   // anti-pattern 0olzaspBOKxkzjp2AZRkV — bearer-only on /mcp).
@@ -188,6 +346,14 @@ export async function validateBearer(
       reason: "missing-bearer",
       bearer_error: "invalid_token",
     };
+  }
+
+  // T3.3 — PAT-by-hash dispatch. PATs are `pat_<base64url>` (no dots),
+  // structurally distinct from JWTs (`<header>.<payload>.<signature>`), so
+  // the prefix is a reliable router. Tokens that match neither shape fall
+  // through the JWT path's `verify-failed` rejection.
+  if (token.startsWith(PAT_PREFIX)) {
+    return validatePatBearer(token, env, deps);
   }
 
   let payload: JWTPayload;
@@ -277,6 +443,7 @@ export async function validateBearer(
 
   return {
     ok: true,
+    source: "jwt",
     jti: await syntheticJti(token),
     user_id: payload.sub,
     client_id: azp,

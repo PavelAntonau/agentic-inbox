@@ -6,10 +6,10 @@
 // Owner-only by construction: every read/write filters on `userId`. The route
 // layer (workers/routes/pats.ts) supplies the value from authzContext.user_id.
 //
-// T3.3 will add a hash-lookup helper here for the bearer middleware
-// (`getActivePatByHash`); T3.1 covers create/list/revoke only.
+// T3.3 (2026-05-04) added `getActivePatByHash` + `touchPatLastUsedAt` for the
+// bearer middleware's PAT-by-hash fallback path on /mcp.
 
-import { and, eq, isNull, desc } from "drizzle-orm";
+import { and, eq, gt, isNull, or, desc } from "drizzle-orm";
 import type { drizzle } from "drizzle-orm/d1";
 import * as schema from "../control-plane/schema";
 
@@ -171,6 +171,91 @@ export async function listPatsForUser(
     .all();
 
   return rows.map(projectPatRow);
+}
+
+/**
+ * Active PAT row returned by `getActivePatByHash`. Carries enough metadata
+ * for the bearer middleware to apply scope / mailbox / IP-allowlist policy
+ * downstream (mailbox + ip_allowlist enforcement is T3.6's e2e brief; this
+ * row surfaces the columns so the path is plumbed end-to-end).
+ */
+export interface ActivePatRow {
+  id: string;
+  user_id: string;
+  scopes: string[];
+  mailbox_id: string | null;
+  ip_allowlist: string[] | null;
+  expires_at: number | null;
+}
+
+/**
+ * Look up an active PAT by its token_hash.
+ *
+ * "Active" means: not revoked AND (no expiry OR expiry in the future relative
+ * to `now`). The unique index on `token_hash` (migration 0012) makes this
+ * O(log N) on D1. Returns null when no active row matches — the bearer
+ * middleware surfaces that as `pat-not-found` / `invalid_token`.
+ *
+ * Pepper rotation note: rows are looked up by HMAC-SHA-256 hex digests, so
+ * any pepper change invalidates the existing PATs en masse. T3.4's
+ * decommissioning of `agent_tokens` does NOT touch `TOKEN_PEPPER` — the
+ * shared secret stays stable across the migration.
+ */
+export async function getActivePatByHash(
+  orm: Orm,
+  tokenHash: string,
+  now: number,
+): Promise<ActivePatRow | null> {
+  const row = await orm
+    .select({
+      id: schema.oauth_personal_access_token.id,
+      userId: schema.oauth_personal_access_token.userId,
+      scopes: schema.oauth_personal_access_token.scopes,
+      mailboxId: schema.oauth_personal_access_token.mailboxId,
+      ipAllowlist: schema.oauth_personal_access_token.ipAllowlist,
+      expiresAt: schema.oauth_personal_access_token.expiresAt,
+    })
+    .from(schema.oauth_personal_access_token)
+    .where(
+      and(
+        eq(schema.oauth_personal_access_token.tokenHash, tokenHash),
+        isNull(schema.oauth_personal_access_token.revokedAt),
+        or(
+          isNull(schema.oauth_personal_access_token.expiresAt),
+          gt(schema.oauth_personal_access_token.expiresAt, now),
+        ),
+      ),
+    )
+    .limit(1)
+    .get();
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.userId,
+    scopes: parseJsonStringArray(row.scopes) ?? [],
+    mailbox_id: row.mailboxId,
+    ip_allowlist: parseJsonStringArray(row.ipAllowlist),
+    expires_at: row.expiresAt,
+  };
+}
+
+/**
+ * Set `last_used_at = now` on the given PAT. Caller invokes via
+ * `ctx.waitUntil(...)` so the /mcp response isn't blocked on the write;
+ * a failure here is logged but does not invalidate the bearer outcome.
+ *
+ * No owner check — the row was already authenticated by hash match.
+ */
+export async function touchPatLastUsedAt(
+  orm: Orm,
+  patId: string,
+  now: number,
+): Promise<void> {
+  await orm
+    .update(schema.oauth_personal_access_token)
+    .set({ lastUsedAt: now })
+    .where(eq(schema.oauth_personal_access_token.id, patId));
 }
 
 /**

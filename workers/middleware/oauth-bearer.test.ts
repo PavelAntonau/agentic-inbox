@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license
 //
 // T2.2 (mcp-oauth) — oauth-bearer.ts unit tests.
+// T3.3 (mcp-oauth) — extended with PAT-by-hash fallback coverage.
 //
 // Coverage matrix (the spec MUSTs from T2.2 + D-mcp-auth-5):
 //   - valid bearer with single-string aud + mcp:* scope → ok
@@ -15,6 +16,16 @@
 //   - missing sub / azp → invalid_token 401
 //   - challenge response shape: WWW-Authenticate header MUST carry realm,
 //     resource_metadata, and (when present) error + error_description.
+//
+// T3.3 additions (PAT path):
+//   - happy-path PAT (active row, mcp:* scope) → ok with source="pat"
+//   - unknown hash → invalid_token 401 (pat-not-found)
+//   - revoked / expired PAT → caught at the lookup layer (single
+//     pat-not-found surface; uniformity is intentional per RFC 6750)
+//   - PAT with no mcp:* scope → insufficient_scope 403 (pat-no-mcp-scope)
+//   - missing TOKEN_PEPPER → invalid_token 401 (pepper-missing)
+//   - touchPatLastUsed invoked exactly once on success
+//   - ctx.waitUntil honored when ExecutionContext supplied
 
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it, beforeAll } from "vitest";
@@ -24,7 +35,10 @@ import {
   RESOURCE_METADATA_URL,
   bearerChallengeResponse,
   validateBearer,
+  type BearerDeps,
 } from "./oauth-bearer";
+import { hashPat, generatePat } from "../lib/pat-tokens";
+import type { ActivePatRow } from "../db/queries/pats";
 import type { Env } from "../types";
 
 const KID = "test-kid-cafef00d";
@@ -142,6 +156,7 @@ describe("validateBearer — happy path", () => {
     const r = await validateBearer(makeRequest(`Bearer ${token}`), keys.env);
     expect(r.ok).toBe(true);
     if (r.ok) {
+      expect(r.source).toBe("jwt");
       expect(r.user_id).toBe("user_abc");
       expect(r.client_id).toBe("claude-code");
       expect(r.scopes).toEqual([
@@ -151,6 +166,8 @@ describe("validateBearer — happy path", () => {
       ]);
       // Synthetic jti is 8 hex chars.
       expect(r.jti).toMatch(/^[0-9a-f]{8}$/);
+      // JWT path does not surface a pat_id.
+      expect(r.pat_id).toBeUndefined();
     }
   });
 });
@@ -304,5 +321,260 @@ describe("bearerChallengeResponse", () => {
   it("Cache-Control: no-store on every challenge", () => {
     const r = bearerChallengeResponse("expired", "invalid_token");
     expect(r.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T3.3 — PAT-by-hash fallback path
+// ---------------------------------------------------------------------------
+
+const TEST_PEPPER = "test-pepper-T3.3";
+
+/**
+ * Build a Keys-shaped Env that carries TOKEN_PEPPER alongside the JWT
+ * signing key. Reuses setupKeys() so the JWT path stays exercisable in
+ * the same test module.
+ */
+async function setupPatEnv(): Promise<{ env: Env }> {
+  const keys = await setupKeys();
+  const env = {
+    ...keys.env,
+    TOKEN_PEPPER: TEST_PEPPER,
+    DB: undefined as unknown as D1Database,
+  } as unknown as Env;
+  return { env };
+}
+
+/** Build an ActivePatRow with sensible defaults for tests. */
+function patRow(overrides: Partial<ActivePatRow> = {}): ActivePatRow {
+  return {
+    id: "pat_id_abc123",
+    user_id: "user_def456",
+    scopes: ["mcp:mailbox:read", "mcp:contacts:read"],
+    mailbox_id: null,
+    ip_allowlist: null,
+    expires_at: null,
+    ...overrides,
+  };
+}
+
+/**
+ * Compose a deps object with controllable lookup + a touch spy. Tests
+ * that need to inspect the touch invocation read `touched`.
+ */
+function makeDeps(args: {
+  pat: ActivePatRow | null;
+  now?: number;
+  ctx?: { waitUntil(p: Promise<unknown>): void };
+  touchError?: Error;
+}): {
+  deps: BearerDeps;
+  touched: { calls: number; lastId: string | null; lastNow: number | null };
+} {
+  const touched = {
+    calls: 0,
+    lastId: null as string | null,
+    lastNow: null as number | null,
+  };
+  const deps: BearerDeps = {
+    lookupPatByHash: async (_env, _hash, _now) => args.pat,
+    touchPatLastUsed: async (_env, patId, now) => {
+      touched.calls += 1;
+      touched.lastId = patId;
+      touched.lastNow = now;
+      if (args.touchError) throw args.touchError;
+    },
+    now: () => args.now ?? 1_700_000_000_000,
+    ctx: args.ctx,
+  };
+  return { deps, touched };
+}
+
+describe("validateBearer — PAT happy path", () => {
+  it("accepts an active PAT and returns source='pat' + pat_id + correct scopes", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const expectedHash = await hashPat(token, TEST_PEPPER);
+
+    let observedHash: string | null = null;
+    const { deps, touched } = makeDeps({
+      pat: patRow({
+        id: "pat_id_xyz",
+        user_id: "user_abc",
+        scopes: ["mcp:mailbox:read"],
+      }),
+      now: 1_700_000_000_000,
+    });
+    // Wrap lookup to capture the hash the middleware passes in.
+    const originalLookup = deps.lookupPatByHash!;
+    deps.lookupPatByHash = async (e, h, n) => {
+      observedHash = h;
+      return originalLookup(e, h, n);
+    };
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+
+    expect(observedHash).toBe(expectedHash);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.source).toBe("pat");
+      expect(r.user_id).toBe("user_abc");
+      expect(r.client_id).toBe("pat:pat_id_xyz");
+      expect(r.pat_id).toBe("pat_id_xyz");
+      expect(r.scopes).toEqual(["mcp:mailbox:read"]);
+      expect(r.jti).toMatch(/^[0-9a-f]{8}$/);
+    }
+    // Touch fired exactly once, with the expected pat id and now.
+    expect(touched.calls).toBe(1);
+    expect(touched.lastId).toBe("pat_id_xyz");
+    expect(touched.lastNow).toBe(1_700_000_000_000);
+  });
+
+  it("surfaces mailbox_id and ip_allowlist on success for downstream policy", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const { deps } = makeDeps({
+      pat: patRow({
+        id: "pat_id_scoped",
+        scopes: ["mcp:mailbox:write"],
+        mailbox_id: "mbox_42",
+        ip_allowlist: ["10.0.0.0/8", "192.168.1.1"],
+      }),
+    });
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.mailbox_id).toBe("mbox_42");
+      expect(r.ip_allowlist).toEqual(["10.0.0.0/8", "192.168.1.1"]);
+    }
+  });
+
+  it("uses ctx.waitUntil when supplied (touch is non-blocking)", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const waitUntilCalls: Promise<unknown>[] = [];
+    const ctx = {
+      waitUntil(p: Promise<unknown>) {
+        waitUntilCalls.push(p);
+      },
+    };
+    const { deps, touched } = makeDeps({
+      pat: patRow({ id: "pat_id_ctx" }),
+      ctx,
+    });
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    expect(r.ok).toBe(true);
+    expect(waitUntilCalls.length).toBe(1);
+    // Touch may not have completed before validateBearer returned (that is the
+    // entire point of waitUntil) but the ctx wiring captured the promise.
+    await Promise.all(waitUntilCalls);
+    expect(touched.calls).toBe(1);
+  });
+
+  it("touch failure does NOT invalidate the bearer (logged + swallowed)", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const { deps, touched } = makeDeps({
+      pat: patRow({ id: "pat_id_resilient" }),
+      touchError: new Error("D1 transient outage"),
+    });
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    expect(r.ok).toBe(true);
+    expect(touched.calls).toBe(1);
+  });
+});
+
+describe("validateBearer — PAT rejection paths", () => {
+  it("rejects when no active row matches (unknown / revoked / expired uniformly)", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const { deps, touched } = makeDeps({ pat: null });
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("pat-not-found");
+      expect(r.bearer_error).toBe("invalid_token");
+    }
+    // No touch on a failed lookup.
+    expect(touched.calls).toBe(0);
+  });
+
+  it("rejects active PAT with no mcp:* scope as insufficient_scope (403)", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const { deps, touched } = makeDeps({
+      pat: patRow({ scopes: ["profile:read", "email:read"] }),
+    });
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("pat-no-mcp-scope");
+      expect(r.bearer_error).toBe("insufficient_scope");
+    }
+    // Insufficient-scope rejection MUST NOT touch last_used_at — the row is
+    // valid but the request is unauthorized for /mcp.
+    expect(touched.calls).toBe(0);
+  });
+
+  it("rejects when TOKEN_PEPPER is unset (config error, not user error)", async () => {
+    const { env: baseEnv } = await setupPatEnv();
+    const env = { ...baseEnv, TOKEN_PEPPER: undefined } as Env;
+    const token = generatePat();
+    const { deps, touched } = makeDeps({ pat: patRow() });
+
+    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("pepper-missing");
+      expect(r.bearer_error).toBe("invalid_token");
+    }
+    // Pepper missing → no DB lookup attempted, no touch.
+    expect(touched.calls).toBe(0);
+  });
+
+  it("PAT-prefixed token still respects the session-cookie guard", async () => {
+    const { env } = await setupPatEnv();
+    const token = generatePat();
+    const { deps, touched } = makeDeps({ pat: patRow() });
+
+    const r = await validateBearer(
+      makeRequest(`Bearer ${token}`, "__Host-anai.session_token=abc"),
+      env,
+      deps,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("session-cookie-on-mcp");
+    // Cookie guard short-circuits before the PAT path runs.
+    expect(touched.calls).toBe(0);
+  });
+
+  it("PAT path is reached for `pat_` prefix only — non-PAT garbage still hits the JWT verify-failed path", async () => {
+    const { env } = await setupPatEnv();
+    // Token does NOT start with `pat_` — should NOT call the PAT lookup.
+    const { deps, touched } = makeDeps({ pat: patRow() });
+    let lookupCalled = false;
+    deps.lookupPatByHash = async () => {
+      lookupCalled = true;
+      return null;
+    };
+
+    const r = await validateBearer(
+      makeRequest(`Bearer not-a-jwt-and-not-a-pat`),
+      env,
+      deps,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      // Garbage non-PAT bearer falls through to the JWT path, fails verify.
+      expect(r.reason).toBe("verify-failed");
+      expect(r.bearer_error).toBe("invalid_token");
+    }
+    expect(lookupCalled).toBe(false);
+    expect(touched.calls).toBe(0);
   });
 });
