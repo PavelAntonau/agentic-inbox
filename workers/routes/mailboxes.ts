@@ -333,14 +333,26 @@ router.post("/:id/share", async (c) => {
   const { group_id } = body.data;
   const { db } = forGroup(c.env.DB, actor);
 
-  const [mailbox, group] = await Promise.all([
+  const [mailbox, group, aclRow] = await Promise.all([
     fetchMailbox(db, mailboxId),
     fetchGroup(db, group_id),
+    // MP-1 — read the actor's mailbox_acls.level so canShare can recognise
+    // an admin-ACL grantee as owner-equivalent.
+    db
+      .select({ level: schema.mailbox_acls.level })
+      .from(schema.mailbox_acls)
+      .where(
+        and(
+          eq(schema.mailbox_acls.mailbox_id, mailboxId),
+          eq(schema.mailbox_acls.user_id, actor.user_id),
+        ),
+      )
+      .get(),
   ]);
   if (!mailbox) return c.json({ error: "Mailbox not found" }, 404);
   if (!group) return c.json({ error: "Group not found" }, 404);
 
-  const perm = canShare(actor, mailbox, group);
+  const perm = canShare(actor, mailbox, group, aclRow?.level ?? null);
   if (!perm.ok) return c.json({ error: perm.reason }, 403);
 
   // E7: enforce max_groups_per_mailbox cap
@@ -402,27 +414,45 @@ router.delete("/:id/share/:groupId", async (c) => {
   const groupId = c.req.param("groupId")!;
   const { db } = forGroup(c.env.DB, actor);
 
-  const [mailbox, group] = await Promise.all([
+  const [mailbox, group, memberRow, aclRow] = await Promise.all([
     fetchMailbox(db, mailboxId),
     fetchGroup(db, groupId),
+    // Determine actor's role in the group
+    db
+      .select({ role_in_group: schema.group_members.role_in_group })
+      .from(schema.group_members)
+      .where(
+        and(
+          eq(schema.group_members.group_id, groupId),
+          eq(schema.group_members.user_id, actor.user_id),
+        ),
+      )
+      .get(),
+    // MP-1 — actor's mailbox_acls.level for the unshare-side admin
+    // recognition.
+    db
+      .select({ level: schema.mailbox_acls.level })
+      .from(schema.mailbox_acls)
+      .where(
+        and(
+          eq(schema.mailbox_acls.mailbox_id, mailboxId),
+          eq(schema.mailbox_acls.user_id, actor.user_id),
+        ),
+      )
+      .get(),
   ]);
   if (!mailbox) return c.json({ error: "Mailbox not found" }, 404);
   if (!group) return c.json({ error: "Group not found" }, 404);
 
-  // Determine actor's role in the group
-  const memberRow = await db
-    .select({ role_in_group: schema.group_members.role_in_group })
-    .from(schema.group_members)
-    .where(
-      and(
-        eq(schema.group_members.group_id, groupId),
-        eq(schema.group_members.user_id, actor.user_id),
-      ),
-    )
-    .get();
   const actorRoleInGroup = memberRow?.role_in_group ?? null;
 
-  const perm = canUnshare(actor, mailbox, group, actorRoleInGroup);
+  const perm = canUnshare(
+    actor,
+    mailbox,
+    group,
+    actorRoleInGroup,
+    aclRow?.level ?? null,
+  );
   if (!perm.ok) return c.json({ error: perm.reason }, 403);
 
   const result = await db

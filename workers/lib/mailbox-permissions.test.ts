@@ -93,6 +93,39 @@ describe("canShare", () => {
     );
     expect(result.ok).toBe(true);
   });
+
+  // MP-1 (audit, agentic-inbox-hardening Phase 2): admin-level mailbox ACL
+  // is owner-equivalent for share/unshare. Without this, the schema's
+  // mailbox_acls.level='admin' grant was effectively a no-op — see
+  // workers/db/control-plane/schema.ts (mailbox_acls) for the source field.
+  it("MP-1: admin-ACL grantee can share even when not the mailbox owner", () => {
+    // u-alice has acl level 'admin' on OTHER_MAILBOX (owned by u-bob).
+    const result = canShare(actor(), OTHER_MAILBOX, GROUP, "admin");
+    expect(result.ok).toBe(true);
+  });
+
+  it("MP-1: write-level ACL grantee CANNOT share (admin only)", () => {
+    const result = canShare(actor(), OTHER_MAILBOX, GROUP, "write");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/owner|admin/i);
+  });
+
+  it("MP-1: read-level ACL grantee CANNOT share", () => {
+    const result = canShare(actor(), OTHER_MAILBOX, GROUP, "read");
+    expect(result.ok).toBe(false);
+  });
+
+  it("MP-1: admin-ACL grantee still must be a member of the target group", () => {
+    // Admin ACL on the mailbox does NOT auto-grant group membership.
+    const result = canShare(
+      actor({ group_ids: ["g-eng"] }),
+      OTHER_MAILBOX,
+      OTHER_GROUP, // g-mkt — actor is not a member
+      "admin",
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/member/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -124,6 +157,19 @@ describe("canUnshare", () => {
   it("allows global_admin", () => {
     const global = actor({ role: "global_admin", user_id: "u-charlie" });
     expect(canUnshare(global, MAILBOX, GROUP, null).ok).toBe(true);
+  });
+
+  // MP-1 (audit, agentic-inbox-hardening Phase 2): admin-ACL grantee can
+  // unshare even when they are not the mailbox owner, group owner, or
+  // group admin.
+  it("MP-1: admin-ACL grantee can unshare a mailbox they don't own", () => {
+    const bob = actor({ user_id: "u-bob" });
+    expect(canUnshare(bob, MAILBOX, GROUP, "member", "admin").ok).toBe(true);
+  });
+
+  it("MP-1: write-level ACL grantee CANNOT unshare (admin-only)", () => {
+    const bob = actor({ user_id: "u-bob" });
+    expect(canUnshare(bob, MAILBOX, GROUP, "member", "write").ok).toBe(false);
   });
 });
 
