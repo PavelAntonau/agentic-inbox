@@ -7,7 +7,12 @@
 //   - Identity header: display name + email (non-interactive)
 //   - Profile          → /profile          (public-ish identity — Phase 4)
 //   - Account settings → /account          (private settings — Phase 4)
-//   - Sign out         → /cdn-cgi/access/logout (Cloudflare Access logout)
+//   - Sign out         → authClient.signOut() (better-auth POST /api/auth/sign-out)
+//
+// T3.8 (Phase 3 mcp-oauth): sign-out POSTs /api/auth/sign-out via better-auth
+// instead of GET /cdn-cgi/access/logout. Clears the __Host-anai.session_token
+// cookie at the better-auth layer. Do NOT regress to a CF Access href — the
+// /account sign-out button already uses this pattern (account.tsx L96-104).
 
 import { Menu } from "@base-ui/react/menu";
 import {
@@ -15,8 +20,10 @@ import {
   SignOutIcon,
   UserCircleIcon,
 } from "@phosphor-icons/react";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router";
 import Avatar from "~/components/Avatar";
+import { authClient } from "~/lib/auth-client";
 import { cn } from "~/ui/lib/cn";
 
 // Phase 3f: bg-card is solid globally now (see app/index.css). No inline
@@ -42,6 +49,18 @@ export default function ProfileMenu({
   avatarUrl,
 }: ProfileMenuProps) {
   const friendlyName = (displayName && displayName.trim()) || email;
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await authClient.signOut();
+    } catch {
+      // best-effort — redirect regardless. mirrors account.tsx handleSignOut.
+    }
+    window.location.href = "/login";
+  };
 
   const itemClassName = cn(
     "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm",
@@ -125,15 +144,14 @@ export default function ProfileMenu({
             <div className="my-1 border-t border-border" />
 
             <Menu.Item
-              className={itemClassName}
-              render={
-                <a href="/cdn-cgi/access/logout" className="no-underline" />
-              }
+              className={cn(itemClassName, "w-full text-left")}
+              disabled={signingOut}
+              onClick={() => void handleSignOut()}
             >
               <span className="text-text-muted">
                 <SignOutIcon size={16} />
               </span>
-              <span>Sign out</span>
+              <span>{signingOut ? "Signing out…" : "Sign out"}</span>
             </Menu.Item>
           </Menu.Popup>
         </Menu.Positioner>
