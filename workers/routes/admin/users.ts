@@ -179,6 +179,51 @@ router.post("/invite", async (c) => {
           access_mocked: accessResult.mocked ?? false,
         },
       );
+
+      // Auto-provision an inbound mailbox when the invitee's email is on
+      // a domain we own. Without this, the OTP email better-auth sends to
+      // the invitee's address arrives at our Worker and gets dropped by
+      // receiveEmail() with "mailbox does not exist". Provisioning is two
+      // cheap operations (R2 put + D1 insert); the expensive MailboxDO is
+      // still created lazily on first inbound email.
+      const ourDomains = (c.env.DOMAINS ?? "")
+        .split(",")
+        .map((d) => d.trim().toLowerCase())
+        .filter(Boolean);
+      const localPart = email.split("@")[0];
+      const emailDomain = email.split("@")[1]?.toLowerCase();
+      if (emailDomain && ourDomains.includes(emailDomain)) {
+        const r2Key = `mailboxes/${email}.json`;
+        const head = await c.env.BUCKET.head(r2Key);
+        if (!head) {
+          const defaultSettings = {
+            fromName: localPart,
+            forwarding: { enabled: false, email: "" },
+            signature: { enabled: false, text: "" },
+            autoReply: { enabled: false, subject: "", message: "" },
+          };
+          await c.env.BUCKET.put(r2Key, JSON.stringify(defaultSettings));
+        }
+
+        const mailboxRow = await orm
+          .select({ id: schema.mailboxes.id })
+          .from(schema.mailboxes)
+          .where(eq(schema.mailboxes.address, email))
+          .get();
+        if (!mailboxRow) {
+          await orm
+            .insert(schema.mailboxes)
+            .values({
+              id: crypto.randomUUID(),
+              address: email,
+              owner_user_id: created.id,
+              created_at: Date.now(),
+              created_by: actor.user_id,
+            })
+            .onConflictDoNothing()
+            .run();
+        }
+      }
     }
   } else {
     // User already exists — write audit but don't leak that fact in the response
@@ -202,7 +247,11 @@ router.post("/invite", async (c) => {
   // recorded in the audit row but do NOT change the response — the privacy
   // contract (always return `ok: true`) stays intact.
   const host = new URL(c.req.url).host;
-  const loginUrl = `https://${host}/login?email=${encodeURIComponent(email)}`;
+  // Trailing slash on /login/ matters — the CF Access "bypass" path
+  // destinations match `mail.actionnow.ai/login/` (segment prefix) but not
+  // bare `mail.actionnow.ai/login`. Bare /login still hits the CF Access
+  // login challenge and never reaches the Worker.
+  const loginUrl = `https://${host}/login/?email=${encodeURIComponent(email)}`;
   let mailSendError: string | null = null;
   try {
     const binding = getEmailBinding(c.env);
