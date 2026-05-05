@@ -314,7 +314,7 @@ even though it isn't in the charter file list.
 
 - **Carried-forward decisions to honor (per action plan):**
   - **D-aim-5** — per-mailbox token scoping: application-layer (audit `mailbox-permissions.ts` + `mailbox_acls` table; verify enforcement happens in `R-mbx` paths, not in DB constraints).
-  - **D-aim-10** — privacy-preserving group invitations: every invite handler in `R-grp` + `R-inv` should return uniform `"Invitation sent"`.
+  - **D-aim-10** — privacy-preserving group invitations: every invite handler in `R-grp` + `R-inv` returns uniform `{ "sent": true }` (JSON, HTTP 200) regardless of recipient existence/visibility/membership. _Amended 2026-05-05 (hardening Phase 1 task 1.3, F-I1 resolution): canonical shape is JSON envelope, not plain-text "Invitation sent." (graph node `tB9b_WFIuRNFVdmG9dOxa`). Privacy invariant — uniformity — is preserved by the JSON shape and is consistent with the rest of the route surface._
   - **D-aim-12** — contacts + 3-tier visibility: `LB-vis` is the canonical filter; every consumer in `R-con` + adjacent `app.ts` user handlers should route through it.
   - **D-V2F-3** — `forGroup()` discipline: any control-plane query that joins `group_members` MUST go through `LB-fG`, never raw drizzle. Phase 2 Teammate A should grep for direct `group_members` joins outside `forGroup()`.
   - **D-V2U-1** — private mailbox semantics: `mailboxes.owner_user_id` + `mailbox_acls` interaction; Phase 2 should verify `R-mbx` `/share`, `/unshare`, `/transfer`, `DELETE` all correctly mutate ACLs.
