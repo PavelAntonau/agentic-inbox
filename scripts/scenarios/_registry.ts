@@ -40,6 +40,12 @@ import sInbox3InternalMode from "./s-inbox-3-internal-mode";
 import sMailbox1 from "./s-mailbox-1";
 import sMailbox2 from "./s-mailbox-2";
 import sGroup2 from "./s-group-2";
+import sAdmin1 from "./s-admin-1";
+import sAdmin2 from "./s-admin-2";
+import sAdmin3 from "./s-admin-3";
+import sAdmin4 from "./s-admin-4";
+import sInvitations2 from "./s-invitations-2";
+import sAuthOauthToken1 from "./s-auth-oauth-token-1";
 
 export interface RegistryEntry {
   scenario: Scenario;
@@ -73,9 +79,15 @@ const ALL: Scenario[] = [
   sGroup1,
   sGroup2,
   sInvitations1,
+  sInvitations2,
   sNotifications1,
   sMailbox1,
   sMailbox2,
+  sAdmin1,
+  sAdmin2,
+  sAdmin3,
+  sAdmin4,
+  sAuthOauthToken1,
 ];
 
 export async function loadScenarios(): Promise<RegistryEntry[]> {
