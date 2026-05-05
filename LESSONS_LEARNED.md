@@ -6,6 +6,117 @@ underlying mental models so the next agent doesn't re-derive them.
 
 ---
 
+## L-2026-05-05 — Schema UNIQUE is the security invariant for tokens and identifiers; non-unique index is silent danger
+
+**Context.** The `agentic-inbox-audit` Phase 2 static review (`.research/audit-auth-permissions.md`) found
+**one critical finding** — `oauth_refresh_token.token` declared with `notNull()` and a non-unique index but
+no `.unique()` — sitting two columns away from `oauth_access_token.token` (line 594) and `session.token`
+(line 292), both of which DO have `.unique()`. The same pattern recurs three more times: `account.(provider_id, account_id)`
+(S-6), `verification.identifier` (S-9), `groups.(owner_user_id, name)` (S-8). Four instances of the same near-miss
+in a schema that otherwise gets it right.
+
+**Root cause.** The mental rule "if a `notNull()` text column carries a token, an external identifier, or
+business-level uniqueness — `.unique()` is the security invariant, not decoration." The four misses all dropped
+that rule, leaving lookups by that column ambiguous: any race in token rotation, migration error, or direct-SQL
+path can produce duplicate rows that the application reads as a single arbitrary match. For refresh tokens that
+silent-duplicate condition is **token replay**: two valid rows for one token, both accepted by rotation, two
+access tokens issued for one refresh. **The pattern was correct on adjacent columns** — meaning the rule was
+known, just inconsistently applied. That makes it a review-checklist gap, not a knowledge gap.
+
+**Fix.** S-1 fix: `token: text("token").notNull().unique()` + Drizzle migration. The migration must check
+for existing duplicates BEFORE adding the constraint (production failure mode is a partial-add that leaves
+the schema in a half-constrained state). The cluster fix (S-1 + S-6 + S-8 + S-9) bundles into one migration —
+better than four separate ones because the schema-discipline lesson is the same and one migration is one
+deploy risk.
+
+**Prevention.**
+- **Review checklist for every Drizzle schema PR.** For each new `text("...").notNull()` column, the reviewer
+  asks: "is this a token / external identifier / business-unique?" If yes, `.unique()` (or `uniqueIndex`) is
+  mandatory.
+- **The audit-finding graph node `S-1` (Small World id `ABfhYiMFim3q0u77iasH2`)** + lesson `L-AIA-2`
+  (`e5uYaFJqnWiCIYo9Eufxb`) carry this rule across sessions — the next session sees them on `search_knowledge`
+  before re-deriving.
+- **Adjacent-column heuristic.** When auditing schema, look at adjacent same-table columns; if some carry
+  `.unique()` and others don't, the divergence is the audit signal. Three of the four findings in this cluster
+  were caught precisely by reading adjacent column properties together.
+
+---
+
+## L-2026-05-05 — Privacy-tier enforcement is per-route discipline; the lib helper is not a chokepoint
+
+**Context.** `D-aim-12` defines a `nobody`-tier visibility ("hidden from non-contacts, non-co-members") and
+the `agentic-inbox-audit` Phase 2 traced its actual enforcement points. Result: `routes/invitations.ts` and
+`routes/mailboxes.ts` correctly call `getVisibilityFilteredUsers` (which wraps `filterVisibleUsers`); `routes/contacts.ts`
+**does not** — `POST /api/contacts/request` (line 101) skips the visibility check entirely (F-C2, severity:high).
+Plus the helper's own `enforceContactsAndNobody` flag defaults to `false` (V-2), so any new caller that omits the
+flag silently re-enters the unfiltered Phase-3 mode. Two real privacy bypasses, both caused by the same shape:
+**the privacy invariant lives in route code, not in a chokepoint**.
+
+**Root cause.** `filterVisibleUsers` is named like a chokepoint and lives in `workers/lib/visibility-filter.ts`,
+but it is structurally **just a helper function**. There's no compile-time mechanism that forces every endpoint
+accepting a `user_id` to call it; there's no runtime gate; the default-false flag means even the helper itself
+is opt-in. So a developer adding `POST /contacts/request` who reasons "this is a permission check — `canSendContactRequest`
+covers it" gets to a working, tested-looking endpoint that nevertheless leaks `nobody`-tier user existence to anyone
+who knows the target's `user_id`. **The privacy decision (`D-aim-12`) was made; the enforcement chokepoint to back
+it up was never built.**
+
+**Fix.** F-C2 fix: after `targetUser` lookup in the `request` handler, return privacy-preserving `404 { error: "User not found" }`
+when `targetUser.visibility === 'nobody'` AND actor is neither co-member nor accepted-contact. V-2 fix: flip
+`enforceContactsAndNobody` default from `false` to `true`; add explicit `false` overrides on any future Phase-3-mode
+callers (none today; admin-panel listing would be a candidate). Combined fix is two small edits — but the durable
+shape change is the next item.
+
+**Prevention.**
+- **Make the chokepoint structural.** Extract a single `assertVisibleTo(actor, target_user_id)` helper that
+  every endpoint accepting a `user_id` parameter must call before any other logic. Code review enforcement: every
+  new route handler that takes a `user_id` parameter MUST call `assertVisibleTo` early in the handler — not via
+  `canSendContactRequest` / `canBlockUser` which are permission checks, not visibility checks.
+- **CI grep.** `rg "users\.id\s*===" workers/routes/` should produce zero hits. Raw user-id comparisons in routes
+  are the symptom of bypassing the chokepoint.
+- **Flag default-false for safety-relevant config.** `enforceContactsAndNobody?: boolean` defaulting to `false`
+  is a privacy-regression timebomb. Default-true; require explicit `false` for the rare contrary case.
+- The audit-finding graph nodes `F-C2` (`HejuxD6Ia0YOZP805meVV`) and `V-2` (`WeRwoOrlfegljcXaBDCKk`) + lesson
+  `L-AIA-3` (`JUz0dO13fGpPwtUGG6Qve`) preserve this rule for cross-session search.
+
+---
+
+## L-2026-05-05 — Scenario coverage is a privilege-escalation surface; orphan handlers are unsafe by default
+
+**Context.** Of the 30 scenarios in `scripts/scenarios/`, **none** exercise `workers/routes/admin/users.ts`
+(5 handlers — promote, demote, delete, invite, list) or `workers/routes/admin/settings.ts` (2 handlers — read,
+PATCH). Phase 2 audit found that the handlers' admin-role guards and `canAct` peer-protection logic look
+correct on inspection — but every one of those 7 mutation paths (some of which alter global role) is unverified
+by any executing scenario. Per Teammate B's report: this is the **highest-privilege mutation surface in the
+system, with zero scenario coverage**. Plus a real correctness defect (F-AU3): `parseInt(adminCap)` on a malformed
+settings row returns `NaN`, the cap-check `NaN >= NaN` is `false`, the cap silently fails open. Static review
+caught it; no test would have, because no test exists.
+
+**Root cause.** "Coverage" was treated as a quality goal, not a security gate. New handlers shipped behind their
+admin guards; the missing scenario was filed as a coverage gap, not a privilege risk. Over time, **seven of the
+most-privileged handlers in the codebase ended up in the orphan-surface bucket together**. The category cluster
+isn't a coincidence; it's a workflow signal — admin routes are typically built last, scenarios written second-last,
+and "we'll add scenarios in the next sprint" silently turns the most-sensitive code path into the least-tested one.
+
+**Fix.** Eight new scenarios: `S-ADMIN-1` (settings read+PATCH+enum/cap validation), `S-ADMIN-2` (users list+invite),
+`S-ADMIN-3` (promote+demote with cap + peer-protection), `S-ADMIN-4` (delete with owns-mailboxes/owner-blocked/success),
+plus `S-INVITATIONS-2`, `S-MAILBOX-3..4`, `S-INVITATIONS-3` for the lower-privilege orphan handlers. F-AU3 correctness
+fix: `if (isNaN(adminCap)) return c.json({error:"Server misconfigured"}, 500)` — fail closed when cap is unparseable,
+not open. F-AS2: per-key `MAX_VALUES` map enforces upper bounds (suggested ceilings recorded in the audit report).
+
+**Prevention.**
+- **CI gate on `routes/admin/*`.** Every new handler under that prefix requires at least one scenario assertion
+  in the same PR. Diff-coverage check: `git diff --name-only origin/main | grep '^workers/routes/admin/' | xargs -I{} rg
+  "{}" scripts/scenarios/` returns at least one hit per added handler.
+- **Fail-closed parsing of security-relevant settings.** `parseInt`, `JSON.parse`, env-var reads — when the result
+  feeds a cap or a permission check, `NaN` / `null` / undefined must NOT silently mean "no cap" or "all access."
+  Default to `500 misconfigured` and let an admin notice.
+- **Treat orphan-surface lists as deploy blockers, not nice-to-haves.** A handler shipping without coverage to a
+  production-shape branch is a coverage debt that compounds; scenarios are part of the handler, not a follow-up task.
+- The audit-finding graph nodes `F-AS1`, `F-AS2`, `F-AU1..F-AU5`, `F-I3` (all linked from project
+  `Nj4GAT_PYMKZY8OAC7AIy`) + lesson `L-AIA-6` (`GAlG1w8c5ynQ58lTlYlQX`) preserve this cluster for future sessions.
+
+---
+
 ## L-2026-05-04 — Dual-stack reconciliation belongs at the request layer, not the data layer
 
 **Context.** Production carries two mailbox stacks: a D1 control plane
