@@ -23,7 +23,8 @@
 //   - revoked / expired PAT → caught at the lookup layer (single
 //     pat-not-found surface; uniformity is intentional per RFC 6750)
 //   - PAT with no mcp:* scope → insufficient_scope 403 (pat-no-mcp-scope)
-//   - missing TOKEN_PEPPER → invalid_token 401 (pepper-missing)
+//   - missing TOKEN_PEPPER → falls back to "dev-pepper" (mirrors T3.1's
+//     mint path so verify never desyncs from mint when the secret is unset)
 //   - touchPatLastUsed invoked exactly once on success
 //   - ctx.waitUntil honored when ExecutionContext supplied
 
@@ -521,20 +522,25 @@ describe("validateBearer — PAT rejection paths", () => {
     expect(touched.calls).toBe(0);
   });
 
-  it("rejects when TOKEN_PEPPER is unset (config error, not user error)", async () => {
+  it("falls back to 'dev-pepper' when TOKEN_PEPPER is unset (matches T3.1 mint)", async () => {
+    // T3.1's routes/pats.ts uses `env.TOKEN_PEPPER ?? "dev-pepper"` to MINT.
+    // T3.3 must use the same fallback to VERIFY or PATs minted under the
+    // fallback would silently fail to authenticate. This test pins the
+    // contract: middleware proceeds with the dev-pepper hash and the lookup
+    // gets called (it's the lookup that decides accept/reject).
     const { env: baseEnv } = await setupPatEnv();
     const env = { ...baseEnv, TOKEN_PEPPER: undefined } as Env;
     const token = generatePat();
-    const { deps, touched } = makeDeps({ pat: patRow() });
+    let observedHash: string | null = null;
+    const { deps } = makeDeps({ pat: null });
+    deps.lookupPatByHash = async (_e, hash) => {
+      observedHash = hash;
+      return null;
+    };
 
-    const r = await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe("pepper-missing");
-      expect(r.bearer_error).toBe("invalid_token");
-    }
-    // Pepper missing → no DB lookup attempted, no touch.
-    expect(touched.calls).toBe(0);
+    await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
+    const expectedFallbackHash = await hashPat(token, "dev-pepper");
+    expect(observedHash).toBe(expectedFallbackHash);
   });
 
   it("PAT-prefixed token still respects the session-cookie guard", async () => {

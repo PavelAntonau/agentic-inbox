@@ -68,8 +68,7 @@ export type BearerRejectReason =
   | "missing-azp"
   // PAT path (T3.3)
   | "pat-not-found"
-  | "pat-no-mcp-scope"
-  | "pepper-missing";
+  | "pat-no-mcp-scope";
 
 /** Discriminator on a successful bearer validation. */
 export type BearerSource = "jwt" | "pat";
@@ -242,15 +241,11 @@ async function validatePatBearer(
   env: Env,
   deps: BearerDeps,
 ): Promise<BearerResult> {
-  const pepper = env.TOKEN_PEPPER;
-  if (!pepper) {
-    return {
-      ok: false,
-      reason: "pepper-missing",
-      bearer_error: "invalid_token",
-      detail: "TOKEN_PEPPER unset — PAT auth disabled",
-    };
-  }
+  // Mirror T3.1's `routes/pats.ts` fallback exactly — both surfaces MUST
+  // use the same pepper value or hashes diverge and PATs silently fail.
+  // The "dev-pepper" string is the documented dev-only constant; production
+  // sets TOKEN_PEPPER as a Worker secret.
+  const pepper = env.TOKEN_PEPPER ?? "dev-pepper";
 
   const now = (deps.now ?? Date.now)();
   const hash = await hashPat(token, pepper);
