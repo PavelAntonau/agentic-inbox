@@ -3,13 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import type { MiddlewareHandler } from "hono";
-import { drizzle } from "drizzle-orm/d1";
+import type { drizzle } from "drizzle-orm/d1";
 import { eq, inArray } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import type { Env } from "../types";
 import type { JwtClaims } from "../lib/mock-access";
 import { isServiceToken, jwtEmail, serviceTokenClientId } from "../lib/auth";
 import type { AuthzContext } from "../db/control-plane/forGroup";
+import { bootstrapDb } from "../db/control-plane/forGroup";
 import { bootstrapOwner } from "../lib/bootstrap-owner";
 import { getSettings } from "../lib/settings-cache";
 import { createAuth } from "../auth";
@@ -68,7 +69,11 @@ async function buildHumanAuthzContext(
 
 export function authzContext(): MiddlewareHandler<Ctx> {
   return async (c, next) => {
-    const orm = drizzle(c.env.DB, { schema });
+    // Bootstrap path — this middleware BUILDS the AuthzContext, so it
+    // legitimately runs before any ctx exists. `bootstrapDb()` is the
+    // documented exemption from the forGroup chokepoint (D-V2F-3, audit
+    // fix CC-1). Every other caller must use forGroup(db, ctx).db.
+    const orm = bootstrapDb(c.env.DB);
 
     // ── Path 1: better-auth session cookie ──────────────────────────────────
     // Check for a valid better-auth session BEFORE the CF Access JWT path.

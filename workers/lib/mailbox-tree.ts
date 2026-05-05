@@ -10,10 +10,10 @@
 // "followed" = mailboxes in actor.authorized_mailbox_ids that actor does NOT own
 //              and that are not already shown under a visible group.
 
-import { drizzle } from "drizzle-orm/d1";
 import { eq, inArray } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import type { AuthzContext } from "../db/control-plane/forGroup";
+import { forGroup } from "../db/control-plane/forGroup";
 
 export interface MailboxNodePayload {
   id: string;
@@ -45,7 +45,9 @@ export async function buildMailboxTree(
   db: D1Database,
   ctx: AuthzContext,
 ): Promise<MailboxTreePayload> {
-  const orm = drizzle(db, { schema });
+  // Audit fix CC-1: route through forGroup so this caller is governed by the
+  // chokepoint (D-V2F-3) rather than calling drizzle() directly.
+  const { db: orm } = forGroup(db, ctx);
 
   // 1. Determine which groups to show
   let visibleGroupIds: string[] = ctx.group_ids;

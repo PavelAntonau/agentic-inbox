@@ -36,3 +36,29 @@ export function forGroup(db: D1Database, ctx: AuthzContext) {
 }
 
 export type ForGroupHandle = ReturnType<typeof forGroup>;
+
+/**
+ * Bootstrap-only handle: returns a plain Drizzle wrapper for the rare paths
+ * that MUST query users / group_members BEFORE any AuthzContext exists yet.
+ *
+ * Audit fix CC-1 (graph: SpDzyE2nPBmE3Ix_oc6ay). Two infrastructure paths
+ * legitimately need DB access without ctx because they're the code that
+ * BUILDS ctx:
+ *   1. `workers/middleware/authz-context.ts` — resolves session/JWT/token →
+ *      user → group_ids + mailbox_ids. This is the bootstrap path.
+ *   2. `workers/lib/bootstrap-owner.ts` — first-login global_owner promotion
+ *      that runs BEFORE the user has a row to derive group_ids from.
+ *
+ * Every OTHER caller MUST go through `forGroup(db, ctx).db` so the CI
+ * grep-lint can enforce the chokepoint. The lint rule (D-V2F-3) targets:
+ *
+ *   rg "import.*drizzle.*drizzle-orm/d1" workers/ \
+ *     --include='*.ts' \
+ *     | grep -v 'workers/db/control-plane/forGroup.ts\|bootstrap-owner.ts'
+ *
+ * (Existing direct `drizzle()` imports in those two files are the documented
+ * exemption surface; everything else is a violation.)
+ */
+export function bootstrapDb(db: D1Database) {
+  return drizzle(db, { schema });
+}
