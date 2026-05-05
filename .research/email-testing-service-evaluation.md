@@ -274,3 +274,59 @@ The specific ask:
 > Claim: Sandbox features include forwarding to real inboxes (Basic+), per-10-second rate limits, FIFO cleanup at the per-sandbox cap.
 > Passage: "Rate limits per 10 sec: The number of emails you can send to each of your Sandboxes every 10 seconds. … Once the rate limit per 10 seconds is reached, the messages are not getting sent and are rejected with the error '550 5.7.0 Requested action not taken: too many emails per second'. … Total forwarded emails per month — The maximum number of emails you can forward from your account to real inboxes for testing and preview purposes. The maximum number of forwarding rules is 300. Email forwarding is available in the Basic Testing plan and more advanced billing plans."
 > Section: features-and-limits page body
+
+---
+
+## Path A — live smoke test results (2026-05-05, base @ 4914258)
+
+**Status:** ✅ send-side and inbound-delivery confirmed via API. Webhook-side payload retrieval requires a deployed `email.received` endpoint (next phase).
+
+**Account state at smoke-test time:**
+
+| Item | Value |
+|---|---|
+| Resend account | `slmails` (login `resend.uncheck832@slmails.com`) |
+| Verified custom domain | `actionnow.ai` (DNS via Cloudflare, region us-east-1, sending=enabled, receiving=disabled) |
+| Auto-provisioned inbound subdomain | **`pooceidpa.resend.app`** (catches `<anything>@pooceidpa.resend.app`) |
+| Admin API key | created `agentic-inbox-admin`, Full Access, all domains, token id `re_So47kVne...` |
+| Storage | `mcp__key__tool_set_secret service=resend account=api-key-admin` (and `account=inbound-domain` for the receiving subdomain) |
+
+**Send + receive E2E:**
+
+```
+POST https://api.resend.com/emails
+  from:    smoke-test@actionnow.ai
+  to:      e2e-1778003804@pooceidpa.resend.app
+  subject: agentic-inbox E2E smoke 1778003804
+  text:    E2E smoke test body, nonce=1778003804
+→ 200 OK { id: "3d5586d0-69c0-4224-924c-aac68ec3eb08" }
+
+GET https://api.resend.com/emails/3d5586d0-69c0-4224-924c-aac68ec3eb08
+→ 200 OK
+  last_event: "delivered"
+  text:       "E2E smoke test body, nonce=1778003804"
+```
+
+`last_event = delivered` to a `*.resend.app` address is Resend's confirmation that the inbound mailbox accepted the message and parsed it. Without an `email.received` webhook subscriber, the parsed payload is buffered for the dashboard's Receiving tab but is NOT exposed via a public REST GET (the `/inbound/*` paths return `405 method_not_allowed` for GET — they're write-only on the public API; reads happen via webhook push).
+
+**What this means for the test harness:**
+
+1. Path A is unblocked from the **vendor / account** side — no signup, no DNS, no Pro plan needed for the small daily volume (~50 E2E tests/day budget on Free, per [R-quotas]).
+2. To actually consume inbound message bodies in tests, agentic-inbox must:
+   - Deploy a Worker route (e.g. `POST /api/webhooks/resend-inbound`) that buffers `email.received` payloads keyed by recipient address (DurableObject or KV).
+   - Register that URL on Resend Dashboard → Webhooks → Add Webhook → event `email.received` → copy the `whsec_…` into `RESEND_WEBHOOK_SECRET` Worker secret.
+   - Test code: send via Resend → poll the buffer endpoint for `e2e-${nonce}@pooceidpa.resend.app` → assert subject/body/links → delete from buffer.
+3. **Two stored secrets are now live in the agent keychain:**
+   - `resend/api-key-admin` — Full Access admin key
+   - `resend/inbound-domain` — `pooceidpa.resend.app`
+   The existing `resend/api-key` (sending-only) from the Onboarding key remains untouched.
+
+**Deviations from the original Path-A plan:**
+
+- The plan said *"enable Receiving on a `*.resend.app` subdomain"*. In practice, receiving is **already on** for every Resend account at sign-up — the dashboard auto-provisions one `<id>.resend.app` (here `pooceidpa`) and shows it under Emails → Receiving. There is no toggle to flip; the only remaining step is registering a webhook (deferred until the Worker route lands).
+- The plan said *"list domains"* expecting at least one inbound domain. Only `actionnow.ai` exists in `/v1/domains`; the Resend-managed `pooceidpa.resend.app` is **not** returned by `GET /domains` and is not visible on the Domains page — it's surfaced only on the Emails → Receiving tab. Worth flagging: anyone discovering inbound state via the API will not find the inbound subdomain there.
+- `actionnow.ai` shows `capabilities.receiving = "disabled"` in `/v1/domains` — turning that on requires adding Resend's MX record at Cloudflare DNS, which is a separate ticket the user has not authorized. Path A intentionally lives on the `*.resend.app` subdomain to avoid that DNS work.
+
+**Cost posture (sanity check at the new key's first send):** 1 sent email + 1 received delivery = 2 quota slots on Free (100/day). At the assumed ~20 E2E runs/day this leaves ~60 slots/day for production invite traffic — comfortable. Upgrade to Pro $20/mo only if E2E or production exceeds ~50/day combined.
+
+**Recommended next ticket:** wire `POST /api/webhooks/resend-inbound` into the agentic-inbox Worker, register webhook in Resend dashboard, replace any `MOCK_MAIL` test fixture with a `waitForReceived(address, timeoutMs)` helper that polls the Worker's buffer. ETA ~half a day.
