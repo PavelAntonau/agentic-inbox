@@ -11,7 +11,11 @@
 import { makeSignature } from "better-auth/crypto";
 import { describe, expect, it } from "vitest";
 import { TRUSTED_CLIENTS } from "~/lib/cached-trusted-clients";
-import { loadConsentClient, verifyOAuthQuerySignature } from "./consent";
+import {
+  ConsentForwardError,
+  loadConsentClient,
+  verifyOAuthQuerySignature,
+} from "./consent";
 import type { Env } from "../types";
 
 const SECRET = "BETTER_AUTH_SECRET-test-fixture-32-bytes-min";
@@ -89,8 +93,24 @@ describe("verifyOAuthQuerySignature", () => {
     if (!result.ok) expect(result.reason).toBe("exp-malformed");
   });
 
-  it("rejects an expired query", async () => {
-    const qs = await buildSignedQuery(baseQuery, -60); // exp 60 s ago
+  it("rejects an expired query (well past the skew window)", async () => {
+    const qs = await buildSignedQuery(baseQuery, -120); // exp 120 s ago
+    const result = await verifyOAuthQuerySignature(qs, SECRET);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("expired");
+  });
+
+  // C-1 (audit, agentic-inbox-hardening Phase 2): allow ±30 s of clock skew
+  // on the exp check. A query that expired 5 s ago must be accepted; one
+  // that expired 60 s ago must still be rejected.
+  it("C-1: tolerates a 5 s clock-skew on the expiry check", async () => {
+    const qs = await buildSignedQuery(baseQuery, -5); // exp 5 s ago
+    const result = await verifyOAuthQuerySignature(qs, SECRET);
+    expect(result.ok).toBe(true);
+  });
+
+  it("C-1: still rejects a query that expired 60 s ago (beyond the skew)", async () => {
+    const qs = await buildSignedQuery(baseQuery, -60);
     const result = await verifyOAuthQuerySignature(qs, SECRET);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("expired");
@@ -141,5 +161,66 @@ describe("loadConsentClient (trusted)", () => {
     expect(view!.clientName).toBe("Claude Code");
     expect(view!.clientUri).toBe("https://www.anthropic.com/claude-code");
     expect(view!.logoUri).toBe("https://www.anthropic.com/favicon.ico");
+  });
+
+  // C-3 (audit, agentic-inbox-hardening Phase 2): when requestedScopes is
+  // supplied, allowedScopes is the intersection of registered ∩ requested.
+  // The lib enforces this so a future caller cannot accidentally over-scope
+  // the consent UI by forgetting to filter.
+  it("C-3: full registered set when requestedScopes is omitted", async () => {
+    const view = await loadConsentClient({} as Env, "claude-code");
+    expect(view).not.toBeNull();
+    // Trusted-client scopes for claude-code are non-empty.
+    expect(view!.allowedScopes.length).toBeGreaterThan(0);
+  });
+
+  it("C-3: returns intersection when requestedScopes is supplied", async () => {
+    const fullView = await loadConsentClient({} as Env, "claude-code");
+    expect(fullView).not.toBeNull();
+    const oneScope = fullView!.allowedScopes[0]!;
+    const view = await loadConsentClient({} as Env, "claude-code", [oneScope]);
+    expect(view).not.toBeNull();
+    expect(view!.allowedScopes).toEqual([oneScope]);
+  });
+
+  it("C-3: drops requested scopes the client did NOT register for", async () => {
+    const view = await loadConsentClient({} as Env, "claude-code", [
+      "mcp:mailbox:read",
+      "mcp:not-a-real-scope",
+    ]);
+    expect(view).not.toBeNull();
+    expect(view!.allowedScopes).not.toContain("mcp:not-a-real-scope");
+  });
+
+  it("C-3: empty requestedScopes yields empty allowedScopes (verbatim honor)", async () => {
+    const view = await loadConsentClient({} as Env, "claude-code", []);
+    expect(view).not.toBeNull();
+    expect(view!.allowedScopes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C-2 — ConsentForwardError MUST NOT leak the plugin's error body in `.message`.
+// ---------------------------------------------------------------------------
+
+describe("ConsentForwardError (C-2)", () => {
+  it("keeps the user-facing message fixed and free of upstream detail", () => {
+    const err = new ConsentForwardError(
+      "Consent request could not be completed",
+      502,
+      "Internal: leaked CSRF token=foo or PII",
+    );
+    expect(err.message).toBe("Consent request could not be completed");
+    expect(err.message).not.toMatch(/CSRF|PII|leaked/);
+  });
+
+  it("preserves upstream detail on .serverDetail for log emission", () => {
+    const err = new ConsentForwardError("user-facing", 502, "internal-only");
+    expect(err.serverDetail).toBe("internal-only");
+  });
+
+  it("works without an upstream detail (legacy paths)", () => {
+    const err = new ConsentForwardError("user-facing", 502);
+    expect(err.serverDetail).toBeUndefined();
   });
 });

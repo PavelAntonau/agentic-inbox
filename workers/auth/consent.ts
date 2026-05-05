@@ -77,7 +77,15 @@ export async function verifyOAuthQuerySignature(
   if (!Number.isFinite(exp) || !Number.isInteger(exp)) {
     return { ok: false, reason: "exp-malformed" };
   }
-  if (exp * 1000 < Date.now()) return { ok: false, reason: "expired" };
+  // C-1 (audit, agentic-inbox-hardening Phase 2): allow ±30 s of clock skew
+  // on the expiry check. The realistic failure mode is a mobile background/
+  // foreground cycle between the consent click and the redirect — the
+  // device's clock can drift relative to the server by a few seconds and
+  // the strict `<` was rejecting otherwise valid signed queries.
+  const CONSENT_QUERY_CLOCK_SKEW_MS = 30 * 1000;
+  if (exp * 1000 < Date.now() - CONSENT_QUERY_CLOCK_SKEW_MS) {
+    return { ok: false, reason: "expired" };
+  }
 
   // Plugin's signParams strips `sig` BEFORE re-serializing for the HMAC, so
   // we do the same. The exp parameter IS included in the signed payload.
@@ -125,49 +133,72 @@ export interface ConsentClientView {
  *      future dynamically-registered MCP client.
  *
  * Returns `null` when the client_id is not found in either source.
+ *
+ * C-3 (audit, agentic-inbox-hardening Phase 2): when `requestedScopes`
+ * is supplied, the returned `allowedScopes` is `intersection(registered,
+ * requested)`. Callers that omit the parameter receive the full registered
+ * set (legacy behaviour). The intersection at this layer means a future
+ * caller that forgets to filter cannot accidentally over-scope a consent
+ * UI with permissions the OAuth client did not actually request.
  */
 export async function loadConsentClient(
   env: Env,
   clientId: string,
+  requestedScopes?: string[],
 ): Promise<ConsentClientView | null> {
   const trusted = getTrustedClient(clientId);
-  if (trusted) return trustedClientToView(trusted);
+  let view: ConsentClientView | null;
+  if (trusted) {
+    view = trustedClientToView(trusted);
+  } else {
+    // Fallback: pull from D1. Dynamic-registration clients land here.
+    const db = drizzle(env.DB, { schema });
+    const row = await db
+      .select({
+        clientId: schema.oauth_client.clientId,
+        name: schema.oauth_client.name,
+        uri: schema.oauth_client.uri,
+        icon: schema.oauth_client.icon,
+        metadata: schema.oauth_client.metadata,
+        scopes: schema.oauth_client.scopes,
+      })
+      .from(schema.oauth_client)
+      .where(eq(schema.oauth_client.clientId, clientId))
+      .get();
+    if (!row) return null;
 
-  // Fallback: pull from D1. Dynamic-registration clients land here.
-  const db = drizzle(env.DB, { schema });
-  const row = await db
-    .select({
-      clientId: schema.oauth_client.clientId,
-      name: schema.oauth_client.name,
-      uri: schema.oauth_client.uri,
-      icon: schema.oauth_client.icon,
-      metadata: schema.oauth_client.metadata,
-      scopes: schema.oauth_client.scopes,
-    })
-    .from(schema.oauth_client)
-    .where(eq(schema.oauth_client.clientId, clientId))
-    .get();
-  if (!row) return null;
-
-  let description = "";
-  if (typeof row.metadata === "string" && row.metadata.trim()) {
-    try {
-      const m = JSON.parse(row.metadata) as Record<string, unknown>;
-      if (typeof m.description === "string") description = m.description;
-    } catch {
-      // Malformed metadata — leave description empty.
+    let description = "";
+    if (typeof row.metadata === "string" && row.metadata.trim()) {
+      try {
+        const m = JSON.parse(row.metadata) as Record<string, unknown>;
+        if (typeof m.description === "string") description = m.description;
+      } catch {
+        // Malformed metadata — leave description empty.
+      }
     }
+
+    view = {
+      clientId: row.clientId,
+      clientName: row.name ?? row.clientId,
+      clientUri: row.uri ?? null,
+      logoUri: row.icon ?? null,
+      description,
+      source: "registered",
+      allowedScopes: parseScopeArray(row.scopes),
+    };
   }
 
-  return {
-    clientId: row.clientId,
-    clientName: row.name ?? row.clientId,
-    clientUri: row.uri ?? null,
-    logoUri: row.icon ?? null,
-    description,
-    source: "registered",
-    allowedScopes: parseScopeArray(row.scopes),
-  };
+  // C-3: intersect on the way out so the caller cannot over-scope by
+  // accident. Empty requestedScopes → empty allowedScopes (a deliberate
+  // request for "no scope" is honored verbatim).
+  if (requestedScopes !== undefined) {
+    const requestedSet = new Set(requestedScopes);
+    view = {
+      ...view,
+      allowedScopes: view.allowedScopes.filter((s) => requestedSet.has(s)),
+    };
+  }
+  return view;
 }
 
 function trustedClientToView(t: TrustedClient): ConsentClientView {
@@ -286,6 +317,12 @@ export async function submitConsentDecision(
   });
 
   if (!res.ok) {
+    // C-2 (audit, agentic-inbox-hardening Phase 2): keep the user-facing
+    // error message fixed and free of the plugin's body so a 5xx detail
+    // cannot leak a CSRF token, an internal stack frame, or partial PII
+    // into a client-rendered error string. The plugin body is preserved
+    // on `Error.cause` so server-side logs retain diagnostic detail
+    // without ever surfacing it through `err.message`.
     let detail = "";
     try {
       detail = await res.text();
@@ -293,8 +330,9 @@ export async function submitConsentDecision(
       // ignore
     }
     throw new ConsentForwardError(
-      `consent endpoint returned ${res.status}: ${detail.slice(0, 200)}`,
+      "Consent request could not be completed",
       res.status,
+      detail.slice(0, 200) || undefined,
     );
   }
 
@@ -310,18 +348,26 @@ export async function submitConsentDecision(
         : null;
   if (!redirectUri) {
     throw new ConsentForwardError(
-      "consent endpoint returned no redirect_uri",
+      "Consent request could not be completed",
       502,
     );
   }
   return { redirectUri };
 }
 
+/**
+ * C-2 (Phase 2): user-facing message is fixed; upstream detail is parked
+ * on `serverDetail` for log emission, never inlined into `err.message`.
+ */
 export class ConsentForwardError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Upstream detail (truncated to 200 chars). For server-side logs only.
+   *  MUST NOT be surfaced to clients. */
+  readonly serverDetail: string | undefined;
+  constructor(message: string, status: number, serverDetail?: string) {
     super(message);
     this.name = "ConsentForwardError";
     this.status = status;
+    this.serverDetail = serverDetail;
   }
 }
