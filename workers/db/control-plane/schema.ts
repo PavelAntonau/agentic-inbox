@@ -82,17 +82,33 @@ export const contacts = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.owner_user_id, t.contact_user_id] }),
+    // S-2 (audit graph: Z4NSQDL0GqzAdDPL1hnbu, migration 0014):
+    // Index the inverse-direction lookup. The PK already covers
+    // (owner_user_id, contact_user_id) prefix scans; this index is for
+    // queries that filter by contact_user_id alone (e.g. "who has me as
+    // a contact" — used by visibility-filter and bidirectional-handshake
+    // checks).
+    contactUserIdx: index("contacts_contact_user_id_idx").on(t.contact_user_id),
   }),
 );
 
 // 3. groups — isolation boundary
+//
+// S-4 (audit, agentic-inbox-hardening Phase 2): owner_user_id uses
+// onDelete:"restrict" — deleting a user that still owns groups is blocked
+// at the FK layer. The admin user-delete handler (DELETE /api/admin/users/:id)
+// is responsible for re-assigning or cascade-deleting owned groups before
+// the user row goes away. Documented in DECISIONS.md (D-aih-S4-onDelete).
+// Existing prod databases were created without this declaration; SQLite
+// cannot ALTER an FK in place, so this annotation is forward-looking
+// documentation that aligns the drizzle schema with deployed behaviour.
 export const groups = sqliteTable("groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
   owner_user_id: text("owner_user_id")
     .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "restrict" }),
   created_at: integer("created_at").notNull(),
   created_by: text("created_by").references(() => users.id),
 });
@@ -145,6 +161,13 @@ export const group_invitations = sqliteTable(
     pendingIdx: uniqueIndex("group_invitations_pending")
       .on(t.group_id, t.invitee_email)
       .where(sql`${t.status} = 'pending'`),
+    // S-3 (audit, agentic-inbox-hardening Phase 2, migration 0014):
+    // Index for the unseen-notifications hot path —
+    // GET /api/notifications/unseen filters group_invitations by
+    // invitee_user_id on every page-load poll.
+    inviteeUserIdx: index("group_invitations_invitee_user_idx").on(
+      t.invitee_user_id,
+    ),
   }),
 );
 
@@ -155,9 +178,13 @@ export const mailboxes = sqliteTable(
     id: text("id").primaryKey(),
     address: text("address").notNull().unique(), // COLLATE NOCASE via index
     display_name: text("display_name"),
+    // S-4 (audit, agentic-inbox-hardening Phase 2): mailboxes.owner_user_id
+    // uses onDelete:"restrict" so a user with mailboxes cannot be deleted
+    // while those mailboxes exist. Admin user-delete handler must reassign
+    // or remove owned mailboxes first. See DECISIONS.md (D-aih-S4-onDelete).
     owner_user_id: text("owner_user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "restrict" }),
     created_at: integer("created_at").notNull(),
     created_by: text("created_by").references(() => users.id),
     // Phase 2 — inbox policy columns (migration 0007)
@@ -323,7 +350,15 @@ export const account = sqliteTable(
   },
   (t) => ({
     userIdIdx: index("account_user_id_idx").on(t.userId),
-    providerIdx: index("account_provider_idx").on(t.providerId, t.accountId),
+    // S-6 (audit, agentic-inbox-hardening Phase 2, migration 0014):
+    // (provider_id, account_id) is the better-auth caller's natural
+    // identity tuple. Schema-level UNIQUE catches duplicate-row bugs
+    // the ORM layer cannot, mirroring the S-1 lesson on
+    // oauth_refresh_token.token (L-AIA-2).
+    providerIdx: uniqueIndex("account_provider_idx").on(
+      t.providerId,
+      t.accountId,
+    ),
   }),
 );
 

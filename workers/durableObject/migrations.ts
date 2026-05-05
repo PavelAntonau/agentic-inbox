@@ -189,4 +189,20 @@ export const mailboxMigrations: Migration[] = [
             CREATE INDEX IF NOT EXISTS idx_threads_tip ON threads(tip_message_id);
         `,
   },
+  {
+    // DB-1 (audit, agentic-inbox-hardening Phase 2). Re-assessment finding:
+    // the original audit flagged thread_id, message_id, and folder_id as
+    // missing indexes, but migrations 2 and 8 already cover thread_id,
+    // folder_id, and (folder_id, date DESC). Only message_id remained
+    // un-indexed. message_id is queried for RFC 5322 deduplication on
+    // inbound delivery and for "find the email that started this thread"
+    // lookups; without an index those become full scans on growing inboxes.
+    //
+    // No txn() wrapper: idempotent CREATE INDEX IF NOT EXISTS — safe to
+    // re-run if the migration fails partway.
+    name: "10_message_id_index",
+    sql: `
+            CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
+        `,
+  },
 ];
