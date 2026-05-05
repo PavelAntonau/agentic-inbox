@@ -23,6 +23,7 @@ import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { isMockMode } from "../lib/mock-mode";
+import { bumpVersion } from "../lib/settings-cache";
 import {
   clearOutbox,
   getLatestOtp,
@@ -293,6 +294,183 @@ mockRouter.post("/impersonate", async (c) => {
   return c.json({ ok: true, email: trimmed });
 });
 
+/**
+ * GET /__mock/invitations-by-group?group_id= — list invitations for a group.
+ *
+ * The privacy contract on POST /api/invitations returns only `{ sent: true }`,
+ * which means scenarios cannot recover the invitation id from the wire
+ * response. This endpoint exposes the rows directly (id, status, invitee,
+ * inviter) so cancel/decline scenarios can pin the row to operate on.
+ *
+ * Production never sees /__mock/* — module-level guard above.
+ *
+ * Returns: { invitations: Array<{ id, group_id, invitee_email, invited_by, status, created_at, expires_at }> }
+ */
+mockRouter.get("/invitations-by-group", async (c) => {
+  const groupId = c.req.query("group_id");
+  if (!groupId) {
+    return c.json({ error: "group_id query param required" }, 400);
+  }
+  const rows = await c.env.DB.prepare(
+    `SELECT id, group_id, invitee_email, invited_by, status, created_at, expires_at
+       FROM group_invitations
+      WHERE group_id = ?1
+      ORDER BY created_at ASC`,
+  )
+    .bind(groupId)
+    .all<{
+      id: string;
+      group_id: string;
+      invitee_email: string;
+      invited_by: string;
+      status: string;
+      created_at: number;
+      expires_at: number;
+    }>();
+  return c.json({ invitations: rows.results ?? [] });
+});
+
+/**
+ * POST /__mock/seed-setting — directly upsert a row into the `settings` table.
+ *
+ * The PATCH /api/admin/settings/:key handler validates input strictly (integer
+ * keys → parseInt + non-negative + per-key MAX_VALUES; enum keys → allowed
+ * set), so it cannot plant the malformed values F-AU3 audit needs to exercise:
+ * an unparseable `max_global_admins` string. This endpoint bypasses the
+ * validator and writes raw, then bumps the settings_version so the in-memory
+ * cache reloads.
+ *
+ * Body: { key: string, value: string }
+ *
+ * Production never sees /__mock/* — module-level guard above.
+ *
+ * Returns: { ok: true, key, value, version }
+ */
+mockRouter.post("/seed-setting", async (c) => {
+  let body: { key?: unknown; value?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const { key, value } = body;
+  if (typeof key !== "string" || key.trim().length === 0) {
+    return c.json({ error: "key is required" }, 400);
+  }
+  if (typeof value !== "string") {
+    return c.json({ error: "value must be a string" }, 400);
+  }
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO settings (key, value, updated_at, updated_by)
+     VALUES (?1, ?2, ?3, NULL)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=NULL`,
+  )
+    .bind(key.trim(), value, now)
+    .run();
+
+  // bumpVersion both writes the settings_version row AND clears the
+  // module-level in-memory cache. Inserting the row alone is not enough:
+  // getSettings has a 30 s TTL on the fast path that skips the version
+  // check entirely. The mock helper must short-circuit that cache so the
+  // next getSettings call reads the freshly-planted value.
+  await bumpVersion(c.env.DB);
+
+  return c.json({ ok: true, key: key.trim(), value });
+});
+
+/**
+ * POST /__mock/seed-oauth-refresh-token — direct INSERT into
+ * `oauth_refresh_token`. Used by S-AUTH-OAUTH-TOKEN-1 to assert the
+ * UNIQUE(token) constraint added by migration 0013 (audit fix S-1) fires at
+ * the wire level when a duplicate token is submitted.
+ *
+ * Body: { token: string, user_email: string, client_id?: string }
+ *   - token       — raw token string. The scenario sends the same value twice
+ *                   to exercise the UNIQUE constraint.
+ *   - user_email  — must resolve to an existing users.id (caller seeds first).
+ *   - client_id   — optional; defaults to a synthesised "s-auth-oauth-token-1"
+ *                   client which is upserted if missing.
+ *
+ * Returns:
+ *   201 + { id, token } on success
+ *   409 + { error, code: "UNIQUE_CONSTRAINT" } when the UNIQUE(token) constraint trips
+ *
+ * Production never sees /__mock/*.
+ */
+mockRouter.post("/seed-oauth-refresh-token", async (c) => {
+  let body: { token?: unknown; user_email?: unknown; client_id?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const { token, user_email, client_id } = body;
+  if (typeof token !== "string" || token.length === 0) {
+    return c.json({ error: "token is required" }, 400);
+  }
+  if (typeof user_email !== "string" || user_email.length === 0) {
+    return c.json({ error: "user_email is required" }, 400);
+  }
+
+  const userRow = await c.env.DB.prepare(
+    `SELECT id FROM users WHERE lower(email)=lower(?1)`,
+  )
+    .bind(user_email)
+    .first<{ id: string }>();
+  if (!userRow) {
+    return c.json({ error: `no user with email ${user_email}` }, 404);
+  }
+
+  const resolvedClientId =
+    typeof client_id === "string" && client_id.length > 0
+      ? client_id
+      : "s-auth-oauth-token-1-client";
+
+  // Upsert a synthetic oauth_client row if missing (FK target).
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO oauth_client (id, client_id, redirect_uris, created_at, updated_at)
+     VALUES (?1, ?1, '[]', ?2, ?2)
+     ON CONFLICT(client_id) DO NOTHING`,
+  )
+    .bind(resolvedClientId, now)
+    .run();
+
+  const tokenRowId = `mock-rt-${crypto.randomUUID()}`;
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO oauth_refresh_token
+        (id, token, client_id, user_id, scopes, created_at, expires_at)
+       VALUES (?1, ?2, ?3, ?4, 'mcp', ?5, ?6)`,
+    )
+      .bind(
+        tokenRowId,
+        token,
+        resolvedClientId,
+        userRow.id,
+        now,
+        now + 3600_000,
+      )
+      .run();
+    return c.json({ id: tokenRowId, token }, 201);
+  } catch (e) {
+    const msg = (e as Error).message ?? "";
+    if (
+      msg.includes("UNIQUE") ||
+      msg.toLowerCase().includes("unique constraint") ||
+      msg.includes("oauth_refresh_token_token_unique") ||
+      msg.includes("oauth_refresh_token.token")
+    ) {
+      return c.json(
+        { error: "duplicate token", code: "UNIQUE_CONSTRAINT", detail: msg },
+        409,
+      );
+    }
+    return c.json({ error: msg }, 500);
+  }
+});
+
 mockRouter.post("/inbox", async (c) => {
   const body = await c.req.json<{
     to: string;
@@ -348,7 +526,25 @@ mockRouter.post("/reset", async (c) => {
     "groups",
     "user_contacts",
     "user_sessions",
+    "oauth_refresh_token",
+    "oauth_access_token",
+    "oauth_consent",
+    "oauth_client",
+    // better-auth child tables — all FK→users ON DELETE CASCADE in the
+    // migrations, but D1 / Miniflare local mode does not always enable
+    // PRAGMA foreign_keys, so cascading isn't guaranteed. Truncate
+    // explicitly to keep the reset deterministic across environments.
+    "account",
+    "session",
+    "pats",
+    "verification",
     "users",
+    // S-ADMIN-3 plants a non-integer max_global_admins via /__mock/seed-setting
+    // to exercise the F-AU3 fail-closed branch. If the scenario crashes
+    // mid-run the poisoned row survives and breaks every subsequent promote
+    // call (returns 500 instead of 200). Wipe the catalog on reset so each
+    // run starts from baked-in DEFAULTS.
+    "settings",
   ];
   const cleared: Record<string, number | string> = {};
   for (const t of tables) {
@@ -359,6 +555,12 @@ mockRouter.post("/reset", async (c) => {
       cleared[t] = `skip: ${(e as Error).message.slice(0, 80)}`;
     }
   }
+
+  // After truncating `settings`, also clear the module-level in-memory
+  // cache so the next getSettings() call reloads from the now-empty
+  // table (which falls back to DEFAULTS). Without this, the cache's
+  // stale rows would survive the reset for up to 30 s.
+  await bumpVersion(c.env.DB);
 
   return c.json({
     ok: true,
