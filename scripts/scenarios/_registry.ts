@@ -46,6 +46,7 @@ import sAdmin3 from "./s-admin-3";
 import sAdmin4 from "./s-admin-4";
 import sInvitations2 from "./s-invitations-2";
 import sAuthOauthToken1 from "./s-auth-oauth-token-1";
+import sMsgUserToUser1 from "./s-msg-user-to-user-1";
 
 export interface RegistryEntry {
   scenario: Scenario;
@@ -88,6 +89,7 @@ const ALL: Scenario[] = [
   sAdmin3,
   sAdmin4,
   sAuthOauthToken1,
+  sMsgUserToUser1,
 ];
 
 export async function loadScenarios(): Promise<RegistryEntry[]> {
