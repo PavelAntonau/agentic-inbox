@@ -51,6 +51,36 @@ const ENUM_KEYS: Record<string, string[]> = {
 };
 
 // -----------------------------------------------------------------------
+// F-AS2 (audit, agentic-inbox-hardening Phase 2): per-key upper-bound
+// caps for integer settings.
+//
+// Without these, an authenticated admin can set any integer-typed setting
+// to MAX_INT, which is functionally unbounded and exploitable on the
+// downstream consumers (e.g. max_regular_users = 10^9 → invitation handler
+// admits unlimited new users; group_invitation_ttl_days = 10^9 → invitations
+// never expire).
+//
+// The four explicit caps are taken from the audit report. The remaining
+// integer keys get conservative defaults — they are not exploitable in the
+// same way, but a 100-mailbox-per-user limit (vs MAX_INT) is sane defense
+// in depth and keeps the cap surface uniform.
+// -----------------------------------------------------------------------
+
+export const SETTINGS_MAX_VALUES: Record<string, number> = {
+  // Audit-named caps (workers/db/control-plane/.research → F-AS2)
+  max_regular_users: 10000,
+  max_global_admins: 20,
+  group_invitation_ttl_days: 365,
+  agent_token_idle_prune_minutes: 44640, // 31 days
+
+  // Conservative caps for the rest of the integer catalog
+  max_private_mailboxes_per_user: 1000,
+  max_mailboxes_per_group: 1000,
+  max_groups_per_mailbox: 1000,
+  agent_token_default_max_instances: 100,
+};
+
+// -----------------------------------------------------------------------
 // PATCH /:key — update a single setting value
 // -----------------------------------------------------------------------
 
@@ -101,6 +131,16 @@ router.patch("/:key", async (c) => {
     if (isNaN(parsed) || parsed < 0) {
       return c.json(
         { error: `Value for ${key} must be a non-negative integer` },
+        400,
+      );
+    }
+    // F-AS2 — enforce per-key upper bound.
+    const maxAllowed = SETTINGS_MAX_VALUES[key];
+    if (maxAllowed !== undefined && parsed > maxAllowed) {
+      return c.json(
+        {
+          error: `Value for ${key} exceeds maximum allowed (${maxAllowed})`,
+        },
         400,
       );
     }
