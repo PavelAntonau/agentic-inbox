@@ -32,7 +32,7 @@ import { verifyDraft } from "./ai";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "./mocks/email-binding";
 import { decideSendPolicy, deliverInternal } from "./internal-delivery";
-import { Folders } from "../../shared/folders";
+import { Folders, normalizeFolderId } from "../../shared/folders";
 import type { Env } from "../types";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 
@@ -375,10 +375,11 @@ export async function toolMoveEmail(
   emailId: string,
   folderId: string,
 ) {
+  const canonicalFolderId = normalizeFolderId(folderId) ?? folderId;
   const stub = getMailboxStub(env, mailboxId);
-  const success = await stub.moveEmail(emailId, folderId);
+  const success = await stub.moveEmail(emailId, canonicalFolderId);
   if (success) {
-    return { status: "moved", emailId, folder: folderId };
+    return { status: "moved", emailId, folder: canonicalFolderId };
   }
   return { error: "Failed to move email" };
 }

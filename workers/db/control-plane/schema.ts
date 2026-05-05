@@ -545,8 +545,8 @@ export const oauth_client = sqliteTable(
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    createdAt: integer("created_at"),
-    updatedAt: integer("updated_at"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
     name: text("name"),
     uri: text("uri"),
     icon: text("icon"),
@@ -585,8 +585,8 @@ export const oauth_consent = sqliteTable(
     }),
     referenceId: text("reference_id"),
     scopes: text("scopes").notNull(),
-    createdAt: integer("created_at"),
-    updatedAt: integer("updated_at"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
   },
   (t) => ({
     clientIdIdx: index("oauth_consent_client_id_idx").on(t.clientId),
@@ -616,10 +616,10 @@ export const oauth_refresh_token = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("reference_id"),
-    expiresAt: integer("expires_at"),
-    createdAt: integer("created_at"),
-    revoked: integer("revoked"),
-    authTime: integer("auth_time"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }),
+    revoked: integer("revoked", { mode: "timestamp_ms" }),
+    authTime: integer("auth_time", { mode: "timestamp_ms" }),
     scopes: text("scopes").notNull(),
   },
   (t) => ({
@@ -649,8 +649,8 @@ export const oauth_access_token = sqliteTable(
     refreshId: text("refresh_id").references(() => oauth_refresh_token.id, {
       onDelete: "set null",
     }),
-    expiresAt: integer("expires_at"),
-    createdAt: integer("created_at"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }),
     scopes: text("scopes").notNull(),
   },
   (t) => ({

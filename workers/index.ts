@@ -18,7 +18,7 @@ import {
 } from "./lib/email-helpers";
 import { SendEmailRequestSchema } from "./lib/schemas";
 import { handleReplyEmail, handleForwardEmail } from "./routes/reply-forward";
-import { Folders } from "../shared/folders";
+import { Folders, normalizeFolderId } from "../shared/folders";
 import type { Env } from "./types";
 import { requireMailbox, type MailboxContext } from "./lib/mailbox";
 
@@ -222,7 +222,7 @@ app.delete("/api/v1/mailboxes/:mailboxId", async (c) => {
 // -- Emails ---------------------------------------------------------
 
 app.get("/api/v1/mailboxes/:mailboxId/emails", async (c: AppContext) => {
-  const folder = c.req.query("folder");
+  const folder = normalizeFolderId(c.req.query("folder")) ?? undefined;
   const thread_id = c.req.query("thread_id");
   const threaded = boolQuery(c, "threaded");
   const page = intQuery(c, "page");
@@ -433,9 +433,10 @@ app.post(
   "/api/v1/mailboxes/:mailboxId/emails/:id/move",
   async (c: AppContext) => {
     const { folderId } = (await c.req.json()) as { folderId: string };
+    const canonicalFolderId = normalizeFolderId(folderId) ?? folderId;
     const success = await c.var.mailboxStub.moveEmail(
       c.req.param("id")!,
-      folderId,
+      canonicalFolderId,
     );
     return success
       ? c.json({ status: "moved" })
@@ -510,7 +511,7 @@ app.delete(
 app.get("/api/v1/mailboxes/:mailboxId/search", async (c: AppContext) => {
   const searchOpts: Record<string, unknown> = {
     query: c.req.query("query") || "",
-    folder: c.req.query("folder"),
+    folder: normalizeFolderId(c.req.query("folder")),
     from: c.req.query("from"),
     to: c.req.query("to"),
     subject: c.req.query("subject"),

@@ -105,6 +105,17 @@ describe("maxCreatedByClient", () => {
     ];
     expect(maxCreatedByClient(rows).get("c-1")).toBe(1000);
   });
+
+  it("accepts Date objects (drizzle timestamp_ms mode reads)", () => {
+    const rows = [
+      { clientId: "c-1", createdAt: new Date(1000) },
+      { clientId: "c-1", createdAt: new Date(2000) },
+      { clientId: "c-2", createdAt: 500 },
+    ];
+    const out = maxCreatedByClient(rows);
+    expect(out.get("c-1")).toBe(2000);
+    expect(out.get("c-2")).toBe(500);
+  });
 });
 
 // ---------------------------------------------------------------------------

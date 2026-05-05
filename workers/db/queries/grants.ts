@@ -60,14 +60,16 @@ export function parseScopes(scopes: string | null | undefined): string[] {
  * client_id → max(createdAt) map. Skips null timestamps.
  */
 export function maxCreatedByClient(
-  rows: ReadonlyArray<{ clientId: string; createdAt: number | null }>,
+  rows: ReadonlyArray<{ clientId: string; createdAt: Date | number | null }>,
 ): Map<string, number> {
   const out = new Map<string, number>();
   for (const r of rows) {
     if (r.createdAt == null) continue;
+    const ms =
+      r.createdAt instanceof Date ? r.createdAt.getTime() : r.createdAt;
     const prev = out.get(r.clientId);
-    if (prev == null || r.createdAt > prev) {
-      out.set(r.clientId, r.createdAt);
+    if (prev == null || ms > prev) {
+      out.set(r.clientId, ms);
     }
   }
   return out;
@@ -118,7 +120,10 @@ export async function listAgentAuthorizations(
     client_uri: row.clientUri ?? null,
     client_icon: row.clientIcon ?? null,
     scopes: parseScopes(row.scopes),
-    granted_at: row.createdAt ?? null,
+    granted_at:
+      row.createdAt instanceof Date
+        ? row.createdAt.getTime()
+        : (row.createdAt ?? null),
     last_used_at: lastUsedByClient.get(row.clientId) ?? null,
   }));
 }
