@@ -153,23 +153,30 @@ describe("useToastManager", () => {
 });
 
 describe("toastVariants", () => {
-  it("returns default variant classes for no args", () => {
+  it("returns default variant classes for no args (success-green tone)", () => {
+    // After the @cloudflare/kumo → @base-ui/react migration (commit 34ed2e4)
+    // and the toast-style follow-up (9508b1b), the default variant carries
+    // the positive-confirmation green treatment, not a kumo-fill background.
     const cls = toastVariants();
-    expect(cls).toContain("border-kumo-fill");
+    expect(cls).toContain("border-emerald-500/60");
   });
 
-  it("returns error variant classes", () => {
+  it("returns error variant classes (red tone)", () => {
     const cls = toastVariants({ variant: "error" });
-    expect(cls).toContain("border-kumo-fill");
+    expect(cls).toContain("border-red-500/60");
   });
 
   it("KUMO_TOAST_DEFAULT_VARIANTS.variant is default", () => {
     expect(KUMO_TOAST_DEFAULT_VARIANTS.variant).toBe("default");
   });
 
-  it("KUMO_TOAST_VARIANTS.variant has default + error + warning", () => {
+  it("KUMO_TOAST_VARIANTS.variant has default + success + error + warning", () => {
+    // Keep `default` and `success` distinct so callers can opt in to the
+    // explicit success variant for clarity even though both use the same
+    // visual treatment.
     expect(Object.keys(KUMO_TOAST_VARIANTS.variant)).toEqual([
       "default",
+      "success",
       "error",
       "warning",
     ]);
