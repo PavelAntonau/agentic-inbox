@@ -37,6 +37,9 @@ import sInvitations1 from "./s-invitations-1";
 import sNotifications1 from "./s-notifications-1";
 import sInbox3Allowlist from "./s-inbox-3-allowlist";
 import sInbox3InternalMode from "./s-inbox-3-internal-mode";
+import sMailbox1 from "./s-mailbox-1";
+import sMailbox2 from "./s-mailbox-2";
+import sGroup2 from "./s-group-2";
 
 export interface RegistryEntry {
   scenario: Scenario;
@@ -68,8 +71,11 @@ const ALL: Scenario[] = [
   sContacts4,
   sDraft1,
   sGroup1,
+  sGroup2,
   sInvitations1,
   sNotifications1,
+  sMailbox1,
+  sMailbox2,
 ];
 
 export async function loadScenarios(): Promise<RegistryEntry[]> {
