@@ -20,7 +20,14 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     globals: true,
-    include: ["app/**/*.test.{ts,tsx}", "workers/**/*.test.{ts,tsx}"],
+    include: [
+      "app/**/*.test.{ts,tsx}",
+      "workers/**/*.test.{ts,tsx}",
+      // T3.6 (mcp-oauth) — e2e suite: per-named-client OAuth flow, PAT
+      // lifecycle, revocation latency. Runs in the same vitest pool as
+      // unit tests; integration via in-memory stand-ins for D1.
+      "tests/e2e/**/*.test.ts",
+    ],
     setupFiles: ["./test/setup.ts"],
   },
 });
