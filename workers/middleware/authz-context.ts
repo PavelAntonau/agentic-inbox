@@ -220,7 +220,7 @@ export function authzContext(): MiddlewareHandler<Ctx> {
         c.env.DB,
         c.env,
         email,
-        Date.now(),
+        new Date(),
       );
       if (promotedId) {
         user = await orm

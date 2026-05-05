@@ -155,7 +155,7 @@ router.post("/invite", async (c) => {
         role: "user",
         status: "active", // Will be gated by Access until first login
         visibility: "everyone",
-        created_at: Date.now(),
+        created_at: new Date(),
         last_login_at: null,
       })
       .onConflictDoNothing()

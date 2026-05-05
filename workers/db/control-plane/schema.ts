@@ -41,15 +41,17 @@ export const users = sqliteTable(
       .notNull()
       .default("personal"),
     company: text("company"),
-    created_at: integer("created_at").notNull(),
-    last_login_at: integer("last_login_at"),
+    created_at: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    last_login_at: integer("last_login_at", { mode: "timestamp_ms" }),
     // Phase 6.1: better-auth required fields. email_verified is flipped to 1
     // when an email-OTP sign-in succeeds. updated_at is bumped on every
     // mutation; better-auth handles this for the rows it owns.
     email_verified: integer("email_verified", { mode: "boolean" })
       .notNull()
       .default(false),
-    updated_at: integer("updated_at").notNull().default(0),
+    updated_at: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(new Date(0)),
   },
   (t) => ({
     emailIdx: uniqueIndex("users_email_nocase").on(sql`lower(${t.email})`),
@@ -315,12 +317,12 @@ export const session = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    expiresAt: integer("expires_at").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     token: text("token").notNull().unique(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => ({
     userIdIdx: index("session_user_id_idx").on(t.userId),
@@ -341,12 +343,16 @@ export const account = sqliteTable(
     accessToken: text("access_token"),
     refreshToken: text("refresh_token"),
     idToken: text("id_token"),
-    accessTokenExpiresAt: integer("access_token_expires_at"),
-    refreshTokenExpiresAt: integer("refresh_token_expires_at"),
+    accessTokenExpiresAt: integer("access_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
     scope: text("scope"),
     password: text("password"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => ({
     userIdIdx: index("account_user_id_idx").on(t.userId),
@@ -368,9 +374,9 @@ export const verification = sqliteTable(
     id: text("id").primaryKey(),
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
-    expiresAt: integer("expires_at").notNull(),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => ({
     identifierIdx: index("verification_identifier_idx").on(t.identifier),

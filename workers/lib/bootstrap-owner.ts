@@ -45,7 +45,7 @@ export async function bootstrapOwner(
   db: D1Database,
   env: Env,
   loginEmail: string,
-  now: number,
+  now: Date,
 ): Promise<string | null> {
   if (!isBootstrapEmail(loginEmail, env)) return null;
 

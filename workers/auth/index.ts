@@ -131,7 +131,7 @@ export function createAuth(env: Env): ServerAuth {
     database: drizzleAdapter(db, {
       provider: "sqlite",
       schema: {
-        user: schema.users,
+        users: schema.users,
         session: schema.session,
         account: schema.account,
         verification: schema.verification,
