@@ -275,12 +275,15 @@ They are coverage gaps Phase 2 audits must flag explicitly:
 | `workers/routes/contacts.ts` (every handler covered, but `/block` only via S-CONTACTS-1/4 — no decline-then-block sequence) | Partial — minor combinatorial gap | low |
 
 **`workers/lib/visibility-filter.ts`** is exercised only via the contacts
-suite. The 5-tier visibility (USR-good-practice-2 / USR-directive-5) is
-not directly observable through the contacts scenarios alone — Phase 2
-Teammate A should call this out as a **medium** coverage gap and
-recommend additional scenarios for visibility tiers `everyone` /
-`contacts` / `nobody` against group-member, mailbox-share, and
-discover-by-email surfaces.
+suite. The 3-tier visibility model (USR-good-practice-2 / USR-directive-5,
+per **OQ-AIA-4 default B** — D-aim-12 as-written is canonical; tiers
+`contacts-of-contacts` and `explicit-allow` from the original 5-tier text
+are NOT scoped as missing features) is not directly observable through
+the contacts scenarios alone — Phase 2 Teammate A should call this out
+as a **medium** coverage gap and recommend additional scenarios for
+visibility tiers `everyone` / `contacts` / `nobody` against group-member,
+mailbox-share, and discover-by-email surfaces. _Amended 2026-05-05
+(hardening Phase 2 task 2.7, V-1 resolution)._
 
 ---
 
