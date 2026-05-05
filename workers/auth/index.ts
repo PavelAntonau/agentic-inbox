@@ -267,6 +267,13 @@ export function createAuth(env: Env): ServerAuth {
         adapter: {
           getJwks: async () => [staticSigningKey],
         },
+        // Pin the JWT iss claim to the issuer-root URL declared by the
+        // RFC 8414 metadata at /.well-known/oauth-authorization-server
+        // (which serves `issuer: "https://mail.actionnow.ai"`).
+        // Without this, better-auth defaults `iss` to `${baseURL}/api/auth`
+        // and the /mcp middleware's REQUIRED_ISSUER check rejects with
+        // `wrong-issuer`. The static signing key + JWKS are unaffected.
+        jwt: { issuer: "https://mail.actionnow.ai" },
       }),
 
       // OAuth Authorization Server (RFC 6749/7636/8707/9728/8414) for MCP.
