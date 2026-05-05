@@ -556,11 +556,15 @@ export const oauth_consent = sqliteTable(
 // 3. oauth_refresh_token — refresh-token rotation chain (RFC 6749 §6).
 //    `revoked` (date) is set on the previous refresh when issuing a new one.
 //    session_id ON DELETE SET NULL preserves the audit trail past sign-out.
+//    `token` is UNIQUE: lookup-by-token is the entire purpose of the column,
+//    and a duplicate row is a token-replay surface (audit S-1, 2026-05-04).
+//    Mirrors the .unique() discipline on session.token (L292) and
+//    oauth_access_token.token (L594). Migration 0013 adds the index.
 export const oauth_refresh_token = sqliteTable(
   "oauth_refresh_token",
   {
     id: text("id").primaryKey(),
-    token: text("token").notNull(),
+    token: text("token").notNull().unique(),
     clientId: text("client_id")
       .notNull()
       .references(() => oauth_client.clientId, { onDelete: "cascade" }),
@@ -578,7 +582,6 @@ export const oauth_refresh_token = sqliteTable(
     scopes: text("scopes").notNull(),
   },
   (t) => ({
-    tokenIdx: index("oauth_refresh_token_token_idx").on(t.token),
     clientIdIdx: index("oauth_refresh_token_client_id_idx").on(t.clientId),
     userIdIdx: index("oauth_refresh_token_user_id_idx").on(t.userId),
   }),
