@@ -66,15 +66,20 @@ const groupMembers: GroupMemberRef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// filterVisibleUsers — Phase 3 (enforceContactsAndNobody = false, default)
+// filterVisibleUsers — Phase 3 (legacy, opt-in via enforceContactsAndNobody = false)
+//
+// V-2 (audit, agentic-inbox-hardening Phase 2): the default flipped to true.
+// These tests must now pass `enforceContactsAndNobody: false` explicitly to
+// exercise the legacy path; omitting the flag yields the safe Phase 6 path.
 // ---------------------------------------------------------------------------
 
-describe("filterVisibleUsers — Phase 3 defaults", () => {
+describe("filterVisibleUsers — Phase 3 legacy (enforceContactsAndNobody=false)", () => {
   it("includes self even when actor has no groups", () => {
     const result = filterVisibleUsers({
       actor: { user_id: "u-alice", group_ids: [] },
       users: [alice],
       groupMembers: [],
+      enforceContactsAndNobody: false,
     });
     expect(result.map((u) => u.id)).toContain("u-alice");
   });
@@ -84,6 +89,7 @@ describe("filterVisibleUsers — Phase 3 defaults", () => {
       actor: actorAlice,
       users: [disabledUser, alice],
       groupMembers,
+      enforceContactsAndNobody: false,
     });
     expect(result.map((u) => u.id)).not.toContain("u-disabled");
   });
@@ -95,16 +101,17 @@ describe("filterVisibleUsers — Phase 3 defaults", () => {
       actor: actorAlice,
       users: [alice, bobNobody],
       groupMembers,
+      enforceContactsAndNobody: false,
     });
     expect(result.map((u) => u.id)).toContain("u-bob");
   });
 
   it("includes non-co-member 'everyone' users in Phase 3", () => {
-    // In Phase 3, all active users are visible (enforceContactsAndNobody=false)
     const result = filterVisibleUsers({
       actor: actorAlice,
       users: [alice, carol],
       groupMembers,
+      enforceContactsAndNobody: false,
     });
     // Carol is not in g-eng but Phase 3 doesn't enforce contacts/nobody
     expect(result.map((u) => u.id)).toContain("u-carol");
@@ -115,8 +122,39 @@ describe("filterVisibleUsers — Phase 3 defaults", () => {
       actor: actorAlice,
       users: [alice, dave],
       groupMembers,
+      enforceContactsAndNobody: false,
     });
     expect(result.map((u) => u.id)).toContain("u-dave");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V-2 regression guard — default behaviour is enforce=true.
+//
+// agentic-inbox-hardening Phase 2 (audit-graph: Z4NSQDL0GqzAdDPL1hnbu region).
+// If this test fails, the default has silently flipped back to false and
+// every new call site that omits the flag has re-introduced Phase 3 mode.
+// ---------------------------------------------------------------------------
+
+describe("filterVisibleUsers — V-2 default-true safety", () => {
+  it("excludes 'nobody' non-co-members when the flag is OMITTED (default=true)", () => {
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [alice, dave],
+      groupMembers,
+      // enforceContactsAndNobody intentionally not passed
+    });
+    expect(result.map((u) => u.id)).not.toContain("u-dave");
+  });
+
+  it("excludes 'contacts' non-co-members when the flag is OMITTED (default=true)", () => {
+    const result = filterVisibleUsers({
+      actor: actorAlice,
+      users: [alice, carol],
+      groupMembers,
+      // enforceContactsAndNobody intentionally not passed
+    });
+    expect(result.map((u) => u.id)).not.toContain("u-carol");
   });
 });
 

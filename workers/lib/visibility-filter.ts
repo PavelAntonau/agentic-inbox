@@ -58,8 +58,11 @@ export interface VisibilityFilterOptions {
    */
   blockedUserIds?: Set<string>;
   /**
-   * Phase 6+ only: when true, enforce `contacts` and `nobody` rules.
-   * In Phase 3 this is always false — kept here so Phase 6 can flip it.
+   * Phase 6+: when true (the safe default), enforce `contacts` and `nobody`
+   * rules. Pass `false` only on legacy Phase-3 paths that intentionally
+   * surface every active user (V-2 / agentic-inbox-hardening Phase 2 — the
+   * audit found the previous default-false silently re-introduced Phase 3
+   * mode for any new caller that forgot to pass the flag).
    */
   enforceContactsAndNobody?: boolean;
 }
@@ -67,18 +70,23 @@ export interface VisibilityFilterOptions {
 /**
  * Filter a list of users to those visible to the actor for autocomplete.
  *
- * Phase 3 rules (enforceContactsAndNobody = false):
- *   1. Always include the actor themselves (self).
- *   2. Include any user whose visibility = 'everyone'.
- *   3. Include co-members (share at least one group with the actor).
- *
- * Phase 6+ rules (enforceContactsAndNobody = true):
+ * Phase 6+ rules (default — enforceContactsAndNobody = true):
  *   1. Always include self.
  *   2. Always include co-members (regardless of visibility).
  *   3. Always include actor's accepted contacts.
  *   4. Include users with visibility='everyone' AND status='active'.
  *   5. Exclude blocked users (either direction).
  *   6. Exclude visibility='nobody' for non-actor / non-co-member viewers (E15).
+ *
+ * Phase 3 rules (legacy — opt-in via enforceContactsAndNobody = false):
+ *   1. Always include the actor themselves (self).
+ *   2. Include any user whose visibility = 'everyone'.
+ *   3. Include co-members (share at least one group with the actor).
+ *
+ * V-2 (audit, agentic-inbox-hardening Phase 2): default flipped from false
+ * to true so omitting the flag yields the safe behaviour. Any future caller
+ * that genuinely needs Phase-3 semantics must pass `false` explicitly,
+ * making the unsafe path locally visible at the call site.
  */
 export function filterVisibleUsers(opts: VisibilityFilterOptions): UserRef[] {
   const {
@@ -87,7 +95,7 @@ export function filterVisibleUsers(opts: VisibilityFilterOptions): UserRef[] {
     groupMembers,
     acceptedContactIds = new Set(),
     blockedUserIds = new Set(),
-    enforceContactsAndNobody = false,
+    enforceContactsAndNobody = true,
   } = opts;
 
   // Build a set of user IDs that share at least one group with the actor
