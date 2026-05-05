@@ -22,6 +22,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "../lib/mocks/email-binding";
+import { isBootstrapEmail } from "../lib/bootstrap-owner";
 import type { Env } from "../types";
 // T1.6 — pre-registered trusted MCP clients. Same module is consumed by
 // `scripts/seed-trusted-clients.ts` (writes the rows) and by the consent /
@@ -307,16 +308,12 @@ export function createAuth(env: Env): ServerAuth {
         create: {
           // Bootstrap-owner: when a user signs in for the first time and
           // their email matches BOOTSTRAP_OWNER_EMAIL, promote to global_owner.
-          // This preserves the same behavior the existing app implements via
-          // workers/lib/bootstrap-owner.ts on the CF Access path.
+          // Predicate is shared with bootstrapOwner() (CF Access path) so
+          // both promotion routes stay aligned (audit fix A-1, graph:
+          // avWqp-pNgG5Df1BboqefB — the prior implementation compared
+          // without `.trim()` and would diverge on a whitespace-padded env).
           async before(user) {
-            const bootstrapEmail = (
-              env as Env & { BOOTSTRAP_OWNER_EMAIL?: string }
-            ).BOOTSTRAP_OWNER_EMAIL;
-            if (
-              bootstrapEmail &&
-              user.email.toLowerCase() === bootstrapEmail.toLowerCase()
-            ) {
+            if (isBootstrapEmail(user.email, env)) {
               return { data: { ...user, role: "global_owner" } };
             }
             return { data: user };

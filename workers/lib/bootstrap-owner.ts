@@ -8,6 +8,26 @@ import * as schema from "../db/control-plane/schema";
 import type { Env } from "../types";
 
 /**
+ * Shared predicate: does `loginEmail` match the configured bootstrap-owner
+ * email under whitespace-tolerant, case-insensitive comparison?
+ *
+ * Both promotion paths (the better-auth databaseHooks.user.create.before in
+ * workers/auth/index.ts AND the CF Access path via bootstrapOwner() below)
+ * MUST use this predicate. Audit S-1 sibling A-1 (graph: avWqp-pNgG5Df1BboqefB)
+ * caught a divergence where the better-auth hook compared without `.trim()`
+ * while bootstrapOwner() trimmed — a BOOTSTRAP_OWNER_EMAIL value with leading
+ * or trailing whitespace would have promoted via one path but not the other.
+ *
+ * Returns false if BOOTSTRAP_OWNER_EMAIL is unset, empty after trim, or
+ * doesn't match — i.e. fail-closed on misconfiguration.
+ */
+export function isBootstrapEmail(loginEmail: string, env: Env): boolean {
+  const target = env.BOOTSTRAP_OWNER_EMAIL?.trim();
+  if (!target) return false;
+  return loginEmail.trim().toLowerCase() === target.toLowerCase();
+}
+
+/**
  * First-login flow for the pinned global owner. Idempotent.
  *
  * If env.BOOTSTRAP_OWNER_EMAIL is set AND no users row exists for that email,
@@ -27,9 +47,7 @@ export async function bootstrapOwner(
   loginEmail: string,
   now: number,
 ): Promise<string | null> {
-  const target = env.BOOTSTRAP_OWNER_EMAIL?.trim();
-  if (!target) return null;
-  if (loginEmail.toLowerCase() !== target.toLowerCase()) return null;
+  if (!isBootstrapEmail(loginEmail, env)) return null;
 
   const orm = drizzle(db, { schema });
   const existing = await orm
