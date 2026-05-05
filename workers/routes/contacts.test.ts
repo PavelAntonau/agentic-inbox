@@ -11,6 +11,7 @@ import {
   canAcceptContactRequest,
   canDeclineContactRequest,
   canBlockUser,
+  isReachableForContactRequest,
   type ContactRow,
 } from "../lib/contact-permissions";
 
@@ -203,5 +204,130 @@ describe("contacts symmetric handshake logic", () => {
       blockedUserIds.add(blockByBob.owner_user_id);
     }
     expect(blockedUserIds.has("u-bob")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isReachableForContactRequest (audit F-C2 — D-aim-12 nobody-tier gate)
+// ---------------------------------------------------------------------------
+
+describe("isReachableForContactRequest (F-C2)", () => {
+  function ctxWithGroups(groups: string[]): AuthzContext {
+    return {
+      user_id: "u-alice",
+      role: "user",
+      group_ids: groups,
+      authorized_mailbox_ids: [],
+    };
+  }
+
+  it("self always reachable (request-time gate doesn't bar self)", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups([]),
+        targetUserId: "u-alice", // self
+        targetVisibility: "nobody",
+        targetGroupIds: [],
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("everyone-tier always reachable (gate is request-layer no-op)", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups([]),
+        targetUserId: "u-bob",
+        targetVisibility: "everyone",
+        targetGroupIds: [],
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("contacts-tier always reachable at request layer (autocomplete is the gate)", () => {
+    // D-aim-12: protection for `contacts` tier is at autocomplete/discovery
+    // via filterVisibleUsers; once a user_id is known, requests can flow.
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups([]),
+        targetUserId: "u-bob",
+        targetVisibility: "contacts",
+        targetGroupIds: [],
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("nobody-tier rejects a stranger (no co-membership, no accepted contact)", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups(["g-team-a"]),
+        targetUserId: "u-bob",
+        targetVisibility: "nobody",
+        targetGroupIds: ["g-team-b"],
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("nobody-tier reachable via co-membership (one shared group)", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups(["g-team-a", "g-team-b"]),
+        targetUserId: "u-bob",
+        targetVisibility: "nobody",
+        targetGroupIds: ["g-team-b", "g-team-c"], // overlap on g-team-b
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("nobody-tier reachable via existing accepted contact", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups([]),
+        targetUserId: "u-bob",
+        targetVisibility: "nobody",
+        targetGroupIds: [],
+        actorHasAcceptedContact: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("nobody-tier rejects when actor has zero groups and no accepted contact", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups([]),
+        targetUserId: "u-bob",
+        targetVisibility: "nobody",
+        targetGroupIds: ["g-team-a"],
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("nobody-tier rejects when target has zero groups and no accepted contact", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups(["g-team-a"]),
+        targetUserId: "u-bob",
+        targetVisibility: "nobody",
+        targetGroupIds: [],
+        actorHasAcceptedContact: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("nobody-tier: co-membership AND accepted-contact both true also passes", () => {
+    expect(
+      isReachableForContactRequest({
+        actor: ctxWithGroups(["g-team-a"]),
+        targetUserId: "u-bob",
+        targetVisibility: "nobody",
+        targetGroupIds: ["g-team-a"],
+        actorHasAcceptedContact: true,
+      }),
+    ).toBe(true);
   });
 });

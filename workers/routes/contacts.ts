@@ -29,6 +29,7 @@ import {
   canAcceptContactRequest,
   canDeclineContactRequest,
   canBlockUser,
+  isReachableForContactRequest,
 } from "../lib/contact-permissions";
 
 type AppVariables = {
@@ -117,11 +118,64 @@ router.post("/request", async (c) => {
 
   // Verify target exists
   const targetUser = await db
-    .select({ id: schema.users.id, status: schema.users.status })
+    .select({
+      id: schema.users.id,
+      status: schema.users.status,
+      visibility: schema.users.visibility,
+    })
     .from(schema.users)
     .where(eq(schema.users.id, targetUserId))
     .get();
   if (!targetUser || targetUser.status !== "active") {
+    return c.json({ error: "User not found" }, 404);
+  }
+
+  // Audit fix F-C2 (graph: HejuxD6Ia0YOZP805meVV) — D-aim-12 visibility gate.
+  //
+  // A `visibility='nobody'` user must be unreachable for contact requests from
+  // anyone who is not already a co-member or an accepted contact. Without this
+  // gate, any authenticated caller who learns the target's user_id (e.g. from
+  // another surface) can send them a contact request, defeating the privacy
+  // tier the user explicitly chose.
+  //
+  // Privacy-preserving: return 404 (the same shape as `User not found`) so the
+  // response cannot be used to probe whether the user_id exists at all.
+  // Fetch target's group memberships + actor's accepted-contact relationship
+  // to feed isReachableForContactRequest. We always run these queries
+  // (regardless of visibility tier) because contact-block detection below also
+  // uses the contacts table — running them up front keeps the call sites
+  // close together and avoids re-querying when the predicate needs them.
+  const targetGroupRows = await db
+    .select({ group_id: schema.group_members.group_id })
+    .from(schema.group_members)
+    .where(eq(schema.group_members.user_id, targetUserId))
+    .all();
+  const targetGroupIds = targetGroupRows.map((g) => g.group_id);
+  const acceptedRow = await db
+    .select({ status: schema.contacts.status })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.owner_user_id, ctx.user_id),
+        eq(schema.contacts.contact_user_id, targetUserId),
+        eq(schema.contacts.status, "accepted"),
+      ),
+    )
+    .get();
+  const actorHasAcceptedContact = !!acceptedRow;
+
+  if (
+    !isReachableForContactRequest({
+      actor: ctx,
+      targetUserId,
+      targetVisibility: targetUser.visibility,
+      targetGroupIds,
+      actorHasAcceptedContact,
+    })
+  ) {
+    // Privacy-preserving: same shape as "User not found" — a caller that
+    // probes random user_ids cannot distinguish "doesn't exist" from
+    // "exists but visibility=nobody". (Audit fix F-C2.)
     return c.json({ error: "User not found" }, 404);
   }
 
