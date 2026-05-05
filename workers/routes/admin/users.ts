@@ -22,6 +22,34 @@ type AppVariables = {
 const router = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // -----------------------------------------------------------------------
+// Helpers — admin-cap parsing (F-AU3)
+// -----------------------------------------------------------------------
+
+/**
+ * Parse the `max_global_admins` setting value into a numeric cap.
+ *
+ * Returns a discriminated result so the caller can fail-closed on a
+ * malformed setting row. Treating an unparseable value as "no cap"
+ * (the previous behaviour) silently disabled the promotion limit
+ * (audit F-AU3 — `NaN >= NaN === false` defeats canAct's cap check).
+ *
+ * Exported for unit-test access; the router itself is the only
+ * production caller.
+ */
+export function parseAdminCap(
+  raw: string | undefined,
+): { ok: true; cap: number | undefined } | { ok: false; reason: "nan" } {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, cap: undefined };
+  }
+  const parsed = parseInt(raw, 10);
+  if (Number.isNaN(parsed)) {
+    return { ok: false, reason: "nan" };
+  }
+  return { ok: true, cap: parsed };
+}
+
+// -----------------------------------------------------------------------
 // Auth guard — all admin routes require global_owner or global_admin
 // -----------------------------------------------------------------------
 
@@ -239,10 +267,26 @@ router.post("/:id/promote", async (c) => {
 
   if (!target) return c.json({ error: "User not found" }, 404);
 
-  // Read settings for admin cap
+  // Read settings for admin cap.
+  //
+  // F-AU3 (audit, agentic-inbox-hardening Phase 2): parseInt returns NaN
+  // for malformed values; canAct's cap check `currentAdminCount >= adminCap`
+  // then evaluates `n >= NaN === false`, silently bypassing the cap. Fail
+  // closed with 500 on a non-integer value so the misconfiguration surfaces
+  // immediately instead of letting an unbounded promotion through.
   const settings = await getSettings(db);
   const adminCapRow = settings.find((s) => s.key === "max_global_admins");
-  const adminCap = adminCapRow ? parseInt(adminCapRow.value, 10) : undefined;
+  const adminCapParsed = parseAdminCap(adminCapRow?.value);
+  if (!adminCapParsed.ok) {
+    return c.json(
+      {
+        error:
+          "Server misconfiguration: max_global_admins is not a valid integer",
+      },
+      500,
+    );
+  }
+  const adminCap = adminCapParsed.cap;
 
   let currentAdminCount: number | undefined;
   if (adminCap !== undefined) {
