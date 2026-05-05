@@ -47,6 +47,9 @@ export default [
   // external MCP clients (Claude Code etc.) can reach it via the plugin's
   // authorize redirect; the loader handles its own session check.
   route("consent", "routes/consent.tsx"),
-  route("i/:id", "routes/i.$id.tsx"),
+  // (Audit fix F-I2 2026-05-05) `/i/:id` invitation deep-link removed — the
+  // worker side never produced the URL, the verifier's encoding mismatched
+  // the helper's, and the env read fell through to "dev-fallback-hmac-key"
+  // by default. See workers/routes/invitations.ts comment for full removal.
   route("*", "routes/not-found.tsx"),
 ] satisfies RouteConfig;

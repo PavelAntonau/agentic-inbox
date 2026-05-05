@@ -35,34 +35,6 @@ router.use("*", async (c, next) => {
 });
 
 // -----------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------
-
-/** Generate HMAC-SHA-256 token for an invitation ID */
-async function makeHmacToken(
-  key: string,
-  invitationId: string,
-): Promise<string> {
-  const enc = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(key),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    enc.encode(invitationId),
-  );
-  return btoa(String.fromCharCode(...new Uint8Array(sig)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-}
-
-// -----------------------------------------------------------------------
 // POST / — send invitation (privacy-preserving)
 // -----------------------------------------------------------------------
 
@@ -209,17 +181,17 @@ router.post("/", async (c) => {
 
   // Build the login URL — the plain-text invite spec routes recipients
   // straight to /login?email=<urlencoded> and lets the OTP flow take over.
-  // The HMAC-token /i/<id>?t=<token> path is preserved for the in-app
-  // notifications drawer (existing user case) and for future branded mail,
-  // but external recipients receive the simpler login link.
+  //
+  // (Audit fix F-I2 2026-05-05, graph BxkKD9WEOHZGp0PJrRM8N): an HMAC-token
+  // `/i/<id>?t=<token>` deep-link variant lived here, including a
+  // `makeHmacToken` helper, a type-unsafe `INVITATION_HMAC_KEY` env read with
+  // a literal "dev-fallback-hmac-key" string default, and an `app/routes/i.$id.tsx`
+  // landing page. The whole pipeline was dead: the helper's return value was
+  // never assigned, the URL was never sent in any email body, and the verifier
+  // expected hex while the helper produced base64url. Removed end-to-end —
+  // including the route file and registration — to eliminate the silent
+  // auth-bypass surface a future "wire it up" change would have introduced.
   const host = new URL(c.req.url).host;
-  const hmacKey =
-    (c.env as unknown as Record<string, string>)["INVITATION_HMAC_KEY"] ??
-    "dev-fallback-hmac-key";
-  // Token still computed so notifications endpoints can use it without an
-  // additional crypto round-trip; the value is recorded on the invitation
-  // row implicitly via the HMAC, no need to store separately.
-  await makeHmacToken(hmacKey, finalInvitationId);
   const loginUrl = `https://${host}/login?email=${encodeURIComponent(rawEmail)}`;
 
   // Send the invitation email. We log structured failures but DO NOT swallow
