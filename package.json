@@ -31,7 +31,7 @@
 		"scenarios:smoke": "tsx scripts/scenarios/_runner.ts --smoke",
 		"scenarios:all": "tsx scripts/scenarios/_runner.ts --all",
 		"preview": "npm run build && vite preview",
-		"test": "vitest run",
+		"test": "vitest run --max-workers=4",
 		"test:ui": "vitest",
 		"test:visual": "playwright test",
 		"test:visual:update": "playwright test --update-snapshots",

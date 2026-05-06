@@ -20,6 +20,16 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     globals: true,
+    // Cap parallel forks at 4. Without this cap, vitest's default uses
+    // (cpu-count - 1) forks; on machines with many cores the parallel
+    // load of better-sqlite3's native binding (used by
+    // workers/durableObject/migrations.test.ts) intermittently fails with
+    // a NODE_MODULE_VERSION mismatch error from bindings.js. Reducing
+    // concurrency stabilises the native-module load. Tests still complete
+    // in ~60-90s on a 12-core machine.
+    // NB: parallelism is also capped via the `vitest run --maxWorkers=4` flag
+    // in package.json's `test` script. See note below.
+    pool: "forks",
     include: [
       "app/**/*.test.{ts,tsx}",
       "workers/**/*.test.{ts,tsx}",

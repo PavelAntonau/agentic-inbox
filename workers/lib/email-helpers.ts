@@ -400,16 +400,13 @@ export function parseInboundAuthHeader(
   authResults: string | null | undefined,
 ): InboundAuthVerdict {
   const normalized = (authResults ?? "").toString();
-  const find = (
-    name: string,
-  ):
-    | InboundAuthVerdict["spf"]
-    | InboundAuthVerdict["dkim"]
-    | InboundAuthVerdict["dmarc"] => {
+  const findRaw = (name: string): string | null => {
     const re = new RegExp(`\\b${name}\\s*=\\s*([a-zA-Z]+)`, "i");
     const m = normalized.match(re);
-    if (!m) return "unknown";
-    const v = m[1].toLowerCase();
+    return m ? m[1].toLowerCase() : null;
+  };
+  const parseSpf = (v: string | null): InboundAuthVerdict["spf"] => {
+    if (!v) return "unknown";
     if (
       v === "pass" ||
       v === "fail" ||
@@ -418,15 +415,41 @@ export function parseInboundAuthHeader(
       v === "none" ||
       v === "temperror" ||
       v === "permerror"
-    ) {
-      return v as InboundAuthVerdict["spf"];
-    }
+    )
+      return v;
+    return "unknown";
+  };
+  const parseDkim = (v: string | null): InboundAuthVerdict["dkim"] => {
+    if (!v) return "unknown";
+    // DKIM (RFC 6376) does not define `softfail`; map to `unknown`.
+    if (
+      v === "pass" ||
+      v === "fail" ||
+      v === "neutral" ||
+      v === "none" ||
+      v === "temperror" ||
+      v === "permerror"
+    )
+      return v;
+    return "unknown";
+  };
+  const parseDmarc = (v: string | null): InboundAuthVerdict["dmarc"] => {
+    if (!v) return "unknown";
+    // DMARC (RFC 7489) does not define `softfail` / `neutral`; map to `unknown`.
+    if (
+      v === "pass" ||
+      v === "fail" ||
+      v === "none" ||
+      v === "temperror" ||
+      v === "permerror"
+    )
+      return v;
     return "unknown";
   };
 
-  const spf = find("spf");
-  const dkim = find("dkim");
-  const dmarc = find("dmarc");
+  const spf = parseSpf(findRaw("spf"));
+  const dkim = parseDkim(findRaw("dkim"));
+  const dmarc = parseDmarc(findRaw("dmarc"));
 
   let reject = false;
   if (dmarc === "fail") reject = true;

@@ -165,7 +165,7 @@ describe("canUnshare", () => {
 
   it("allows global_admin", () => {
     const global = actor({ role: "global_admin", user_id: "u-charlie" });
-    expect(canUnshare(global, MAILBOX, GROUP, null).ok).toBe(true);
+    expect(canUnshare(global, MAILBOX, GROUP, null, null).ok).toBe(true);
   });
 
   // MP-1 (audit, agentic-inbox-hardening Phase 2): admin-ACL grantee can

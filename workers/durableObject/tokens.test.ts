@@ -27,7 +27,12 @@ function makeDurableObjectStub() {
   };
   return {
     ctx: { storage } as unknown as DurableObjectState,
-    env: {} as Env,
+    // `any`-typed so the harness can flow into both AgentTokenLimiter (which
+    // takes Env) and RevocationCache (which takes its narrower RevocationEnv
+    // shape with REVOCATION_CACHE_INTERNAL_TOKEN). Tests cast at the
+    // construction site as needed; this dodges the test-only type plumbing.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    env: {} as any,
     storage,
     store,
   };
