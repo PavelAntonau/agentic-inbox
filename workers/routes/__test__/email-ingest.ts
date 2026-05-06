@@ -18,7 +18,10 @@ const testRoutes = new Hono<{
  * uses this to verify bootstrap-owner promotion + group isolation.
  */
 testRoutes.get("/whoami", (c) => {
-  if (!import.meta.env.DEV && !c.env.CF_ACCESS_DEV_MODE) {
+  // P0-6 (audit 2026-05-06): bypass mode is "skip CF Access JWT only" —
+  // it must NOT unlock dev-only test surfaces. Gate on a positive marker.
+  const isDev = import.meta.env.DEV || c.env.CF_ACCESS_DEV_MODE === "mock";
+  if (!isDev) {
     return c.text("Test routes are dev-only", 404);
   }
   return c.json({
@@ -34,7 +37,10 @@ testRoutes.get("/whoami", (c) => {
  * Body: JSON { to: string, from: string, subject: string, body: string }
  */
 testRoutes.post("/email-ingest", async (c) => {
-  if (!import.meta.env.DEV && !c.env.CF_ACCESS_DEV_MODE) {
+  // P0-6 (audit 2026-05-06): bypass mode is "skip CF Access JWT only" —
+  // it must NOT unlock dev-only test surfaces. Gate on a positive marker.
+  const isDev = import.meta.env.DEV || c.env.CF_ACCESS_DEV_MODE === "mock";
+  if (!isDev) {
     return c.text("Test routes are dev-only", 404);
   }
 
