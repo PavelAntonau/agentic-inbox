@@ -346,6 +346,115 @@ export function textToHtml(text: string): string {
   return `<div style="white-space:pre-wrap">${escaped}</div>`;
 }
 
+// ── Inbound auth (SPF / DKIM / DMARC) — Phase C3 / C3.13 (P2-7) ────
+
+/**
+ * Result of evaluating an inbound email's `Authentication-Results`
+ * header. CF Email Routing prepends an `Authentication-Results: ...`
+ * line to every received message; this helper parses it.
+ */
+export interface InboundAuthVerdict {
+  spf:
+    | "pass"
+    | "fail"
+    | "softfail"
+    | "neutral"
+    | "none"
+    | "temperror"
+    | "permerror"
+    | "unknown";
+  dkim:
+    | "pass"
+    | "fail"
+    | "neutral"
+    | "none"
+    | "temperror"
+    | "permerror"
+    | "unknown";
+  dmarc: "pass" | "fail" | "none" | "temperror" | "permerror" | "unknown";
+  /** True when the message MUST be refused (dmarc=fail OR both spf+dkim=fail). */
+  reject: boolean;
+  /** Human-readable summary for audit / log lines. */
+  summary: string;
+}
+
+/**
+ * Parse an `Authentication-Results` header value (or undefined when
+ * absent) into a verdict. Tolerant to missing / malformed input —
+ * `unknown` outcomes never trigger a reject.
+ *
+ * Decision policy (per the security audit P2-7):
+ *
+ *   - `dmarc=fail`                      → reject (the upstream
+ *     domain has explicitly published a policy that says this
+ *     message is forged; honour it).
+ *   - `spf=fail` AND `dkim=fail`        → reject (both auth methods
+ *     failed independently; very strong forgery signal).
+ *   - any single soft-fail              → log + accept (audit trail
+ *     keeps the record; we don't break legitimate inbound mail).
+ *   - missing header / unknown outcomes → fail-OPEN, log a warn.
+ *     Breaking inbound mail entirely is worse than admitting that
+ *     CF Email Routing didn't surface a verdict on this hop.
+ */
+export function parseInboundAuthHeader(
+  authResults: string | null | undefined,
+): InboundAuthVerdict {
+  const normalized = (authResults ?? "").toString();
+  const find = (
+    name: string,
+  ):
+    | InboundAuthVerdict["spf"]
+    | InboundAuthVerdict["dkim"]
+    | InboundAuthVerdict["dmarc"] => {
+    const re = new RegExp(`\\b${name}\\s*=\\s*([a-zA-Z]+)`, "i");
+    const m = normalized.match(re);
+    if (!m) return "unknown";
+    const v = m[1].toLowerCase();
+    if (
+      v === "pass" ||
+      v === "fail" ||
+      v === "softfail" ||
+      v === "neutral" ||
+      v === "none" ||
+      v === "temperror" ||
+      v === "permerror"
+    ) {
+      return v as InboundAuthVerdict["spf"];
+    }
+    return "unknown";
+  };
+
+  const spf = find("spf");
+  const dkim = find("dkim");
+  const dmarc = find("dmarc");
+
+  let reject = false;
+  if (dmarc === "fail") reject = true;
+  if (spf === "fail" && dkim === "fail") reject = true;
+
+  const summary = `spf=${spf} dkim=${dkim} dmarc=${dmarc}${reject ? " (rejected)" : ""}`;
+  return { spf, dkim, dmarc, reject, summary };
+}
+
+/**
+ * Convenience entry point — accepts a `parsedEmail.headers` map (the
+ * shape PostalMime returns) or anything case-insensitively keyable to
+ * `Authentication-Results`. Returns the same verdict object.
+ */
+export function verifyInboundAuth(
+  headers: Record<string, string | undefined> | undefined | null,
+): InboundAuthVerdict {
+  if (!headers) return parseInboundAuthHeader(undefined);
+  // Case-insensitive lookup — PostalMime can hand back `Authentication-Results`,
+  // `authentication-results`, or both.
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() === "authentication-results") {
+      return parseInboundAuthHeader(headers[k]);
+    }
+  }
+  return parseInboundAuthHeader(undefined);
+}
+
 /**
  * Strip HTML tags and normalize whitespace to produce plain text.
  * Removes <style> and <script> blocks first to avoid injecting their
@@ -359,6 +468,238 @@ export function stripHtmlToText(html: string): string {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// ── Email-body sanitization (Phase C3 / C3.7, P2-D-2) ──────────────
+//
+// Server-side allowlist sanitizer. The DOM-based DOMPurify library is
+// not usable in the Workers runtime (no document, no DOM), so this
+// implementation is a hand-rolled tag/attribute allowlist that runs over
+// raw HTML strings. It is the FOURTH layer of defense after:
+//
+//   1. Outbound `verifyDraft` (LLM cleanse + diff log)
+//   2. Inbound iframe sandbox (UI defense — blocks scripts at render time)
+//   3. Inline-quote `stripHtmlToText` (when injecting old-message bodies
+//      into new compose context)
+//
+// Layer 4 fires at STORAGE time on both:
+//
+//   - Inbound `parsedEmail.html` (workers/index.ts receiveEmail), so the
+//     stored body never contains a stored-XSS payload, even if the
+//     sandbox iframe is later relaxed or the body is rendered in a new
+//     surface (admin observability, audit-log, AI tool prompts).
+//   - Outbound `bodyHtml` (lib/tools.ts toolSendEmail / toolSendReply,
+//     lib/internal-delivery.ts deliverInternal), defending against
+//     compose-side injection paths the LLM cleanse missed.
+//
+// Allowlist intentionally errs conservative — we keep the formatting
+// tags real users send (paragraphs, lists, blockquotes, basic
+// formatting, tables for newsletters/receipts, images for inline
+// pictures) and drop everything else.
+
+const SANITIZE_TAG_ALLOWLIST: ReadonlySet<string> = new Set([
+  "a",
+  "p",
+  "div",
+  "span",
+  "br",
+  "hr",
+  "b",
+  "i",
+  "u",
+  "em",
+  "strong",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "pre",
+  "code",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "img",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "td",
+  "th",
+  "small",
+  "sup",
+  "sub",
+]);
+
+const SANITIZE_ATTR_ALLOWLIST: ReadonlySet<string> = new Set([
+  "href",
+  "src",
+  "alt",
+  "title",
+  "style",
+  "width",
+  "height",
+  "colspan",
+  "rowspan",
+  "align",
+]);
+
+// Tags whose ENTIRE contents are dropped (script bodies, style sheets,
+// embedded objects, iframes). Closing tag is also removed.
+const SANITIZE_DESTRUCTIVE_TAGS: ReadonlySet<string> = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "frame",
+  "frameset",
+  "noscript",
+  "form",
+  "input",
+  "button",
+  "select",
+  "textarea",
+  "applet",
+  "meta",
+  "link",
+]);
+
+// `style` attribute deny-substrings (case-insensitive). Drops the entire
+// style attribute if any of these appear; we don't try to surgically
+// edit a CSS declaration list because the parser surface for that is
+// nontrivial and the false-positive rate is tolerable for email bodies.
+const STYLE_DENY_PATTERNS = [
+  /javascript:/i,
+  /expression\s*\(/i,
+  /url\s*\(\s*["']?\s*javascript:/i,
+  /url\s*\(\s*["']?\s*data:text\/html/i,
+  /-moz-binding/i,
+  /behavior\s*:/i,
+  /@import/i,
+];
+
+/**
+ * Returns true when the given URL is safe for an `href` or `src`. Allows
+ * `http(s):`, `mailto:`, `cid:` (inline images), and protocol-relative
+ * + absolute-path forms. Refuses `javascript:`, `data:` (except images),
+ * `file:`, `vbscript:`, etc.
+ */
+function isSafeUrl(url: string, attrName: "href" | "src" | string): boolean {
+  const trimmed = url.trim();
+  if (trimmed.length === 0) return false;
+  // Strip control characters that browsers helpfully ignore inside URL schemes.
+  // eslint-disable-next-line no-control-regex
+  const stripped = trimmed.replace(/[\x00-\x1f\x7f]/g, "").toLowerCase();
+  if (
+    stripped.startsWith("javascript:") ||
+    stripped.startsWith("vbscript:") ||
+    stripped.startsWith("file:")
+  ) {
+    return false;
+  }
+  // data: is allowed only as `data:image/...` for `src`. data:text/html
+  // is the classic stored-XSS vector.
+  if (stripped.startsWith("data:")) {
+    if (attrName !== "src") return false;
+    return /^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,/i.test(stripped);
+  }
+  return true;
+}
+
+/**
+ * Sanitize an HTML email body using a fixed tag/attribute allowlist.
+ *
+ * Pure CPU; no I/O. Idempotent (sanitize(sanitize(x)) === sanitize(x)).
+ *
+ * Returns "" when the input is null/undefined/empty so callers can pass
+ * a possibly-missing body without a guard.
+ */
+export function sanitizeEmailHtml(input: string | null | undefined): string {
+  if (typeof input !== "string" || input.length === 0) return "";
+
+  let html = input;
+
+  // 1. Drop destructive tags + their contents in one sweep. Includes
+  // unclosed cases ("<script ... <p>") — replace up to the next `</tag>`
+  // OR end of input.
+  for (const tag of SANITIZE_DESTRUCTIVE_TAGS) {
+    const re = new RegExp(
+      `<\\s*${tag}\\b[^>]*>([\\s\\S]*?)<\\s*/\\s*${tag}\\s*>`,
+      "gi",
+    );
+    html = html.replace(re, "");
+    // self-closing or unterminated forms — drop the open tag.
+    const reOpen = new RegExp(`<\\s*${tag}\\b[^>]*/?>`, "gi");
+    html = html.replace(reOpen, "");
+  }
+
+  // 2. Drop HTML comments — they can hide IE conditional script
+  // execution and just generally aren't useful in stored bodies.
+  html = html.replace(/<!--[\s\S]*?-->/g, "");
+
+  // 3. Walk every remaining tag and apply the tag/attribute allowlist.
+  // Two regex passes: one for opening + self-closing, one for closing.
+  html = html.replace(
+    /<\s*\/\s*([a-zA-Z][a-zA-Z0-9]*)\s*>/g,
+    (_m, name: string) => {
+      const lc = name.toLowerCase();
+      if (!SANITIZE_TAG_ALLOWLIST.has(lc)) return "";
+      return `</${lc}>`;
+    },
+  );
+
+  html = html.replace(
+    /<\s*([a-zA-Z][a-zA-Z0-9]*)\s*([^>]*?)(\/?)\s*>/g,
+    (_m, name: string, attrs: string, selfClose: string) => {
+      const lc = name.toLowerCase();
+      if (!SANITIZE_TAG_ALLOWLIST.has(lc)) return "";
+
+      // Parse attrs: name=("..."|'...'|bare), space-separated. Tolerant
+      // to malformed input; unknown shapes get dropped.
+      const cleaned: string[] = [];
+      const attrRe =
+        /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?/g;
+      let match: RegExpExecArray | null;
+      while ((match = attrRe.exec(attrs)) !== null) {
+        const rawName = match[1].toLowerCase();
+        const value = match[2] ?? match[3] ?? match[4] ?? "";
+
+        // Drop event handlers wholesale (onclick, onerror, onload, …).
+        if (rawName.startsWith("on")) continue;
+        // xmlns and xml:* attributes can be used to smuggle SVG-script
+        // namespaces; drop wholesale.
+        if (rawName.startsWith("xmlns") || rawName.startsWith("xml:")) continue;
+        if (!SANITIZE_ATTR_ALLOWLIST.has(rawName)) continue;
+
+        // URL-bearing attrs: validate the protocol.
+        if (rawName === "href" || rawName === "src") {
+          if (!isSafeUrl(value, rawName)) continue;
+        }
+
+        // `style`: drop the whole attr if any deny-pattern fires.
+        if (rawName === "style") {
+          if (STYLE_DENY_PATTERNS.some((p) => p.test(value))) continue;
+        }
+
+        // Re-encode quotes in the value to prevent attribute-context escape.
+        const escaped = value
+          .replace(/"/g, "&quot;")
+          .replace(/&(?!(?:amp|quot|apos|lt|gt|#)\b)/g, "&amp;");
+        cleaned.push(`${rawName}="${escaped}"`);
+      }
+
+      const sc = selfClose ? "/" : "";
+      return cleaned.length > 0
+        ? `<${lc} ${cleaned.join(" ")}${sc}>`
+        : `<${lc}${sc}>`;
+    },
+  );
+
+  return html;
 }
 
 /**

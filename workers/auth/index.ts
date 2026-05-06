@@ -25,6 +25,7 @@ import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "../lib/mocks/email-binding";
 import { isBootstrapEmail } from "../lib/bootstrap-owner";
+import { normalizeEmail } from "../lib/email";
 import type { Env } from "../types";
 // T1.6 — pre-registered trusted MCP clients. Same module is consumed by
 // `scripts/seed-trusted-clients.ts` (writes the rows) and by the consent /
@@ -97,14 +98,20 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
   orm: ReturnType<typeof drizzle>,
 ): Promise<{ data: U }> {
   const rawEmail = typeof user?.email === "string" ? user.email : "";
-  const normalizedEmail = rawEmail.trim().toLowerCase();
+  // C3.3: route through the shared canonicalizer instead of inline
+  // `.trim().toLowerCase()` so the signup gate, the bootstrap predicate,
+  // and the JWT-email lookup all see exactly the same form. The
+  // `lower(email)` UNIQUE index in D1 stores rows in this canonical form.
+  const normalizedEmail = normalizeEmail(rawEmail);
   if (!normalizedEmail) {
     throw new APIError("FORBIDDEN", {
       message: "Email is required for sign-up.",
     });
   }
   if (isBootstrapEmail(rawEmail, env)) {
-    return { data: { ...user, role: "global_owner" } as U };
+    return {
+      data: { ...user, email: normalizedEmail, role: "global_owner" } as U,
+    };
   }
   const invite = await orm
     .select({ id: schema.group_invitations.id })

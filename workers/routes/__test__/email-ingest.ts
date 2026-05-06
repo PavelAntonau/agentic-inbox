@@ -51,17 +51,27 @@ testRoutes.post("/email-ingest", async (c) => {
     body: string;
   }>();
 
-  const raw = new Blob([
+  // Phase C3 / C3.25 BUG: build the raw RFC 822 frame as a Blob and
+  // measure its BYTE size with `.size`. The previous implementation
+  // passed `body.length` for `rawSize`, which is the JS string length
+  // (UTF-16 code units) and undercounts multi-byte chars in headers,
+  // body, and CRLF separators. The size eventually feeds the inbound
+  // 25 MB cap in `streamToArrayBuffer`; the off-by-encoding error
+  // could let a multi-byte body squeak past the cap or, more
+  // realistically in practice, fail size checks for a body that was
+  // legitimately under the byte cap.
+  const rawBlob = new Blob([
     `From: ${from}\r\n`,
     `To: ${to}\r\n`,
     `Subject: ${subject}\r\n`,
     `\r\n`,
     body,
-  ]).stream();
+  ]);
+  const raw = rawBlob.stream();
 
   const { receiveEmail } = await import("../../index");
   await receiveEmail(
-    { raw, rawSize: body.length },
+    { raw, rawSize: rawBlob.size },
     c.env,
     c.executionCtx as ExecutionContext,
   );

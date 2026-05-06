@@ -163,22 +163,91 @@ export class AgentTokenLimiter extends DurableObject {
     const path = url.pathname;
 
     if (path === "/register" && request.method === "POST") {
-      const body = await request.json<{
-        fingerprint: string;
-        max_instances: number;
-        idle_prune_ms?: number;
-      }>();
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "invalid json" }, { status: 400 });
+      }
+      // Phase C3 / C3.21 — validate body shape, reject malformed input
+      // BEFORE touching state. The previous handler trusted client input
+      // and would happily accept `max_instances: 0` (allows nothing) or
+      // `max_instances: -1` (treated as cap < size, rejecting forever).
+      if (!body || typeof body !== "object") {
+        return Response.json(
+          { error: "body must be a JSON object" },
+          { status: 400 },
+        );
+      }
+      const b = body as {
+        fingerprint?: unknown;
+        max_instances?: unknown;
+        idle_prune_ms?: unknown;
+      };
+      if (typeof b.fingerprint !== "string" || b.fingerprint.length === 0) {
+        return Response.json(
+          { error: "fingerprint must be a non-empty string" },
+          { status: 400 },
+        );
+      }
+      if (b.fingerprint.length > 256) {
+        return Response.json(
+          { error: "fingerprint exceeds 256-character cap" },
+          { status: 400 },
+        );
+      }
+      if (
+        typeof b.max_instances !== "number" ||
+        !Number.isInteger(b.max_instances) ||
+        b.max_instances < 1
+      ) {
+        return Response.json(
+          { error: "max_instances must be an integer >= 1" },
+          { status: 400 },
+        );
+      }
+      if (
+        b.idle_prune_ms !== undefined &&
+        (typeof b.idle_prune_ms !== "number" ||
+          !Number.isInteger(b.idle_prune_ms) ||
+          b.idle_prune_ms < 0 ||
+          !Number.isFinite(b.idle_prune_ms))
+      ) {
+        return Response.json(
+          {
+            error:
+              "idle_prune_ms must be a non-negative finite integer (or omitted)",
+          },
+          { status: 400 },
+        );
+      }
       const result = await this.register(
-        body.fingerprint,
-        body.max_instances,
-        body.idle_prune_ms ?? 0,
+        b.fingerprint,
+        b.max_instances,
+        (b.idle_prune_ms as number | undefined) ?? 0,
       );
       return Response.json(result);
     }
 
     if (path === "/prune" && request.method === "POST") {
-      const body = await request.json<{ idle_ms: number }>();
-      const removed = await this.prune(body.idle_ms);
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "invalid json" }, { status: 400 });
+      }
+      const idleMs = (body as { idle_ms?: unknown })?.idle_ms;
+      if (
+        typeof idleMs !== "number" ||
+        !Number.isFinite(idleMs) ||
+        idleMs < 0
+      ) {
+        return Response.json(
+          { error: "idle_ms must be a non-negative finite number" },
+          { status: 400 },
+        );
+      }
+      const removed = await this.prune(idleMs);
       return Response.json({ removed });
     }
 

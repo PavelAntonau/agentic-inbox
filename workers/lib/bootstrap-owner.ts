@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import type { Env } from "../types";
+import { normalizeEmail } from "./email";
 
 /**
  * Shared predicate: does `loginEmail` match the configured bootstrap-owner
@@ -22,9 +23,9 @@ import type { Env } from "../types";
  * doesn't match — i.e. fail-closed on misconfiguration.
  */
 export function isBootstrapEmail(loginEmail: string, env: Env): boolean {
-  const target = env.BOOTSTRAP_OWNER_EMAIL?.trim();
+  const target = normalizeEmail(env.BOOTSTRAP_OWNER_EMAIL);
   if (!target) return false;
-  return loginEmail.trim().toLowerCase() === target.toLowerCase();
+  return normalizeEmail(loginEmail) === target;
 }
 
 /**
@@ -49,11 +50,16 @@ export async function bootstrapOwner(
 ): Promise<string | null> {
   if (!isBootstrapEmail(loginEmail, env)) return null;
 
+  // C3.3: read AND write the canonical lower-cased form. Mixed-case
+  // upstream input would otherwise miss the row on read (BOOTSTRAP_OWNER
+  // misfire scenario in the walkthrough catalog) AND violate the
+  // `lower(email)` UNIQUE index on insert when retried.
+  const canonicalEmail = normalizeEmail(loginEmail);
   const orm = drizzle(db, { schema });
   const existing = await orm
     .select()
     .from(schema.users)
-    .where(eq(schema.users.email, loginEmail))
+    .where(eq(schema.users.email, canonicalEmail))
     .get();
   if (existing) return existing.id;
 
@@ -62,7 +68,7 @@ export async function bootstrapOwner(
     .insert(schema.users)
     .values({
       id,
-      email: loginEmail,
+      email: canonicalEmail,
       display_name: null,
       role: "global_owner",
       status: "active",
@@ -77,7 +83,7 @@ export async function bootstrapOwner(
   const final = await orm
     .select()
     .from(schema.users)
-    .where(eq(schema.users.email, loginEmail))
+    .where(eq(schema.users.email, canonicalEmail))
     .get();
   return final?.id ?? null;
 }

@@ -17,7 +17,15 @@ export const users = sqliteTable(
   "users",
   {
     id: text("id").primaryKey(),
-    email: text("email").notNull().unique(), // COLLATE NOCASE applied via index below
+    // Phase C3 / C3.24 (migration 0016): the historical `.unique()` here
+    // produced an implicit case-SENSITIVE unique index on raw `email`,
+    // which DUPLICATED the case-insensitive `users_email_nocase` index
+    // declared below and (worse) silently allowed mixed-case writes that
+    // the lower() index then rejected. Migration 0016 drops the implicit
+    // unique idx and the `lower(email)` `users_email_nocase` is the sole
+    // uniqueness constraint going forward. Schema reflects that here so
+    // drizzle's introspection matches the live D1 shape.
+    email: text("email").notNull(), // uniqueness via users_email_nocase below
     display_name: text("display_name"),
     // Three-value role: global_owner is the pinned bootstrap seat;
     // group_owner / group_admin are encoded via groups.owner_user_id
@@ -751,8 +759,11 @@ export const oauth_personal_access_token = sqliteTable(
   },
   (t) => ({
     userIdIdx: index("oauth_personal_access_token_user_id_idx").on(t.userId),
-    tokenHashIdx: index("oauth_personal_access_token_token_hash_idx").on(
-      t.tokenHash,
-    ),
+    // Phase C3 / C3.24 (D-06, migration 0016): the historical
+    // `tokenHashIdx` index was redundant — `tokenHash` already has
+    // `.unique()` (line above), which materializes an implicit unique
+    // index that BM25-tier-1 lookups use anyway. The redundant index
+    // wasted disk and write-amplification budget on every PAT issue.
+    // Migration 0016 drops it; this schema no longer declares it.
   }),
 );

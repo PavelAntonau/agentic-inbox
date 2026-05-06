@@ -20,6 +20,51 @@ import type { SendEmailParams } from "../../email-sender";
 const OUTBOX_PREFIX = "__mock__/outbox/";
 const OTP_PREFIX = "__mock__/otp/";
 
+/**
+ * Phase C3 / C3.14 (D-09): hostname-based hard-stop. The mock outbox
+ * MUST refuse to write rows when running against the production
+ * deployment. The MOCK_MODE flag is the primary gate (set ONLY in
+ * `.dev.vars`), but a misconfigured rollback or env-injection bug
+ * could leak it; this guard is the second line of defense — keyed on
+ * the immutable production hostname instead of a flag value an
+ * attacker could flip.
+ */
+const PRODUCTION_HOSTNAME = "mail.actionnow.ai";
+
+/**
+ * Detect production hostname from an optional URL string. Accepts
+ * full URL forms (`https://mail.actionnow.ai/...`) and bare hostnames
+ * (`mail.actionnow.ai`). Returns true when the resolved hostname
+ * matches the production canonical hostname (case-insensitive).
+ */
+export function isProductionHostname(rawUrl: string | undefined): boolean {
+  if (typeof rawUrl !== "string" || rawUrl.length === 0) return false;
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname.toLowerCase() === PRODUCTION_HOSTNAME;
+  } catch {
+    // Bare hostname or malformed URL — fall through to direct compare.
+    return rawUrl.trim().toLowerCase() === PRODUCTION_HOSTNAME;
+  }
+}
+
+/**
+ * The hard-error class. Throwing (not silent skip) is intentional: if
+ * MOCK_MODE leaks into production, every send must surface as a 5xx
+ * so the operator notices immediately. A silent skip would leave the
+ * caller thinking mail was queued when it never landed.
+ */
+export class MockOutboxProductionRefusalError extends Error {
+  constructor() {
+    super(
+      "Mock outbox refused — running against the production hostname. " +
+        "MOCK_MODE must be unset on the production deploy. " +
+        "Investigate immediately: a leaked dev flag is the most likely cause.",
+    );
+    this.name = "MockOutboxProductionRefusalError";
+  }
+}
+
 /** Best-effort 6-digit OTP extraction from subject + body. */
 function extractOtp(
   subject: string,
@@ -44,11 +89,21 @@ function firstRecipient(to: string | string[]): string | null {
 /**
  * Persist one outgoing email to the mock outbox. Returns the synthetic
  * messageId that the SendEmail-shaped binding hands back to the caller.
+ *
+ * Phase C3 / C3.14 (D-09): when `requestUrl` is provided AND its
+ * hostname matches the production canonical, throw
+ * `MockOutboxProductionRefusalError` immediately. The mock outbox is
+ * a development-only artefact; running it against production is
+ * always a configuration error.
  */
 export async function writeOutboxEntry(
   env: Env,
   params: SendEmailParams,
+  options?: { requestUrl?: string | undefined | null },
 ): Promise<string> {
+  if (options?.requestUrl && isProductionHostname(options.requestUrl)) {
+    throw new MockOutboxProductionRefusalError();
+  }
   const id = crypto.randomUUID();
   const tsMs = Date.now();
   const recipient = firstRecipient(params.to);

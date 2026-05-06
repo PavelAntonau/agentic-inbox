@@ -29,7 +29,7 @@
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/control-plane/schema";
 import { Folders } from "../../shared/folders";
-import { getMailboxStub } from "./email-helpers";
+import { getMailboxStub, sanitizeEmailHtml } from "./email-helpers";
 import type { Env } from "../types";
 import type { MailboxDO } from "../durableObject";
 
@@ -266,11 +266,33 @@ export async function evaluateInternalDeliveryPolicy(
 export async function deliverInternal(
   env: Env,
   params: DeliverInternalParams,
+  options?: {
+    /**
+     * Phase C3 / BUG-D-4: actor user id of the human or service token that
+     * triggered this internal delivery. When set, the audit-log row records
+     * the real sender; when undefined, the row falls back to `null` (legacy
+     * behaviour) so older callers don't break. New code should always pass
+     * this when known.
+     */
+    actorUserId?: string | null;
+    /**
+     * Phase C3 / BUG-D-4: actor token id (PAT, agent token) that triggered
+     * the delivery, when applicable. Mirrors `audit_log.actor_token_id`.
+     */
+    actorTokenId?: string | null;
+  },
 ): Promise<DeliverInternalResult> {
   const stub: DurableObjectStub<MailboxDO> = getMailboxStub(
     env,
     params.toAddress,
   );
+
+  // Phase C3 / C3.7 (P2-D-2): server-side allowlist sanitization is the
+  // 4th defense layer. The body has already been LLM-cleansed
+  // (verifyDraft) but malicious content can still slip through; sanitize
+  // again at the storage boundary so the destination DO never persists a
+  // stored-XSS payload.
+  const sanitizedHtml = sanitizeEmailHtml(params.bodyHtml);
 
   await stub.createEmail(
     Folders.INBOX,
@@ -280,7 +302,7 @@ export async function deliverInternal(
       sender: params.fromMailboxId,
       recipient: params.toAddress,
       date: new Date().toISOString(),
-      body: params.bodyHtml,
+      body: sanitizedHtml,
       in_reply_to: params.threading?.in_reply_to ?? null,
       email_references: params.threading?.email_references ?? null,
       thread_id: params.threading?.thread_id ?? params.messageId,
@@ -289,7 +311,7 @@ export async function deliverInternal(
     [],
   );
 
-  await writeInternalDeliveryAudit(env, params).catch((e) => {
+  await writeInternalDeliveryAudit(env, params, options).catch((e) => {
     console.error(
       "internal-delivery audit_log write failed:",
       (e as Error).message,
@@ -302,6 +324,7 @@ export async function deliverInternal(
 async function writeInternalDeliveryAudit(
   env: Env,
   params: DeliverInternalParams,
+  options?: { actorUserId?: string | null; actorTokenId?: string | null },
 ): Promise<void> {
   if (!env.DB) return;
   const orm = drizzle(env.DB, { schema });
@@ -309,8 +332,11 @@ async function writeInternalDeliveryAudit(
     .insert(schema.audit_log)
     .values({
       at: Date.now(),
-      actor_user_id: null,
-      actor_token_id: null,
+      // Phase C3 / BUG-D-4: actor_user_id used to be hard-coded null,
+      // anonymizing every internal-delivery row. Plumb the caller-supplied
+      // value through so the row records who actually sent the message.
+      actor_user_id: options?.actorUserId ?? null,
+      actor_token_id: options?.actorTokenId ?? null,
       action: "email.internal_deliver",
       target_type: "email",
       target_id: params.messageId,

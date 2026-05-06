@@ -83,8 +83,26 @@ export async function verifyOAuthQuerySignature(
   // device's clock can drift relative to the server by a few seconds and
   // the strict `<` was rejecting otherwise valid signed queries.
   const CONSENT_QUERY_CLOCK_SKEW_MS = 30 * 1000;
-  if (exp * 1000 < Date.now() - CONSENT_QUERY_CLOCK_SKEW_MS) {
+  const expMs = exp * 1000;
+  const nowMs = Date.now();
+  if (expMs < nowMs - CONSENT_QUERY_CLOCK_SKEW_MS) {
     return { ok: false, reason: "expired" };
+  }
+  // Phase C3 / C3.25 BUG: consent.ts:80-88 one-sided clock skew. Add an
+  // upper bound on `exp`. The plugin's signed-query helper sets a
+  // 5-minute TTL today; legitimate values land in `[now, now + 5min]`.
+  // Allowing an arbitrarily-far-future exp lets a single signed query
+  // be replayed indefinitely if the secret is ever rotated AFTER the
+  // attacker captured a query (the secret rotation would invalidate
+  // the signature, but only when the exp window has actually passed).
+  // Cap the future at 1 hour to bound the replay window even when the
+  // signed payload was minted by a buggy client with a long TTL.
+  const CONSENT_QUERY_MAX_FUTURE_MS = 60 * 60 * 1000;
+  if (
+    expMs >
+    nowMs + CONSENT_QUERY_MAX_FUTURE_MS + CONSENT_QUERY_CLOCK_SKEW_MS
+  ) {
+    return { ok: false, reason: "exp-too-far-in-future" };
   }
 
   // Plugin's signParams strips `sig` BEFORE re-serializing for the HMAC, so

@@ -54,16 +54,20 @@ function isGlobal(role: AuthzContext["role"]): boolean {
  * (max_groups_per_mailbox).
  *
  * MP-1 (Phase 2): the actorMailboxAclLevel parameter elevates an
- * admin-ACL grantee to owner-equivalent on this operation. Optional and
- * defaults to null so unit-test callers and pre-MP-1 sites continue to
- * type-check; production sites should always read the actor's level
- * from mailbox_acls before invoking.
+ * admin-ACL grantee to owner-equivalent on this operation.
+ *
+ * Phase C3 / C3.25 BUG: the parameter is now REQUIRED at the type
+ * level (was previously optional with a default of `null`). Callers
+ * that genuinely don't have an ACL row to consult must pass `null`
+ * explicitly so the omission is visible in code review. The previous
+ * default-null silently turned every "I forgot to read mailbox_acls"
+ * site into a deny — the same shape as the audit's MP-1 finding.
  */
 export function canShare(
   actor: AuthzContext,
   mailbox: MailboxRow,
   group: GroupRow,
-  actorMailboxAclLevel: MailboxAclLevel = null,
+  actorMailboxAclLevel: MailboxAclLevel,
 ): PermResult {
   if (isGlobal(actor.role)) return { ok: true };
 
@@ -96,7 +100,7 @@ export function canUnshare(
   mailbox: MailboxRow,
   group: GroupRow,
   actorRoleInGroup: "admin" | "member" | null,
-  actorMailboxAclLevel: MailboxAclLevel = null,
+  actorMailboxAclLevel: MailboxAclLevel,
 ): PermResult {
   if (isGlobal(actor.role)) return { ok: true };
   if (mailbox.owner_user_id === actor.user_id) return { ok: true };

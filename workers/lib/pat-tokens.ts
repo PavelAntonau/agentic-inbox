@@ -88,8 +88,12 @@ export async function mintPat(pepper: string): Promise<{
   tokenPrefix: string;
   tokenSuffix: string;
 }> {
+  // Phase C3 / C3.25 BUG: drop the cargo-cult `Promise.all([single])`.
+  // Awaiting a one-element array adds an extra microtask hop without
+  // any concurrency benefit. The hash is the only async step; await
+  // it directly.
   const plaintext = generatePat();
-  const [tokenHash] = await Promise.all([hashPat(plaintext, pepper)]);
+  const tokenHash = await hashPat(plaintext, pepper);
   return {
     plaintext,
     tokenHash,

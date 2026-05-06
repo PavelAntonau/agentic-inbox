@@ -271,6 +271,12 @@ export function authzContext(): MiddlewareHandler<Ctx> {
     }
 
     // Human path
+    // C3.3: jwtEmail() returns the canonical (lower-cased, trimmed) form
+    // produced by lib/email.ts:normalizeEmail. The `users.email` column is
+    // stored in the same canonical form (migration 0016 backfilled, and the
+    // `lower(email)` UNIQUE index protects future writes), so a raw equality
+    // join here is sound. Mixed-case upstream JWT claims (CF Access has been
+    // observed surfacing them) used to MISS the row → 403 bootstrap loops.
     const email = jwtEmail(jwt);
     if (!email) return c.text("JWT missing email", 403);
 

@@ -56,12 +56,15 @@ const OTHER_GROUP: GroupRow = {
 
 describe("canShare", () => {
   it("allows mailbox owner who is a member of the group", () => {
-    const result = canShare(actor(), MAILBOX, GROUP);
+    // C3 (BUG cleanup): pass `null` for actorMailboxAclLevel explicitly —
+    // the predicate now requires the parameter at the type level so the
+    // omission can no longer slip through code review.
+    const result = canShare(actor(), MAILBOX, GROUP, null);
     expect(result.ok).toBe(true);
   });
 
   it("blocks non-owner who is a member of the group", () => {
-    const result = canShare(actor(), OTHER_MAILBOX, GROUP);
+    const result = canShare(actor(), OTHER_MAILBOX, GROUP, null);
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/owner/i);
   });
@@ -71,6 +74,7 @@ describe("canShare", () => {
       actor({ group_ids: ["g-eng"] }),
       MAILBOX,
       OTHER_GROUP,
+      null,
     );
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/member/i);
@@ -81,6 +85,7 @@ describe("canShare", () => {
       actor({ role: "global_owner", group_ids: [] }),
       OTHER_MAILBOX,
       OTHER_GROUP,
+      null,
     );
     expect(result.ok).toBe(true);
   });
@@ -90,6 +95,7 @@ describe("canShare", () => {
       actor({ role: "global_admin", group_ids: [] }),
       OTHER_MAILBOX,
       OTHER_GROUP,
+      null,
     );
     expect(result.ok).toBe(true);
   });
@@ -134,24 +140,27 @@ describe("canShare", () => {
 
 describe("canUnshare", () => {
   it("allows mailbox owner", () => {
-    expect(canUnshare(actor(), MAILBOX, GROUP, "member").ok).toBe(true);
+    // C3 (BUG cleanup): pass `null` for actorMailboxAclLevel explicitly.
+    expect(canUnshare(actor(), MAILBOX, GROUP, "member", null).ok).toBe(true);
   });
 
   it("allows group owner", () => {
     const bob = actor({ user_id: "u-bob" });
     // u-bob owns OTHER_GROUP
-    expect(canUnshare(bob, MAILBOX, OTHER_GROUP, "member").ok).toBe(true);
+    expect(canUnshare(bob, MAILBOX, OTHER_GROUP, "member", null).ok).toBe(true);
   });
 
   it("allows group admin", () => {
     const bob = actor({ user_id: "u-bob" });
-    expect(canUnshare(bob, OTHER_MAILBOX, OTHER_GROUP, "admin").ok).toBe(true);
+    expect(canUnshare(bob, OTHER_MAILBOX, OTHER_GROUP, "admin", null).ok).toBe(
+      true,
+    );
   });
 
   it("blocks a plain member who doesn't own mailbox or group", () => {
     // bob (u-bob) is neither the mailbox owner (u-alice) nor the group owner (u-alice)
     const bob = actor({ user_id: "u-bob" });
-    expect(canUnshare(bob, MAILBOX, GROUP, "member").ok).toBe(false);
+    expect(canUnshare(bob, MAILBOX, GROUP, "member", null).ok).toBe(false);
   });
 
   it("allows global_admin", () => {

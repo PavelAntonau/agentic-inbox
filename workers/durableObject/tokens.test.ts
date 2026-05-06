@@ -251,14 +251,104 @@ describe("RevocationCache", () => {
     expect(data.revoked).toBe(true);
   });
 
-  it("HTTP /snapshot returns list", async () => {
-    await cache.revoke("client-Z");
+  it("HTTP /snapshot returns 503 when REVOCATION_CACHE_INTERNAL_TOKEN is unset (C3.8 fail-CLOSED)", async () => {
+    // The default harness leaves env empty; /snapshot must refuse.
     const res = await cache.fetch(
       new Request("http://do/snapshot", { method: "GET" }),
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("HTTP /snapshot returns 403 when token is wrong", async () => {
+    const harnessAuth = makeDurableObjectStub();
+    harnessAuth.env = {
+      REVOCATION_CACHE_INTERNAL_TOKEN: "secret-token-xyz",
+    } as unknown as Env;
+    const cacheAuth = new RevocationCache(harnessAuth.ctx, harnessAuth.env);
+    await cacheAuth.revoke("client-Z");
+    const res = await cacheAuth.fetch(
+      new Request("http://do/snapshot", {
+        method: "GET",
+        headers: { "x-internal-token": "wrong" },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("HTTP /snapshot returns list when token matches (C3.8)", async () => {
+    const harnessAuth = makeDurableObjectStub();
+    harnessAuth.env = {
+      REVOCATION_CACHE_INTERNAL_TOKEN: "secret-token-xyz",
+    } as unknown as Env;
+    const cacheAuth = new RevocationCache(harnessAuth.ctx, harnessAuth.env);
+    await cacheAuth.revoke("client-Z");
+    const res = await cacheAuth.fetch(
+      new Request("http://do/snapshot", {
+        method: "GET",
+        headers: { "x-internal-token": "secret-token-xyz" },
+      }),
     );
     expect(res.status).toBe(200);
     const data = await res.json<string[]>();
     expect(data).toContain("client-Z");
+  });
+
+  it("HTTP /revoke 400s on missing cf_client_id (C3.8 body validation)", async () => {
+    const res = await cache.fetch(
+      new Request("http://do/revoke", {
+        method: "POST",
+        body: JSON.stringify({ wrong_key: "x" }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("HTTP /revoke 400s on invalid JSON body (C3.8 body validation)", async () => {
+    const res = await cache.fetch(
+      new Request("http://do/revoke", {
+        method: "POST",
+        body: "not json",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("HTTP /prune-stale removes entries older than before_ts (C3.8)", async () => {
+    // Plant a legacy entry directly so we can reason about its ts.
+    await cache.revoke("client-recent");
+    // Directly mutate storage to simulate a legacy ts=0 entry.
+    const list = harness.store.get("revoked") as Array<{
+      id: string;
+      ts: number;
+    }>;
+    list.push({ id: "client-legacy", ts: 0 });
+    harness.store.set("revoked", list);
+
+    // Reload via fresh instance.
+    const harness2 = makeDurableObjectStub();
+    harness2.storage.get.mockImplementation(async (key: string) => {
+      return harness.store.get(key);
+    });
+    harness2.storage.put.mockImplementation(
+      async (key: string, value: unknown) => {
+        harness.store.set(key, value);
+      },
+    );
+    const cache2 = new RevocationCache(harness2.ctx, harness2.env);
+
+    const res = await cache2.fetch(
+      new Request("http://do/prune-stale", {
+        method: "POST",
+        body: JSON.stringify({ before_ts: 1 }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json<{ removed: number }>();
+    // Only the ts=0 legacy entry has ts < 1; the recent revocation has ts=Date.now().
+    expect(data.removed).toBe(1);
   });
 
   it("HTTP unknown path → 404", async () => {

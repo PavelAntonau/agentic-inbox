@@ -192,11 +192,31 @@ export async function verifyDraft(env: AiEnv, body: string): Promise<string> {
     // it's probably being too aggressive — fall back to original.
     // This threshold balances between catching real artifacts and
     // preventing the verifier from gutting legitimate emails.
+    //
+    // Phase C3 / C3.23 (D-08): include the actual cleaned text in the
+    // warn payload (not just a count). Without the text, debugging a
+    // false positive ("why did the verifier nuke my email?") needs a
+    // re-run with extra logging hooked up; with the text, the operator
+    // sees the offending output inline. Cap at 4 KB to keep the log
+    // line reasonable (the verifier max input is small to begin with).
     if (cleanedTrimmed.length < replyText.trim().length * 0.5) {
-      console.warn(
-        "Draft verifier removed >50% of content, falling back to original.",
-        `Original: ${replyText.trim().length} chars, Cleaned: ${cleanedTrimmed.length} chars`,
-      );
+      const ORIGINAL_PREVIEW_CAP = 4096;
+      const original_len = replyText.trim().length;
+      const cleaned_len = cleanedTrimmed.length;
+      const original_text = replyText.trim().slice(0, ORIGINAL_PREVIEW_CAP);
+      const cleaned_text = cleanedTrimmed.slice(0, ORIGINAL_PREVIEW_CAP);
+      console.warn({
+        event: "verify_draft_shrink",
+        message:
+          "Draft verifier removed >50% of content, falling back to original.",
+        original_len,
+        cleaned_len,
+        shrink_pct: Math.round(
+          (1 - cleaned_len / Math.max(original_len, 1)) * 100,
+        ),
+        cleaned_text,
+        original_text,
+      });
       return body;
     }
 

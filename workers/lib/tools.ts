@@ -433,6 +433,13 @@ export async function toolSendReply(
     subject: string;
     bodyHtml: string;
   },
+  /**
+   * Phase C3 / BUG-D-4: caller-supplied actor identity, plumbed through to
+   * the audit-log row written by `deliverInternal`. Optional for
+   * back-compat with existing MCP / agent callers; new code should
+   * always pass `{ userId, tokenId? }`.
+   */
+  actor?: { userId?: string | null; tokenId?: string | null },
 ): Promise<
   { status: "sent"; messageId: string; message: string } | { error: string }
 > {
@@ -520,20 +527,27 @@ export async function toolSendReply(
       }
     }
     try {
-      await deliverInternal(env, {
-        fromMailboxId: mailboxId.toLowerCase(),
-        toAddress: params.to.toLowerCase(),
-        subject: params.subject,
-        bodyHtml: fullBodyHtml,
-        outgoingMessageId,
-        messageId,
-        threading: {
-          in_reply_to: originalMsgId,
-          email_references:
-            references.length > 0 ? JSON.stringify(references) : null,
-          thread_id: threadId,
+      await deliverInternal(
+        env,
+        {
+          fromMailboxId: mailboxId.toLowerCase(),
+          toAddress: params.to.toLowerCase(),
+          subject: params.subject,
+          bodyHtml: fullBodyHtml,
+          outgoingMessageId,
+          messageId,
+          threading: {
+            in_reply_to: originalMsgId,
+            email_references:
+              references.length > 0 ? JSON.stringify(references) : null,
+            thread_id: threadId,
+          },
         },
-      });
+        {
+          actorUserId: actor?.userId ?? null,
+          actorTokenId: actor?.tokenId ?? null,
+        },
+      );
     } catch (e) {
       console.error("Internal delivery failed:", (e as Error).message);
       return { error: `Failed to deliver reply: ${(e as Error).message}` };
@@ -584,6 +598,11 @@ export async function toolSendEmail(
     subject: string;
     bodyHtml: string;
   },
+  /**
+   * Phase C3 / BUG-D-4: caller-supplied actor identity, plumbed through
+   * to the audit-log row. See `toolSendReply` for rationale.
+   */
+  actor?: { userId?: string | null; tokenId?: string | null },
 ): Promise<
   { status: "sent"; messageId: string; message: string } | { error: string }
 > {
@@ -649,14 +668,21 @@ export async function toolSendEmail(
       }
     }
     try {
-      await deliverInternal(env, {
-        fromMailboxId: mailboxId.toLowerCase(),
-        toAddress: params.to.toLowerCase(),
-        subject: params.subject,
-        bodyHtml: sanitizedBody,
-        outgoingMessageId,
-        messageId,
-      });
+      await deliverInternal(
+        env,
+        {
+          fromMailboxId: mailboxId.toLowerCase(),
+          toAddress: params.to.toLowerCase(),
+          subject: params.subject,
+          bodyHtml: sanitizedBody,
+          outgoingMessageId,
+          messageId,
+        },
+        {
+          actorUserId: actor?.userId ?? null,
+          actorTokenId: actor?.tokenId ?? null,
+        },
+      );
     } catch (e) {
       console.error("Internal delivery failed:", (e as Error).message);
       return { error: `Failed to deliver email: ${(e as Error).message}` };

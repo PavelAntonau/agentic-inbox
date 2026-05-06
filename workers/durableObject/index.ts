@@ -737,13 +737,22 @@ export class MailboxDO extends DurableObject<Env> {
       return `?${paramIdx}`;
     };
 
+    // Phase C3 / C3.16 (C-06): escape `%`, `_`, and `\` in user-supplied
+    // search fragments before wrapping with `%...%`. Without this, a
+    // literal `%` in the query matches everything ("john%" → wildcard
+    // soup), and `_` matches any single character. Every LIKE clause
+    // below must pair the escaped param with `ESCAPE '\'`.
+    const escLike = (value: string): string =>
+      value.replace(/[\\%_]/g, (m) => `\\${m}`);
+
     if (query) {
-      const p1 = addParam(`%${query}%`);
-      const p2 = addParam(`%${query}%`);
-      const p3 = addParam(`%${query}%`);
-      const p4 = addParam(`%${query}%`);
+      const escaped = escLike(query);
+      const p1 = addParam(`%${escaped}%`);
+      const p2 = addParam(`%${escaped}%`);
+      const p3 = addParam(`%${escaped}%`);
+      const p4 = addParam(`%${escaped}%`);
       conditions.push(
-        `(${prefix}subject LIKE ${p1} OR ${prefix}body LIKE ${p2} OR ${prefix}sender LIKE ${p3} OR ${prefix}recipient LIKE ${p4} OR ${prefix}cc LIKE ${p4} OR ${prefix}bcc LIKE ${p4})`,
+        `(${prefix}subject LIKE ${p1} ESCAPE '\\' OR ${prefix}body LIKE ${p2} ESCAPE '\\' OR ${prefix}sender LIKE ${p3} ESCAPE '\\' OR ${prefix}recipient LIKE ${p4} ESCAPE '\\' OR ${prefix}cc LIKE ${p4} ESCAPE '\\' OR ${prefix}bcc LIKE ${p4} ESCAPE '\\')`,
       );
     }
     if (folder) {
@@ -753,18 +762,18 @@ export class MailboxDO extends DurableObject<Env> {
       );
     }
     if (from) {
-      const p = addParam(`%${from}%`);
-      conditions.push(`${prefix}sender LIKE ${p}`);
+      const p = addParam(`%${escLike(from)}%`);
+      conditions.push(`${prefix}sender LIKE ${p} ESCAPE '\\'`);
     }
     if (to) {
-      const p = addParam(`%${to}%`);
+      const p = addParam(`%${escLike(to)}%`);
       conditions.push(
-        `(${prefix}recipient LIKE ${p} OR ${prefix}cc LIKE ${p} OR ${prefix}bcc LIKE ${p})`,
+        `(${prefix}recipient LIKE ${p} ESCAPE '\\' OR ${prefix}cc LIKE ${p} ESCAPE '\\' OR ${prefix}bcc LIKE ${p} ESCAPE '\\')`,
       );
     }
     if (subject) {
-      const p = addParam(`%${subject}%`);
-      conditions.push(`${prefix}subject LIKE ${p}`);
+      const p = addParam(`%${escLike(subject)}%`);
+      conditions.push(`${prefix}subject LIKE ${p} ESCAPE '\\'`);
     }
     if (date_start) {
       const p = addParam(date_start);
@@ -1070,6 +1079,14 @@ export class MailboxDO extends DurableObject<Env> {
     const previousTip = current.tip_message_id;
     const now = Date.now();
 
+    // Phase C3 / C3.15 (C-05): override caller-supplied `message.date`
+    // with the server's clock. The previous behaviour (`message.date`
+    // verbatim) let a malicious caller forge a thread timestamp into
+    // the past — backdating a message to defeat audit windows or to
+    // manipulate thread ordering. Server clock is the single source of
+    // truth for "when did this row land in the DO".
+    const serverDate = new Date(now).toISOString();
+
     // Insert the new email with parent_id = previous tip.
     this.ctx.storage.sql.exec(
       `INSERT INTO emails
@@ -1084,7 +1101,7 @@ export class MailboxDO extends DurableObject<Env> {
       message.recipient,
       message.cc ?? null,
       message.bcc ?? null,
-      message.date,
+      serverDate,
       message.read ? 1 : 0,
       0,
       message.body ?? null,

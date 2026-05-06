@@ -168,13 +168,25 @@ export async function resolveMailboxToId(
  * Test whether `ip` is matched by any allowlist entry.
  *
  * Each entry can be a literal IP (exact-match) or a CIDR (`a.b.c.d/n` or
- * `xxxx::/n`). Returns false when ip is null/empty or allowlist is empty.
+ * `xxxx::/n`). Returns false when `ip` is null/empty or allowlist is empty.
  *
- * Empty/null allowlist = "no restriction"; the dispatch caller is
- * responsible for skipping the check entirely in that case (per PAT
- * column semantics: NULL ip_allowlist = no IP gate, [] = effectively no
- * gate too, which is a footgun the route layer should reject at create
- * time but we treat both uniformly here).
+ * **Semantics — Phase C3 / C3.20 (C-04) update:**
+ *
+ *   - `allowlist === null` or `undefined` → **no IP gate configured**.
+ *     The dispatch caller (workers/app.ts) checks `bearer.ip_allowlist`
+ *     explicitly for nullishness BEFORE invoking this predicate, and
+ *     skips the check entirely. This function still returns false on
+ *     null input as a defense-in-depth fallback.
+ *
+ *   - `allowlist === []` → **empty allowlist; fail-CLOSED**. Previously
+ *     this was treated as "no restriction" (a documented footgun); the
+ *     dispatch caller now treats `length > 0` AND null-check together
+ *     as "gate is active", and an empty array means *no IPs match the
+ *     gate, so deny the request*. This predicate's contract reflects
+ *     that: empty list returns false, dispatch caller refuses access.
+ *
+ *   - `allowlist === [...]` with entries → match each entry; return
+ *     true on first hit. Each entry is either an exact IP or a CIDR.
  */
 export function isIpInAllowlist(
   ip: string | null,
@@ -189,6 +201,25 @@ export function isIpInAllowlist(
     }
   }
   return false;
+}
+
+/**
+ * Phase C3 / C3.20 (C-04): canonical predicate for "is the ip_allowlist
+ * column actively gating this request?".
+ *
+ *   - null/undefined → no gate (allow)
+ *   - [] (empty)     → gate is configured but matches nothing → deny
+ *   - non-empty      → gate is active → caller must `isIpInAllowlist`
+ *
+ * Use this at every dispatch site that consumes a PAT/agent-token's
+ * `ip_allowlist` so the empty-array case can never accidentally fall
+ * through as "no gate". Returns true when the caller MUST run an
+ * `isIpInAllowlist` check (and reject on miss).
+ */
+export function ipAllowlistIsActive(
+  allowlist: readonly string[] | null | undefined,
+): boolean {
+  return Array.isArray(allowlist);
 }
 
 function cidrMatch(ip: string, cidr: string): boolean {
