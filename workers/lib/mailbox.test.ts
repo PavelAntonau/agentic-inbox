@@ -35,6 +35,7 @@ vi.mock("drizzle-orm/d1", () => ({
 // ── Imports under test (after mocks) ─────────────────────────────────────
 
 import { requireMailbox, type MailboxContext } from "./mailbox";
+import type { AuthzContext } from "../db/control-plane/forGroup";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -56,8 +57,31 @@ function makeMailboxNamespace() {
   };
 }
 
-function makeApp(env: { DB: unknown; BUCKET: R2Bucket; MAILBOX: unknown }) {
+function makeAuthz(
+  role: AuthzContext["role"] = "user",
+  authorized_mailbox_ids: string[] = [],
+): AuthzContext {
+  return {
+    user_id: "user-test",
+    role,
+    group_ids: [],
+    authorized_mailbox_ids,
+  };
+}
+
+function makeApp(
+  env: { DB: unknown; BUCKET: R2Bucket; MAILBOX: unknown },
+  // `null` = no authzContext set (simulates auth-bypass posture).
+  // Default = global_owner so pre-existing TASK-2.2 tests stay covered.
+  authz: AuthzContext | null = makeAuthz("global_owner"),
+) {
   const app = new Hono<MailboxContext>();
+  // Inject authzContext upstream of requireMailbox so the gate sees it the
+  // same way the real workers/middleware/authz-context.ts middleware sets it.
+  app.use("*", async (c, next) => {
+    if (authz !== null) c.set("authzContext", authz);
+    await next();
+  });
   app.use("/api/v1/mailboxes/:mailboxId/*", requireMailbox);
   app.get("/api/v1/mailboxes/:mailboxId/probe", (c) => {
     return c.json({
@@ -194,5 +218,107 @@ describe("requireMailbox — TASK-2.2 D1-aware fallback", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { resolvedMailboxAddress: string };
     expect(body.resolvedMailboxAddress).toBe("a+plus@actionnow.ai");
+  });
+});
+
+// ── P0-5 (security audit Phase 5): IDOR gate via authzContext ──────────
+//
+// Closes the gap documented in `.research/agentic-inbox-security-audit.md` —
+// `requireMailbox` previously did existence-only resolution, allowing any
+// authenticated user to read/write any other user's mailbox via
+// /api/v1/mailboxes/:id/*. The gate now requires:
+//   - authzContext present (else 401)
+//   - row.id ∈ authorized_mailbox_ids OR caller is global_owner/global_admin
+//   - R2-only legacy mailboxes (no D1 row) require a global role
+
+describe("requireMailbox — P0-5 IDOR gate", () => {
+  it("D1 row + caller authorized → 200", async () => {
+    const id = "uuid-alice";
+    d1Row = { id, address: "alice@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env, makeAuthz("user", [id]));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-alice/probe");
+    expect(res.status).toBe(200);
+  });
+
+  it("D1 row + caller NOT in authorized_mailbox_ids → 403", async () => {
+    d1Row = { id: "uuid-bob", address: "bob@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    // Caller authorized for someone else's mailbox, not bob's
+    const app = makeApp(env, makeAuthz("user", ["uuid-other"]));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-bob/probe");
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/forbidden/i);
+  });
+
+  it("D1 row + global_owner → 200 even without explicit authorization", async () => {
+    d1Row = { id: "uuid-anyone", address: "anyone@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env, makeAuthz("global_owner", []));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-anyone/probe");
+    expect(res.status).toBe(200);
+  });
+
+  it("D1 row + global_admin → 200 even without explicit authorization", async () => {
+    d1Row = { id: "uuid-x", address: "x@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env, makeAuthz("global_admin", []));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-x/probe");
+    expect(res.status).toBe(200);
+  });
+
+  it("R2 fallback + non-global caller → 403 (legacy mailboxes have no ACL model)", async () => {
+    d1Row = null;
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set(["legacy@actionnow.ai"])),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env, makeAuthz("user", []));
+    const res = await app.fetch("/api/v1/mailboxes/legacy@actionnow.ai/probe");
+    expect(res.status).toBe(403);
+  });
+
+  it("R2 fallback + global_owner → 200", async () => {
+    d1Row = null;
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set(["legacy@actionnow.ai"])),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env, makeAuthz("global_owner", []));
+    const res = await app.fetch("/api/v1/mailboxes/legacy@actionnow.ai/probe");
+    expect(res.status).toBe(200);
+  });
+
+  it("authzContext absent → 401 (auth-bypass posture)", async () => {
+    d1Row = { id: "uuid-anything", address: "x@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set(["x@actionnow.ai"])),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeApp(env, null);
+    const res = await app.fetch("/api/v1/mailboxes/uuid-anything/probe");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/unauthorized/i);
   });
 });

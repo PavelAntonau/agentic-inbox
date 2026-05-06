@@ -22,6 +22,7 @@ import { sql } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import type { MailboxDO } from "../durableObject";
 import type { Env } from "../types";
+import type { AuthzContext } from "../db/control-plane/forGroup";
 
 export type MailboxContext = {
   Bindings: Env;
@@ -31,14 +32,28 @@ export type MailboxContext = {
     resolvedMailboxAddress: string;
     /** D1 mailbox UUID — set when the mailbox was found in D1, undefined for R2-only. */
     resolvedMailboxId?: string;
+    /** Set by workers/middleware/authz-context.ts upstream of this middleware.
+     *  Carries (user_id, role, group_ids, authorized_mailbox_ids). Audit P0-5
+     *  reads it to gate IDOR on /api/v1/mailboxes/:id/*. */
+    authzContext?: AuthzContext;
   };
 };
+
+function isGlobal(role: AuthzContext["role"]): boolean {
+  return role === "global_owner" || role === "global_admin";
+}
 
 export const requireMailbox = createMiddleware<MailboxContext>(
   async (c, next) => {
     const rawId = c.req.param("mailboxId");
     if (!rawId) return c.json({ error: "Mailbox ID required" }, 400);
     const mailboxId = decodeURIComponent(rawId);
+
+    // P0-5 IDOR gate: every /api/v1/mailboxes/:id/* request must carry an
+    // authzContext (built upstream by workers/middleware/authz-context.ts).
+    // Absence means unauthenticated or auth-bypass posture — refuse.
+    const ctx = c.var.authzContext;
+    if (!ctx) return c.json({ error: "Unauthorized" }, 401);
 
     // ── Step 1: D1 lookup (resolves both UUID and address forms) ─────────────
     if (c.env.DB) {
@@ -58,6 +73,14 @@ export const requireMailbox = createMiddleware<MailboxContext>(
         .get();
 
       if (row) {
+        // P0-5: authorize against the union of owned + group-shared mailboxes
+        // already computed by authzContext. global_owner / global_admin bypass.
+        if (
+          !isGlobal(ctx.role) &&
+          !ctx.authorized_mailbox_ids.includes(row.id)
+        ) {
+          return c.json({ error: "Forbidden" }, 403);
+        }
         const ns = c.env.MAILBOX;
         const doId = ns.idFromName(row.address);
         const stub = ns.get(doId);
@@ -73,6 +96,13 @@ export const requireMailbox = createMiddleware<MailboxContext>(
     const obj = await c.env.BUCKET.head(key);
     if (!obj) {
       return c.json({ error: "Not found" }, 404);
+    }
+
+    // P0-5: R2-only mailboxes have no D1 row, so `authorized_mailbox_ids`
+    // (a list of D1 UUIDs) cannot grant access. Restrict legacy v1-only
+    // surfaces to global roles; everyone else gets 403.
+    if (!isGlobal(ctx.role)) {
+      return c.json({ error: "Forbidden" }, 403);
     }
 
     const ns = c.env.MAILBOX;
