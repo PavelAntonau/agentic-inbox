@@ -208,11 +208,17 @@ export async function verifyDraft(env: AiEnv, body: string): Promise<string> {
     // Plain text: reattach quoted block if any
     return quotedBlock ? `${cleanedTrimmed}\n\n${quotedBlock}` : cleanedTrimmed;
   } catch (e) {
+    // Phase C2 / D-02: fail-OPEN by returning the original body, NOT "".
+    // The previous behaviour saved a blank draft on AI outage — silently
+    // discarding the user's text. Per OQ-D-02 the verifier is a polish
+    // pass, not a safety pass; availability beats perfect cleanup. Caller
+    // gets the unmodified body, which is always at least as good as a
+    // blank draft and avoids "where did my text go?" data-loss reports.
     console.error(
-      "AI failed — returns empty body, callers may save blank draft:",
+      "AI verifier failed — returning original body unchanged:",
       (e as Error).message,
     );
-    return "";
+    return body;
   }
 }
 

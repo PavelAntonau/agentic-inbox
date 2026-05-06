@@ -323,6 +323,12 @@ router.post("/:id/promote", async (c) => {
   // then evaluates `n >= NaN === false`, silently bypassing the cap. Fail
   // closed with 500 on a non-integer value so the misconfiguration surfaces
   // immediately instead of letting an unbounded promotion through.
+  //
+  // Phase C2 / A-07: also fail-CLOSED when the setting row is missing
+  // entirely. The type system at canAct now requires `adminCap: number`
+  // for the "promote" action, but settings-cache returns string|undefined,
+  // so the route layer is the chokepoint that normalises both shapes into
+  // either a real cap or a 500 response.
   const settings = await getSettings(db);
   const adminCapRow = settings.find((s) => s.key === "max_global_admins");
   const adminCapParsed = parseAdminCap(adminCapRow?.value);
@@ -336,16 +342,21 @@ router.post("/:id/promote", async (c) => {
     );
   }
   const adminCap = adminCapParsed.cap;
-
-  let currentAdminCount: number | undefined;
-  if (adminCap !== undefined) {
-    const countResult = await orm
-      .select({ cnt: count() })
-      .from(schema.users)
-      .where(eq(schema.users.role, "global_admin"))
-      .get();
-    currentAdminCount = countResult?.cnt ?? 0;
+  if (adminCap === undefined) {
+    return c.json(
+      {
+        error: "Server misconfiguration: max_global_admins setting is missing",
+      },
+      500,
+    );
   }
+
+  const countResult = await orm
+    .select({ cnt: count() })
+    .from(schema.users)
+    .where(eq(schema.users.role, "global_admin"))
+    .get();
+  const currentAdminCount = countResult?.cnt ?? 0;
 
   const check = canAct(
     { user_id: actor.user_id, role: actor.role, email: "" },

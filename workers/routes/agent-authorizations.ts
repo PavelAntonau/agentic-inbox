@@ -101,7 +101,16 @@ router.delete("/:clientId", async (c) => {
   }
   const orm = drizzle(c.env.DB, { schema });
 
-  const result = await revokeAgentAuthorization(orm, ctx.user_id, clientId);
+  // Phase C2 / TASK-C2.2: pass the D1 binding so the revoke runs as a
+  // single d1.batch transaction (insert tombstone + delete access tokens
+  // + delete refresh tokens + delete consent). Closes the audit A-03
+  // race window.
+  const result = await revokeAgentAuthorization(
+    orm,
+    c.env.DB,
+    ctx.user_id,
+    clientId,
+  );
   if (!result) {
     return c.json({ error: "Authorization not found" }, 404);
   }

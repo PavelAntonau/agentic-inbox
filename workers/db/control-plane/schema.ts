@@ -101,9 +101,9 @@ export const contacts = sqliteTable(
 // at the FK layer. The admin user-delete handler (DELETE /api/admin/users/:id)
 // is responsible for re-assigning or cascade-deleting owned groups before
 // the user row goes away. Documented in DECISIONS.md (D-aih-S4-onDelete).
-// Existing prod databases were created without this declaration; SQLite
-// cannot ALTER an FK in place, so this annotation is forward-looking
-// documentation that aligns the drizzle schema with deployed behaviour.
+// Phase C2 / D-03 (migration 0015): created_by uses onDelete:"set null"
+// so deleting the user that originally created the group keeps the group
+// itself intact (admin handler still gates by owner_user_id RESTRICT).
 export const groups = sqliteTable("groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -112,7 +112,9 @@ export const groups = sqliteTable("groups", {
     .notNull()
     .references(() => users.id, { onDelete: "restrict" }),
   created_at: integer("created_at").notNull(),
-  created_by: text("created_by").references(() => users.id),
+  created_by: text("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
 });
 
 // 4. group_members
@@ -136,6 +138,11 @@ export const group_members = sqliteTable(
 );
 
 // 5. group_invitations — privacy-preserving invite flow
+//
+// Phase C2 / D-03 (migration 0015): invited_by/decided_by/invitee_user_id
+// all carry onDelete:"set null" — these are audit/provenance only, no
+// behaviour gates on the column being non-NULL. invited_by also drops
+// NOT NULL because a SET NULL FK action requires a nullable column.
 export const group_invitations = sqliteTable(
   "group_invitations",
   {
@@ -144,10 +151,12 @@ export const group_invitations = sqliteTable(
       .notNull()
       .references(() => groups.id, { onDelete: "cascade" }),
     invitee_email: text("invitee_email").notNull(),
-    invitee_user_id: text("invitee_user_id").references(() => users.id),
-    invited_by: text("invited_by")
-      .notNull()
-      .references(() => users.id),
+    invitee_user_id: text("invitee_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    invited_by: text("invited_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     status: text("status", {
       enum: ["pending", "accepted", "declined", "expired", "cancelled"],
     })
@@ -156,7 +165,9 @@ export const group_invitations = sqliteTable(
     created_at: integer("created_at").notNull(),
     expires_at: integer("expires_at").notNull(),
     decided_at: integer("decided_at"),
-    decided_by: text("decided_by").references(() => users.id),
+    decided_by: text("decided_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => ({
     // UNIQUE INDEX ON (group_id, invitee_email) WHERE status='pending'
@@ -220,6 +231,9 @@ export const mailboxes = sqliteTable(
 );
 
 // 7. mailbox_groups
+//
+// Phase C2 / D-03 (migration 0015): added_by uses onDelete:"set null" —
+// audit-only, no gates on the column being non-NULL.
 export const mailbox_groups = sqliteTable(
   "mailbox_groups",
   {
@@ -230,7 +244,9 @@ export const mailbox_groups = sqliteTable(
       .notNull()
       .references(() => groups.id, { onDelete: "cascade" }),
     added_at: integer("added_at").notNull(),
-    added_by: text("added_by").references(() => users.id),
+    added_by: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.mailbox_id, t.group_id] }),
@@ -239,6 +255,11 @@ export const mailbox_groups = sqliteTable(
 
 // 8. agent_tokens — Cloudflare Access service-token mirror
 // Phase 3 will drop this table after the client_id backfill soak (D-PLAT-6).
+//
+// Phase C2 / D-03 (migration 0015): issued_to_user uses
+// onDelete:"cascade" — when an admin deletes a user, every service
+// token issued to them is removed in the same transaction so the
+// admin user-delete handler doesn't need to fan out manually.
 export const agent_tokens = sqliteTable("agent_tokens", {
   id: text("id").primaryKey(),
   cf_service_token_id: text("cf_service_token_id").unique(),
@@ -249,7 +270,7 @@ export const agent_tokens = sqliteTable("agent_tokens", {
     .references(() => mailboxes.id, { onDelete: "cascade" }),
   issued_to_user: text("issued_to_user")
     .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "cascade" }),
   label: text("label"),
   max_instances: integer("max_instances").notNull().default(1),
   created_at: integer("created_at").notNull(),
@@ -573,6 +594,13 @@ export const oauth_client = sqliteTable(
 );
 
 // 2. oauth_consent — per-(client, user) scope grants (PKCE-bound).
+//
+// Phase C2 / TASK-C2.2 (migration 0015): partial UNIQUE on
+// (user_id, client_id) where user_id IS NOT NULL. Better-auth's
+// oauth-provider treats consent as upsertable per (user, client) but
+// doesn't enforce uniqueness at the schema level; without it, a race
+// in the consent flow can persist two rows, and the revoke handler
+// (deletes by user_id+client_id) leaves the second row intact.
 export const oauth_consent = sqliteTable(
   "oauth_consent",
   {
@@ -591,6 +619,41 @@ export const oauth_consent = sqliteTable(
   (t) => ({
     clientIdIdx: index("oauth_consent_client_id_idx").on(t.clientId),
     userIdIdx: index("oauth_consent_user_id_idx").on(t.userId),
+    userClientUnique: uniqueIndex("oauth_consent_user_client_unique")
+      .on(t.userId, t.clientId)
+      .where(sql`${t.userId} IS NOT NULL`),
+  }),
+);
+
+// Phase C2 / audit P1-1 (migration 0015) — JWT revocation Path 2.
+//
+// When a (user, client) grant is revoked end-to-end, this table receives
+// a row with `revoked_at` (epoch ms). workers/middleware/oauth-bearer.ts
+// reads it on every /mcp request and rejects bearers whose iat predates
+// the tombstone. Combined with the transactional revoke at
+// workers/db/queries/grants.ts:revokeAgentAuthorization, the database
+// view of the revoke is atomic from the bearer middleware's perspective.
+//
+// Garbage-collection: a tombstone is only useful while a JWT minted
+// before `revoked_at` could still be valid. Access tokens have
+// 15-minute lifetimes, so a tombstone is dead after `revoked_at +
+// 15min`. A periodic sweep (TODO C3) prunes expired tombstones.
+export const oauth_grant_tombstone = sqliteTable(
+  "oauth_grant_tombstone",
+  {
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    client_id: text("client_id")
+      .notNull()
+      .references(() => oauth_client.clientId, { onDelete: "cascade" }),
+    revoked_at: integer("revoked_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.user_id, t.client_id] }),
+    revokedAtIdx: index("oauth_grant_tombstone_revoked_at_idx").on(
+      t.revoked_at,
+    ),
   }),
 );
 

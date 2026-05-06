@@ -31,7 +31,11 @@ import {
 import { verifyDraft } from "./ai";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "./mocks/email-binding";
-import { decideSendPolicy, deliverInternal } from "./internal-delivery";
+import {
+  decideSendPolicy,
+  deliverInternal,
+  evaluateInternalDeliveryPolicy,
+} from "./internal-delivery";
 import { Folders, normalizeFolderId } from "../../shared/folders";
 import type { Env } from "../types";
 import type { AuthzContext } from "../db/control-plane/forGroup";
@@ -484,6 +488,37 @@ export async function toolSendReply(
   }
 
   if (decision.route === "internal") {
+    // Phase C2 / D-01: apply destination's inbound policy before writing
+    // into its INBOX. The same gates receiveEmail enforces (external_inbound
+    // / external_allow_mode / internal_inbound_mode + contacts gate) MUST
+    // also apply to intra-platform sends — internal-delivery short-circuits
+    // the entire CF Email Routing pipeline, so without this check the
+    // recipient's inbound policy would be silently bypassed for any
+    // workspace user.
+    // Policy gate runs only when a real D1 binding is present. Test
+    // stubs pass an empty `DB: {}` object; treating those as "no
+    // policy" matches the existing decision-tree test contract while
+    // production (env.DB is always a real D1Database) sees the gate.
+    if (
+      decision.destinationBackend.kind === "d1" &&
+      typeof env.DB?.prepare === "function"
+    ) {
+      const senderEmailLc = mailboxId.toLowerCase();
+      const senderUser = await env.DB.prepare(
+        "SELECT id FROM users WHERE lower(email) = ?1",
+      )
+        .bind(senderEmailLc)
+        .first<{ id: string }>();
+      const policy = await evaluateInternalDeliveryPolicy(
+        env,
+        decision.destinationBackend.row,
+        senderEmailLc,
+        senderUser?.id,
+      );
+      if (!policy.accepted) {
+        return { error: policy.error };
+      }
+    }
     try {
       await deliverInternal(env, {
         fromMailboxId: mailboxId.toLowerCase(),
@@ -588,6 +623,31 @@ export async function toolSendEmail(
   }
 
   if (decision.route === "internal") {
+    // Phase C2 / D-01: same inbound-policy gate as toolReply.
+    // Policy gate runs only when a real D1 binding is present. Test
+    // stubs pass an empty `DB: {}` object; treating those as "no
+    // policy" matches the existing decision-tree test contract while
+    // production (env.DB is always a real D1Database) sees the gate.
+    if (
+      decision.destinationBackend.kind === "d1" &&
+      typeof env.DB?.prepare === "function"
+    ) {
+      const senderEmailLc = mailboxId.toLowerCase();
+      const senderUser = await env.DB.prepare(
+        "SELECT id FROM users WHERE lower(email) = ?1",
+      )
+        .bind(senderEmailLc)
+        .first<{ id: string }>();
+      const policy = await evaluateInternalDeliveryPolicy(
+        env,
+        decision.destinationBackend.row,
+        senderEmailLc,
+        senderUser?.id,
+      );
+      if (!policy.accepted) {
+        return { error: policy.error };
+      }
+    }
     try {
       await deliverInternal(env, {
         fromMailboxId: mailboxId.toLowerCase(),

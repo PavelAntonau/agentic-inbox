@@ -165,8 +165,8 @@ describe("validateBearer — happy path", () => {
         "mcp:mailbox:write",
         "mcp:contacts:read",
       ]);
-      // Synthetic jti is 8 hex chars.
-      expect(r.jti).toMatch(/^[0-9a-f]{8}$/);
+      // Phase C2 / A-08: synthetic jti widened to 16 hex chars (64-bit).
+      expect(r.jti).toMatch(/^[0-9a-f]{16}$/);
       // JWT path does not surface a pat_id.
       expect(r.pat_id).toBeUndefined();
     }
@@ -423,7 +423,7 @@ describe("validateBearer — PAT happy path", () => {
       expect(r.client_id).toBe("pat:pat_id_xyz");
       expect(r.pat_id).toBe("pat_id_xyz");
       expect(r.scopes).toEqual(["mcp:mailbox:read"]);
-      expect(r.jti).toMatch(/^[0-9a-f]{8}$/);
+      expect(r.jti).toMatch(/^[0-9a-f]{16}$/);
     }
     // Touch fired exactly once, with the expected pat id and now.
     expect(touched.calls).toBe(1);

@@ -62,7 +62,15 @@ export function authorizationServerMetadata(): Record<string, unknown> {
     token_endpoint: `${ISSUER}/api/auth/oauth2/token`,
     introspection_endpoint: `${ISSUER}/api/auth/oauth2/introspect`,
     revocation_endpoint: `${ISSUER}/api/auth/oauth2/revoke`,
-    registration_endpoint: `${ISSUER}/api/auth/oauth2/register`,
+    // Phase C2 / P1-7 (OQ-P1-7 resolution): registration_endpoint is NOT
+    // advertised for v0.1. Dynamic Client Registration is open by default
+    // in @better-auth/oauth-provider, which means anyone discovering the
+    // doc can mint a client and immediately attempt OAuth flows. Until we
+    // have admin-approval gating in place, the discovery doc simply
+    // doesn't tell clients about /register — the four trusted MCP clients
+    // (Claude Code, ChatGPT desktop, Cursor, ActionNowAI iOS) are
+    // pre-registered via scripts/seed-trusted-clients.ts and don't need
+    // discovery.
     jwks_uri: `${ISSUER}/jwks`,
     scopes_supported: [
       "mcp:mailbox:read",
@@ -74,11 +82,16 @@ export function authorizationServerMetadata(): Record<string, unknown> {
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none", "client_secret_basic"],
-    introspection_endpoint_auth_methods_supported: [
-      "none",
-      "client_secret_basic",
-    ],
+    // Phase C2 / P1-6: drop "none" from the token endpoint AND
+    // introspection endpoint. Confidential clients (everything we trust)
+    // authenticate via client_secret_basic; advertising "none" lets a
+    // discovery-driven client introspect any opaque/JWT token without
+    // identifying itself. The revocation endpoint keeps "none" because
+    // RFC 7009 explicitly allows public clients to revoke their own
+    // tokens, and the new D1 tombstone (TASK-C2.12) makes that path
+    // safely effective.
+    token_endpoint_auth_methods_supported: ["client_secret_basic"],
+    introspection_endpoint_auth_methods_supported: ["client_secret_basic"],
     revocation_endpoint_auth_methods_supported: ["none", "client_secret_basic"],
     // RFC 8707 — clients MUST bind tokens to a resource. Advertised here so
     // RFC-aware clients know to send `resource=` on /authorize and /token.

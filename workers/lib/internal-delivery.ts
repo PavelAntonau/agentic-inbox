@@ -45,6 +45,23 @@ export type SendPolicyDecision =
   | { route: "external" }
   | { route: "denied"; error: string };
 
+/**
+ * Inbound-policy gate result for an internal delivery (Phase C2 / D-01).
+ *
+ * Mirrors `accepted | bounced` from `receiveEmail` in workers/index.ts. When
+ * `accepted=false`, the caller MUST return the audit-friendly `error` to the
+ * tool caller and refuse to write into the destination's INBOX.
+ */
+export type InternalPolicyDecision =
+  | { accepted: true }
+  | { accepted: false; reason: InternalPolicyRejection; error: string };
+
+export type InternalPolicyRejection =
+  | "external-inbound-disabled"
+  | "external-allowlist-miss"
+  | "internal-inbound-none"
+  | "internal-inbound-contacts-only";
+
 export interface DeliverInternalParams {
   /** Lower-case email address of the source mailbox (matches DO id semantics). */
   fromMailboxId: string;
@@ -117,6 +134,118 @@ export function decideSendPolicy(args: {
   };
 }
 
+// ── Inbound-policy gate (Phase C2 / D-01) ─────────────────────────
+
+/**
+ * Apply destination's inbound policy to an internal-delivery candidate.
+ *
+ * Mirrors the gate stack in `receiveEmail` (workers/index.ts:646-749) so an
+ * intra-platform send respects the same external-inbound, allowlist, and
+ * internal-inbound-mode policies the recipient has configured. Without this
+ * check, a workspace user could send to another mailbox even when the
+ * recipient had set internal_inbound_mode='none' or
+ * external_inbound_enabled=0 — internal-delivery short-circuits the entire
+ * Cloudflare Email Routing pipeline, including its policy checks.
+ *
+ * Inputs:
+ *   * destinationRow — the D1 row for the recipient mailbox (kind="d1"
+ *     branch of MailboxBackend). v1-only mailboxes (kind="r2") have no
+ *     policy columns and skip the gate, matching receiveEmail's semantics.
+ *   * senderEmail — lower-cased sender address (the source mailbox id is
+ *     itself an email address).
+ *   * senderUserId — when the sender's email resolves to a `users` row,
+ *     the sender is "internal" and the internal_inbound_mode applies. When
+ *     undefined, the sender is treated as external and only the external
+ *     gates run.
+ *
+ * Returns `{ accepted: true }` on pass; `{ accepted: false, reason, error }`
+ * on rejection. The caller surfaces `error` to the tool caller verbatim.
+ */
+export async function evaluateInternalDeliveryPolicy(
+  env: Env,
+  destinationRow: typeof schema.mailboxes.$inferSelect,
+  senderEmail: string,
+  senderUserId: string | undefined,
+): Promise<InternalPolicyDecision> {
+  const senderEmailLc = senderEmail.toLowerCase();
+
+  // External path: senderUserId === undefined means the sender is external.
+  // Apply the same external_inbound_enabled + external_allow_mode gates as
+  // receiveEmail. Internal senders skip these gates per the existing
+  // receiveEmail semantics (an internal sender's email is always allowed
+  // through the external check; the internal_inbound_mode below governs
+  // them instead).
+  if (!senderUserId) {
+    if (!destinationRow.external_inbound_enabled) {
+      return {
+        accepted: false,
+        reason: "external-inbound-disabled",
+        error: `Recipient has disabled external inbound mail.`,
+      };
+    }
+    if (destinationRow.external_allow_mode === "allowlist") {
+      if (!senderEmailLc) {
+        return {
+          accepted: false,
+          reason: "external-allowlist-miss",
+          error: `Recipient is in allowlist mode and sender address is unknown.`,
+        };
+      }
+      const senderDomain = senderEmailLc.includes("@")
+        ? senderEmailLc.split("@").pop()!
+        : "";
+      const allowlist = await env.DB.prepare(
+        "SELECT sender_pattern, kind FROM inbox_external_allowlist WHERE inbox_id = ?1",
+      )
+        .bind(destinationRow.id)
+        .all<{ sender_pattern: string; kind: string }>();
+      const matched = (allowlist.results ?? []).some((entry) => {
+        const pattern = entry.sender_pattern.toLowerCase().trim();
+        if (entry.kind === "email") return pattern === senderEmailLc;
+        if (entry.kind === "domain") {
+          const dom = pattern.startsWith("@") ? pattern.slice(1) : pattern;
+          return senderDomain === dom;
+        }
+        return false;
+      });
+      if (!matched) {
+        return {
+          accepted: false,
+          reason: "external-allowlist-miss",
+          error: `Sender ${senderEmailLc} is not on the recipient's allowlist.`,
+        };
+      }
+    }
+    return { accepted: true };
+  }
+
+  // Internal path: sender resolved to a users row. Apply
+  // internal_inbound_mode the same way receiveEmail does.
+  const mode = destinationRow.internal_inbound_mode;
+  if (mode === "none") {
+    return {
+      accepted: false,
+      reason: "internal-inbound-none",
+      error: `Recipient has disabled internal mail (internal_inbound_mode=none).`,
+    };
+  }
+  if (mode === "contacts_only") {
+    const contact = await env.DB.prepare(
+      "SELECT 1 FROM contacts WHERE owner_user_id = ?1 AND contact_user_id = ?2 AND status = 'accepted' AND declined_at IS NULL",
+    )
+      .bind(destinationRow.owner_user_id, senderUserId)
+      .first<{ "1": number }>();
+    if (!contact) {
+      return {
+        accepted: false,
+        reason: "internal-inbound-contacts-only",
+        error: `Recipient accepts internal mail only from contacts; sender is not an accepted contact.`,
+      };
+    }
+  }
+  return { accepted: true };
+}
+
 // ── Internal delivery ─────────────────────────────────────────────
 
 /**
@@ -124,6 +253,12 @@ export function decideSendPolicy(args: {
  *
  * Mirrors the inbound flow at workers/index.ts (the catch-all email handler)
  * which also writes via createEmail. Does NOT call env.EMAIL.send().
+ *
+ * Phase C2 / D-01: the inbound-policy gate (`evaluateInternalDeliveryPolicy`)
+ * is applied by the caller (the tool layer) BEFORE invoking deliverInternal,
+ * so the gate's rejection becomes a tool-caller-visible error rather than a
+ * silent INBOX write. deliverInternal itself remains pure-write — splitting
+ * the gate from the write keeps the test surface flat.
  *
  * Best-effort audit log: failures are swallowed so an audit-row write
  * never blocks delivery (matches appendAudit's contract).

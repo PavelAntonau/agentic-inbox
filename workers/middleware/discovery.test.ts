@@ -53,10 +53,27 @@ describe("authorizationServerMetadata (RFC 8414)", () => {
       `${ISSUER}/api/auth/oauth2/introspect`,
     );
     expect(meta.revocation_endpoint).toBe(`${ISSUER}/api/auth/oauth2/revoke`);
-    expect(meta.registration_endpoint).toBe(
-      `${ISSUER}/api/auth/oauth2/register`,
-    );
     expect(meta.jwks_uri).toBe(`${ISSUER}/jwks`);
+  });
+
+  it("Phase C2 / P1-7: registration_endpoint NOT advertised (DCR off for v0.1)", () => {
+    expect(meta.registration_endpoint).toBeUndefined();
+  });
+
+  it("Phase C2 / P1-6: token + introspection auth methods drop 'none'", () => {
+    expect(meta.token_endpoint_auth_methods_supported).toEqual([
+      "client_secret_basic",
+    ]);
+    expect(meta.introspection_endpoint_auth_methods_supported).toEqual([
+      "client_secret_basic",
+    ]);
+    // Revocation keeps 'none' — RFC 7009 explicitly allows public clients
+    // to revoke their own tokens, and the new tombstone makes that path
+    // safely effective.
+    expect(meta.revocation_endpoint_auth_methods_supported).toEqual([
+      "none",
+      "client_secret_basic",
+    ]);
   });
 
   it("advertises only MCP scopes — no openid", () => {

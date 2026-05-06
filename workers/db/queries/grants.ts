@@ -12,7 +12,7 @@
 // clauses to it. The route layer (workers/routes/agent-authorizations.ts)
 // supplies the value from authzContext.user_id.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { drizzle } from "drizzle-orm/d1";
 import * as schema from "../control-plane/schema";
 
@@ -129,18 +129,43 @@ export async function listAgentAuthorizations(
 }
 
 /**
- * Revoke the (userId, clientId) authorization end-to-end:
+ * Revoke the (userId, clientId) authorization end-to-end, transactionally.
  *
- *  - delete every oauth_access_token  WHERE user_id = ? AND client_id = ?
- *  - delete every oauth_refresh_token WHERE user_id = ? AND client_id = ?
- *  - delete every oauth_consent       WHERE user_id = ? AND client_id = ?
+ * Phase C2 / TASK-C2.2 (audit A-03): rewritten as a single `db.batch([...])`
+ * D1 statement so the four writes commit atomically.  The previous
+ * sequential `await orm.delete(...).run()` chain left an observable window
+ * after the access-token DELETE but before the refresh-token DELETE in
+ * which a refresh-rotation by the revoked client could mint a fresh
+ * access token from the still-present refresh row.  Audit's "race window
+ * around revoke" finding closes here.
  *
- * RFC 7009 §2.1 second paragraph: "If the particular token is a refresh token
- * and the authorization server supports the revocation of access tokens, then
- * the authorization server SHOULD also invalidate all access tokens based on
- * the same authorization grant." This implementation extends that to a
- * grant-level revoke initiated by the resource owner — every token derived
- * from the consent is invalidated atomically from the user's perspective.
+ * Phase C2 / TASK-C2.12 (audit P1-1, JWT revocation Path 2): the same
+ * batch INSERTs an `oauth_grant_tombstone` row keyed by (user, client)
+ * with `revoked_at = now`.  The /mcp bearer middleware reads the
+ * tombstone on every JWT request and rejects bearers whose iat predates
+ * the tombstone, so an in-flight access JWT minted moments before the
+ * revoke also gets cut off — without the tombstone, the JWT remains
+ * signature-valid until its 15-minute expiry.
+ *
+ * Operations performed in one batch:
+ *   1. INSERT INTO oauth_grant_tombstone — sets the iat-cutoff floor.
+ *      ON CONFLICT (user, client) DO UPDATE refreshes the floor when
+ *      the same grant is revoked twice (e.g. after the user re-grants
+ *      and revokes again — the new floor moves forward in time).
+ *   2. DELETE FROM oauth_access_token WHERE user_id=? AND client_id=?
+ *   3. DELETE FROM oauth_refresh_token WHERE user_id=? AND client_id=?
+ *   4. DELETE FROM oauth_consent       WHERE user_id=? AND client_id=?
+ *
+ * The pre-flight ownership lookup stays out of the batch — it's a SELECT
+ * (D1 batch is for writes) and we want to short-circuit early on 404.
+ *
+ * RFC 7009 §2.1 second paragraph: "If the particular token is a refresh
+ * token and the authorization server supports the revocation of access
+ * tokens, then the authorization server SHOULD also invalidate all access
+ * tokens based on the same authorization grant." We extend that to a
+ * grant-level revoke initiated by the resource owner — every token
+ * derived from the consent is invalidated atomically from the user's
+ * perspective, AND in-flight JWTs honour the tombstone.
  *
  * Returns null when no matching consent is owned by `userId` (the route
  * surfaces 404). On success, returns row counts for audit / observability.
@@ -150,8 +175,10 @@ export async function listAgentAuthorizations(
  */
 export async function revokeAgentAuthorization(
   orm: Orm,
+  db: D1Database,
   userId: string,
   clientId: string,
+  now: number = Date.now(),
 ): Promise<RevokeResult | null> {
   const owned = await orm
     .select({ id: schema.oauth_consent.id })
@@ -167,42 +194,57 @@ export async function revokeAgentAuthorization(
 
   if (!owned) return null;
 
-  const accessRes = await orm
-    .delete(schema.oauth_access_token)
-    .where(
-      and(
-        eq(schema.oauth_access_token.userId, userId),
-        eq(schema.oauth_access_token.clientId, clientId),
-      ),
+  // Bind the four writes against the underlying D1 binding so they land
+  // in a single D1 batch (atomic at the storage layer). Drizzle's
+  // `delete().run()` would issue 3 round-trips; D1 batch is one.
+  const tombstoneStmt = db
+    .prepare(
+      `INSERT INTO oauth_grant_tombstone (user_id, client_id, revoked_at)
+       VALUES (?1, ?2, ?3)
+       ON CONFLICT(user_id, client_id) DO UPDATE SET revoked_at = excluded.revoked_at`,
     )
-    .run();
+    .bind(userId, clientId, now);
 
-  const refreshRes = await orm
-    .delete(schema.oauth_refresh_token)
-    .where(
-      and(
-        eq(schema.oauth_refresh_token.userId, userId),
-        eq(schema.oauth_refresh_token.clientId, clientId),
-      ),
+  const accessStmt = db
+    .prepare(
+      `DELETE FROM oauth_access_token WHERE user_id = ?1 AND client_id = ?2`,
     )
-    .run();
+    .bind(userId, clientId);
 
-  const consentRes = await orm
-    .delete(schema.oauth_consent)
-    .where(
-      and(
-        eq(schema.oauth_consent.userId, userId),
-        eq(schema.oauth_consent.clientId, clientId),
-      ),
+  const refreshStmt = db
+    .prepare(
+      `DELETE FROM oauth_refresh_token WHERE user_id = ?1 AND client_id = ?2`,
     )
-    .run();
+    .bind(userId, clientId);
 
+  const consentStmt = db
+    .prepare(`DELETE FROM oauth_consent WHERE user_id = ?1 AND client_id = ?2`)
+    .bind(userId, clientId);
+
+  // Tombstone first — even if the deletes somehow failed mid-batch, the
+  // tombstone alone would still cut off in-flight JWTs. D1 guarantees
+  // atomicity, so this is belt-and-braces ordering, not a partial-fail
+  // strategy.
+  const results = await db.batch([
+    tombstoneStmt,
+    accessStmt,
+    refreshStmt,
+    consentStmt,
+  ]);
+
+  // results[0] is the tombstone INSERT (we don't read its rowCount).
   return {
-    consents_deleted: rowCount(consentRes),
-    access_tokens_deleted: rowCount(accessRes),
-    refresh_tokens_deleted: rowCount(refreshRes),
+    consents_deleted: rowCount(results[3]),
+    access_tokens_deleted: rowCount(results[1]),
+    refresh_tokens_deleted: rowCount(results[2]),
   };
 }
+
+// Suppress the "unused" lint on `sql` — it's intentionally imported for
+// future query construction in this file (the batch above uses raw SQL,
+// but follow-up additions should use the drizzle-tagged path when
+// possible).
+void sql;
 
 interface MaybeD1Result {
   meta?: { changes?: number };

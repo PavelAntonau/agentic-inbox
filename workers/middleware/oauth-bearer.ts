@@ -48,6 +48,7 @@ import {
 } from "../db/queries/pats";
 import { hashPat, PAT_PREFIX } from "../lib/pat-tokens";
 import type { Env } from "../types";
+import { and, eq } from "drizzle-orm";
 
 export const REQUIRED_AUDIENCE = "https://mail.actionnow.ai/mcp";
 export const REQUIRED_ISSUER = "https://mail.actionnow.ai";
@@ -69,7 +70,9 @@ export type BearerRejectReason =
   | "missing-azp"
   // PAT path (T3.3)
   | "pat-not-found"
-  | "pat-no-mcp-scope";
+  | "pat-no-mcp-scope"
+  // JWT revocation Path 2 (Phase C2 / TASK-C2.12, audit P1-1)
+  | "grant-revoked";
 
 /** Discriminator on a successful bearer validation. */
 export type BearerSource = "jwt" | "pat";
@@ -179,11 +182,20 @@ function getJwks(env: Env): ReturnType<typeof createLocalJWKSet> {
   return fresh;
 }
 
-/** Synthetic 8-char hex jti from a token string (audit-only correlator). */
+/**
+ * Synthetic 16-char hex jti from a token string (audit-only correlator).
+ *
+ * Phase C2 / A-08: widened from 8 hex chars (32-bit) to 16 hex chars
+ * (64-bit). At 8 hex chars the birthday-collision probability hits ~50%
+ * around 65k tokens; at 16 hex chars it's negligible across the full
+ * audit_log lifetime. We can't mint a real jti at sign time without
+ * forking better-auth's `signJWT`, so a wider hash gives the same
+ * audit-correlation guarantee without changing the JWT shape.
+ */
 async function syntheticJti(token: string): Promise<string> {
   const buf = new TextEncoder().encode(token);
   const hash = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(hash).slice(0, 4))
+  return Array.from(new Uint8Array(hash).slice(0, 8))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
@@ -206,6 +218,17 @@ export interface BearerDeps {
     now: number,
   ) => Promise<ActivePatRow | null>;
   touchPatLastUsed?: (env: Env, patId: string, now: number) => Promise<void>;
+  /**
+   * Phase C2 / TASK-C2.12: tombstone lookup for the JWT revocation Path 2.
+   * Returns the most-recent `revoked_at` (epoch ms) for `(userId, clientId)`,
+   * or null when no tombstone exists. The bearer middleware rejects JWTs
+   * whose `iat * 1000` is at or below `revoked_at`.
+   */
+  lookupGrantTombstone?: (
+    env: Env,
+    userId: string,
+    clientId: string,
+  ) => Promise<number | null>;
   now?: () => number;
   ctx?: { waitUntil(p: Promise<unknown>): void };
 }
@@ -226,6 +249,37 @@ async function defaultTouchPatLastUsed(
 ): Promise<void> {
   const orm = drizzle(env.DB, { schema });
   await touchPatLastUsedAt(orm, patId, now);
+}
+
+/**
+ * Phase C2 / TASK-C2.12 default tombstone lookup. One PK-indexed lookup
+ * per /mcp request; the table is keyed (user_id, client_id) PRIMARY KEY
+ * so this is a point read.
+ *
+ * Returns null when env.DB is not a real D1Database (test stubs that pass
+ * an empty {} object) — keeps the existing happy-path / rejection-path
+ * tests working without each one having to inject `lookupGrantTombstone`
+ * via deps. In production env.DB is always real, so the guard is a
+ * test-only escape hatch, not a security carve-out.
+ */
+async function defaultLookupGrantTombstone(
+  env: Env,
+  userId: string,
+  clientId: string,
+): Promise<number | null> {
+  if (typeof env.DB?.prepare !== "function") return null;
+  const orm = drizzle(env.DB, { schema });
+  const row = await orm
+    .select({ revoked_at: schema.oauth_grant_tombstone.revoked_at })
+    .from(schema.oauth_grant_tombstone)
+    .where(
+      and(
+        eq(schema.oauth_grant_tombstone.user_id, userId),
+        eq(schema.oauth_grant_tombstone.client_id, clientId),
+      ),
+    )
+    .get();
+  return row ? Number(row.revoked_at) : null;
 }
 
 /**
@@ -441,6 +495,33 @@ export async function validateBearer(
       bearer_error: "insufficient_scope",
       detail: `scope=${scopeStr}`,
     };
+  }
+
+  // Phase C2 / TASK-C2.12 — JWT revocation Path 2 (audit P1-1).
+  //
+  // The grant-tombstone read closes the window between "user revoked the
+  // grant" and "the still-valid JWT expires". oauth_grant_tombstone is
+  // populated atomically by revokeAgentAuthorization (workers/db/queries/
+  // grants.ts) inside the same d1.batch that deletes the consent + tokens.
+  // We compare `bearer.iat * 1000 <= revoked_at`: a token issued at or
+  // before the revoke moment is rejected; one issued after a previous
+  // revoke (i.e., the user re-granted, then a fresh JWT was minted) is
+  // honoured because revoked_at moves forward on each revoke (ON CONFLICT
+  // DO UPDATE in the migration).
+  //
+  // Cost: one PK lookup per /mcp request. Negligible vs the JWKS verify.
+  if (typeof payload.iat === "number") {
+    const lookupTombstone =
+      deps.lookupGrantTombstone ?? defaultLookupGrantTombstone;
+    const revokedAtMs = await lookupTombstone(env, payload.sub, azp);
+    if (revokedAtMs !== null && payload.iat * 1000 <= revokedAtMs) {
+      return {
+        ok: false,
+        reason: "grant-revoked",
+        bearer_error: "invalid_token",
+        detail: `iat=${payload.iat}; revoked_at=${revokedAtMs}`,
+      };
+    }
   }
 
   return {

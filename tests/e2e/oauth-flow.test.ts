@@ -180,8 +180,9 @@ describe.each(TRUSTED_CLIENTS)(
         // The full scope set the client requested round-trips through the
         // bearer middleware unchanged.
         expect(r.scopes).toEqual(client.scopes);
-        // azp set, jti synthesised from token bytes.
-        expect(r.jti).toMatch(/^[0-9a-f]{8}$/);
+        // azp set, jti synthesised from token bytes (Phase C2 / A-08:
+        // widened from 8 to 16 hex chars, 64-bit collision space).
+        expect(r.jti).toMatch(/^[0-9a-f]{16}$/);
       }
     });
 

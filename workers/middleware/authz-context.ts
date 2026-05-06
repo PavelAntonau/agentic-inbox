@@ -79,6 +79,15 @@ export function authzContext(): MiddlewareHandler<Ctx> {
     // Check for a valid better-auth session BEFORE the CF Access JWT path.
     // This allows the new auth surface to gate requests while CF Access remains
     // as a fallback (Phase 3 will remove CF Access entirely).
+    //
+    // Phase C2 / A-05: narrow the catch. The previous `catch {}` swallowed
+    // EVERY error — including D1 outages, schema-mismatch ORM errors, and
+    // upstream Worker bindings being unavailable. Silently falling through
+    // to the CF Access path on a D1 error is fail-OPEN: a request that
+    // should have authenticated as a real user becomes a "no jwt → next()"
+    // dev-bypass passthrough. Re-throw on D1-shaped errors so the supervisor
+    // converts them to a 5xx response; only swallow the "no session" /
+    // "session not found" / "expired" benign cases.
     try {
       const auth = createAuth(c.env);
       const baSession = await auth.api.getSession({
@@ -98,8 +107,23 @@ export function authzContext(): MiddlewareHandler<Ctx> {
           return next();
         }
       }
-    } catch {
-      // better-auth unavailable or threw — fall through to CF Access path
+    } catch (e) {
+      // Re-throw on D1 / database-shaped errors so the framework returns 5xx
+      // instead of silently downgrading to an unauthenticated-but-allowed
+      // request. Benign "no session" / "session expired" / fetch-cookie
+      // failures are swallowed (the original behaviour for those cases).
+      const err = e as { name?: string; code?: string; message?: string };
+      const msg = err.message ?? "";
+      const looksLikeDbError =
+        err.name === "D1Error" ||
+        err.name === "DrizzleError" ||
+        err.code === "SQLITE_ERROR" ||
+        /\bD1\b|\bSQLITE\b|\bdrizzle\b/i.test(msg) ||
+        /no such table|no such column|database is locked|unique constraint/i.test(
+          msg,
+        );
+      if (looksLikeDbError) throw e;
+      // benign auth-layer error — fall through to CF Access path
     }
 
     const jwt = c.var.jwt;
@@ -123,6 +147,14 @@ export function authzContext(): MiddlewareHandler<Ctx> {
       // Keyed by issued_to_user so each user's revoked-set is isolated (D-V2U-7).
       // Multi-tenancy ceiling: this is per-user, not per-account; a future
       // accounts table will let us promote the key to account_id.
+      //
+      // Phase C2 / A-06: fail-CLOSED on cache outage. The DB row was already
+      // checked above, but a freshly-issued revocation may not yet be visible
+      // in D1 (revocation writes go to the cache first as the source of truth
+      // for in-flight tokens). Silently falling through on cache failure
+      // means a request the user revoked seconds ago would still authenticate
+      // until D1 caught up. Return 503 with Retry-After so the caller backs
+      // off, the cache recovers, and the next attempt sees the correct state.
       try {
         const cacheId = c.env.REVOCATION_CACHE.idFromName(token.issued_to_user);
         const cacheStub = c.env.REVOCATION_CACHE.get(cacheId);
@@ -133,12 +165,19 @@ export function authzContext(): MiddlewareHandler<Ctx> {
             headers: { "Content-Type": "application/json" },
           }),
         );
-        if (cacheRes.ok) {
-          const { revoked } = (await cacheRes.json()) as { revoked: boolean };
-          if (revoked) return c.text("Token revoked", 401);
+        if (!cacheRes.ok) {
+          return new Response("RevocationCache unavailable", {
+            status: 503,
+            headers: { "Retry-After": "5" },
+          });
         }
+        const { revoked } = (await cacheRes.json()) as { revoked: boolean };
+        if (revoked) return c.text("Token revoked", 401);
       } catch {
-        // RevocationCache unavailable — fall through to DB state (already checked above)
+        return new Response("RevocationCache unavailable", {
+          status: 503,
+          headers: { "Retry-After": "5" },
+        });
       }
 
       // Step 3: AgentTokenLimiter — enforce max_instances cap
@@ -147,6 +186,12 @@ export function authzContext(): MiddlewareHandler<Ctx> {
         // Synthesize from IP + UA when header absent
         `${c.req.header("cf-connecting-ip") ?? "unknown"}:${c.req.header("user-agent") ?? ""}`;
 
+      // Phase C2 / C-03: fail-CLOSED on limiter outage. The previous code
+      // silently allowed every service-token request through whenever the
+      // AgentTokenLimiter DO was unreachable — a single DO failure became a
+      // workspace-wide max_instances bypass. Treat any non-2xx response or
+      // network error as 429 + Retry-After:5 so the caller backs off and
+      // the policy is enforced on the next attempt.
       try {
         const settingsRows = await getSettings(c.env.DB);
         const idleSetting = settingsRows.find(
@@ -168,17 +213,24 @@ export function authzContext(): MiddlewareHandler<Ctx> {
             headers: { "Content-Type": "application/json" },
           }),
         );
-        if (limiterRes.ok) {
-          const result = (await limiterRes.json()) as { accepted: boolean };
-          if (!result.accepted) {
-            return c.text(
-              `Max instances (${token.max_instances}) reached for this token`,
-              429,
-            );
-          }
+        if (!limiterRes.ok) {
+          return new Response("AgentTokenLimiter unavailable", {
+            status: 429,
+            headers: { "Retry-After": "5" },
+          });
+        }
+        const result = (await limiterRes.json()) as { accepted: boolean };
+        if (!result.accepted) {
+          return c.text(
+            `Max instances (${token.max_instances}) reached for this token`,
+            429,
+          );
         }
       } catch {
-        // Limiter unavailable — allow through (fail-open for availability)
+        return new Response("AgentTokenLimiter unavailable", {
+          status: 429,
+          headers: { "Retry-After": "5" },
+        });
       }
 
       // Resolve the user the token was issued to.
@@ -189,6 +241,23 @@ export function authzContext(): MiddlewareHandler<Ctx> {
         .get();
       if (!user || user.status !== "active")
         return c.text("Token user inactive", 403);
+
+      // Phase C2 / A-02: enforce ACL intersection between the token's
+      // bound mailbox and the user's CURRENT authorized set. The token's
+      // mailbox_id is captured at issuance time and never re-checked, so a
+      // user removed from a group (or whose group_mailbox row was revoked)
+      // could keep using their service token to access a mailbox they no
+      // longer have human-path access to. Build the user's live authorized
+      // set the same way buildHumanAuthzContext does, then assert the
+      // token's mailbox is still in it (or the user is global).
+      const isGlobal =
+        user.role === "global_owner" || user.role === "global_admin";
+      if (!isGlobal) {
+        const userCtx = await buildHumanAuthzContext(orm, user);
+        if (!userCtx.authorized_mailbox_ids.includes(token.mailbox_id)) {
+          return c.text("Service token mailbox access revoked", 403);
+        }
+      }
 
       // Service tokens are scoped to ONE mailbox; group_ids = []
       c.set("authzContext", {

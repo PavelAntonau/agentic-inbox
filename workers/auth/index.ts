@@ -171,14 +171,22 @@ export function createAuth(env: Env): ServerAuth {
   const db = drizzle(env.DB, { schema });
   const staticSigningKey = loadStaticSigningKey(env);
 
+  // Phase C2 / P1-5: localhost trustedOrigins are gated to DEV builds only.
+  // Listing localhost in prod's `trustedOrigins` lets better-auth's CSRF
+  // checks accept POSTs whose Origin is `http://localhost:5173`, which is
+  // exactly the bypass surface the production workspace MUST refuse.
+  // import.meta.env.DEV is true under Vite (`npm run dev`) and Vitest;
+  // false in the deployed Worker runtime.
+  const isDev = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+  const trustedOrigins = ["https://mail.actionnow.ai"];
+  if (isDev) {
+    trustedOrigins.push("http://localhost:5173", "http://localhost:8787");
+  }
+
   const auth = betterAuth({
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL ?? "https://mail.actionnow.ai",
-    trustedOrigins: [
-      "https://mail.actionnow.ai",
-      "http://localhost:5173",
-      "http://localhost:8787",
-    ],
+    trustedOrigins,
 
     database: drizzleAdapter(db, {
       provider: "sqlite",

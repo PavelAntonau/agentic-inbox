@@ -30,12 +30,32 @@ export interface CanActResult {
 /**
  * Determine whether `actor` may perform `action` on `target`.
  *
+ * Phase C2 / A-07: type-level required parameters. The previous signature
+ * accepted optional `adminCap` / `currentAdminCount`, which let callers
+ * either forget to pass them (silently disabling the cap check) or pass
+ * `undefined` from a parse failure (`NaN >= NaN === false` defeats the
+ * comparison too — see the F-AU3 lesson). Splitting promote into its own
+ * required-args overload forces the call site to compute both values OR
+ * fail-CLOSED on parse failure before reaching this predicate.
+ *
  * @param actor   Reduced auth context for the requesting user
  * @param target  D1 user row (with owns_mailboxes_count pre-joined)
  * @param action  One of 'promote' | 'demote' | 'remove'
- * @param adminCap  Current max_global_admins setting (for promote cap check)
- * @param currentAdminCount  Current count of global_admin users in workspace
+ * @param adminCap            Current max_global_admins setting (REQUIRED for promote)
+ * @param currentAdminCount   Current count of global_admin users (REQUIRED for promote)
  */
+export function canAct(
+  actor: ActorRef,
+  target: TargetUser,
+  action: "promote",
+  adminCap: number,
+  currentAdminCount: number,
+): CanActResult;
+export function canAct(
+  actor: ActorRef,
+  target: TargetUser,
+  action: "demote" | "remove",
+): CanActResult;
 export function canAct(
   actor: ActorRef,
   target: TargetUser,
@@ -59,12 +79,21 @@ export function canAct(
       if (actor.role !== "global_owner" && actor.role !== "global_admin") {
         return { ok: false, reason: "forbidden" };
       }
-      // Cap check
+      // Cap check — type system guarantees these are numbers when action ===
+      // "promote" via the overload signature above. The runtime guard below
+      // mirrors that contract for callers that bypass the overload (older JS
+      // call sites or dynamic dispatch). NaN trips the guard too: NaN !==
+      // typeof === "number" is false, so we'd allow through silently.
+      // Treat NaN as a misconfiguration and fail-CLOSED.
       if (
-        adminCap !== undefined &&
-        currentAdminCount !== undefined &&
-        currentAdminCount >= adminCap
+        typeof adminCap !== "number" ||
+        Number.isNaN(adminCap) ||
+        typeof currentAdminCount !== "number" ||
+        Number.isNaN(currentAdminCount)
       ) {
+        return { ok: false, reason: "admin-cap-misconfigured" };
+      }
+      if (currentAdminCount >= adminCap) {
         return { ok: false, reason: "admin-cap-reached" };
       }
       return { ok: true };

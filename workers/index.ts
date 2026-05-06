@@ -79,13 +79,23 @@ app.use(
     origin: (origin) => {
       // Same-origin requests have no Origin header — allow them.
       if (!origin) return origin;
-      // In development, allow localhost for Vite dev server.
-      try {
-        const url = new URL(origin);
-        if (url.hostname === "localhost" || url.hostname === "127.0.0.1")
-          return origin;
-      } catch {
-        /* invalid origin */
+      // Phase C2 / P1-4: localhost reflection is gated to DEV builds only.
+      // In production the localhost branch is dead code; reflecting it
+      // would let a developer running a local proxy on the user's machine
+      // mount cross-origin requests against mail.actionnow.ai. The cors
+      // middleware never sees the gate in prod because import.meta.env.DEV
+      // is false in the Workers runtime.
+      const isDev = Boolean(
+        (import.meta as { env?: { DEV?: boolean } }).env?.DEV,
+      );
+      if (isDev) {
+        try {
+          const url = new URL(origin);
+          if (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+            return origin;
+        } catch {
+          /* invalid origin */
+        }
       }
       // Block all other cross-origin requests. The app is served from the
       // same origin as the API, so legitimate browser requests never send

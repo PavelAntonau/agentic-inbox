@@ -4,10 +4,59 @@
 import type { Env } from "../types";
 
 // -----------------------------------------------------------------------
-// In-memory mock set — consistent within a single worker invocation
+// Mock-mode predicate (Phase C2 / A-04)
 // -----------------------------------------------------------------------
-
+//
+// The mock path silently swallows policy mutations into an in-memory Set,
+// returning { ok: true, mocked: true }. That is essential for unit tests and
+// `npm run dev` (no CF account credentials present), but it is also a
+// silent-fail-OPEN in production: if the worker is deployed without
+// CF_ACCOUNT_ID, every invite-list write would be eaten by the mock with no
+// audit trail and no observable side effect.
+//
+// The previous implementation triggered mock mode on any of:
+//   1. MOCK_MODE === "1"           — explicit unit-test override.
+//   2. CF_ACCESS_DEV_MODE === "mock" — explicit dev override.
+//   3. !env.CF_ACCOUNT_ID            — fallback, but ALSO matches a misdeploy.
+//
+// Branch (3) is the bug. If the operator forgets to provision CF_ACCOUNT_ID
+// in production, branch (3) silently downgrades to mock mode and admin
+// invites never reach Cloudflare Access. Drop the implicit disjunct: in
+// non-dev, throw 503 instead of mocking.
+//
+// `import.meta.env.DEV` is true under Vite (`npm run dev`) and Vitest. In
+// the deployed Worker it is undefined / false — the canonical signal.
 const _mockEmailSet = new Set<string>();
+
+function isDevEnv(): boolean {
+  // Vite-injected; undefined in the Cloudflare Workers runtime.
+  return Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+}
+
+function evaluateMockMode(env: Env): {
+  mock: boolean;
+  reason?: "explicit-mock" | "dev-mode" | "no-account-id-prod";
+} {
+  if (env.MOCK_MODE === "1") return { mock: true, reason: "explicit-mock" };
+  if (env.CF_ACCESS_DEV_MODE === "mock")
+    return { mock: true, reason: "explicit-mock" };
+  if (!env.CF_ACCOUNT_ID) {
+    if (isDevEnv()) return { mock: true, reason: "dev-mode" };
+    return { mock: false, reason: "no-account-id-prod" };
+  }
+  return { mock: false };
+}
+
+function unavailableResponse(): {
+  ok: false;
+  error: string;
+} {
+  return {
+    ok: false,
+    error:
+      "Cloudflare Access policy unavailable: CF_ACCOUNT_ID is not provisioned",
+  };
+}
 
 // -----------------------------------------------------------------------
 // Cloudflare Access API helpers
@@ -92,13 +141,13 @@ export async function upsertEmail(
   env: Env,
   email: string,
 ): Promise<{ ok: boolean; mocked?: boolean; error?: string }> {
-  const isMock =
-    env.MOCK_MODE === "1" ||
-    env.CF_ACCESS_DEV_MODE === "mock" ||
-    !env.CF_ACCOUNT_ID;
-  if (isMock) {
+  const decision = evaluateMockMode(env);
+  if (decision.mock) {
     _mockEmailSet.add(email.toLowerCase());
     return { ok: true, mocked: true };
+  }
+  if (decision.reason === "no-account-id-prod") {
+    return unavailableResponse();
   }
 
   try {
@@ -131,13 +180,13 @@ export async function removeEmail(
   env: Env,
   email: string,
 ): Promise<{ ok: boolean; mocked?: boolean; error?: string }> {
-  const isMock =
-    env.MOCK_MODE === "1" ||
-    env.CF_ACCESS_DEV_MODE === "mock" ||
-    !env.CF_ACCOUNT_ID;
-  if (isMock) {
+  const decision = evaluateMockMode(env);
+  if (decision.mock) {
     _mockEmailSet.delete(email.toLowerCase());
     return { ok: true, mocked: true };
+  }
+  if (decision.reason === "no-account-id-prod") {
+    return unavailableResponse();
   }
 
   try {
