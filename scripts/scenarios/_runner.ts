@@ -93,13 +93,26 @@ function isTransportError(message: string | undefined): boolean {
 // Browser-mcp Streamable HTTP client (minimal MCP handshake + tool calls).
 // ────────────────────────────────────────────────────────────────────────────
 
+// Stable agent_id used for every browser-mcp call from the scenario runner.
+// Pinning to a per-runner namespace prevents cross-talk with concurrent agents
+// that share the anonymous pool (a real failure mode observed 2026-05-06 —
+// another agent's `noca-collab-recon` session became the "active" session in
+// the anonymous namespace mid-run, and our `browser_evaluate` calls landed on
+// the wrong session). Per-agent isolation gives the runner its own pool with
+// its own active-session pointer that no other agent can touch.
+const RUNNER_AGENT_ID =
+  process.env.SCENARIO_AGENT_ID ?? "agentic-inbox-scenarios";
+
 class BrowserMcp implements BrowserMcpClient {
   private mcpSessionId: string | null = null;
   private nextRpcId = 0;
   private sessionAlias: string | null = null;
   private initialized = false;
 
-  constructor(private readonly endpoint: string = BROWSER_MCP_URL) {}
+  constructor(
+    private readonly endpoint: string = BROWSER_MCP_URL,
+    private readonly agentId: string = RUNNER_AGENT_ID,
+  ) {}
 
   async init(): Promise<void> {
     if (this.initialized) return;
@@ -123,7 +136,14 @@ class BrowserMcp implements BrowserMcpClient {
     this.initialized = true;
   }
 
-  /** Open a fresh browser session and make it the active one. */
+  /** Open a fresh browser session and make it the active one.
+   *
+   * Each session is launched with `headed: false` (per-session override) so
+   * the autonomous-test runs always go headless regardless of the
+   * browser-mcp global default — and so launching test sessions cannot flip
+   * a concurrent agent's interactive headed window. Per-session
+   * isolation landed in browser-mcp 2026-05-06.
+   */
   async openSession(alias: string): Promise<void> {
     await this.init();
     await this.callTool("session_create", {
@@ -131,6 +151,8 @@ class BrowserMcp implements BrowserMcpClient {
       viewport_width: 1440,
       viewport_height: 900,
       device_scale_factor: 2,
+      headed: false,
+      agent_id: this.agentId,
     });
     this.sessionAlias = alias;
   }
@@ -138,7 +160,10 @@ class BrowserMcp implements BrowserMcpClient {
   async closeSession(): Promise<void> {
     if (!this.sessionAlias) return;
     try {
-      await this.callTool("session_close", { id_or_alias: this.sessionAlias });
+      await this.callTool("session_close", {
+        id_or_alias: this.sessionAlias,
+        agent_id: this.agentId,
+      });
     } catch {
       // Best-effort — server may have already evicted the session.
     } finally {
@@ -169,9 +194,15 @@ class BrowserMcp implements BrowserMcpClient {
     name: string,
     args: Record<string, unknown>,
   ): Promise<unknown> {
+    // Stamp every browser-mcp call with the runner's stable agent_id so all
+    // session-aware tools (browser_evaluate, browser_navigate, screenshot,
+    // session_close, etc.) resolve to the runner's own per-agent pool. The
+    // caller may explicitly override (rarely needed); otherwise we inject.
+    const stamped =
+      "agent_id" in args ? args : { ...args, agent_id: this.agentId };
     const res = await this.rpc({
       method: "tools/call",
-      params: { name, arguments: args },
+      params: { name, arguments: stamped },
     });
     if (res.error) {
       throw new Error(

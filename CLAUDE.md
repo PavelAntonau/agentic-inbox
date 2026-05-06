@@ -435,3 +435,67 @@ The pre-MTV2 "Sessions A–E" checklist has been replaced by
 [`.research/action-plan-agentic-inbox-mtv2-unified.md`](./.research/action-plan-agentic-inbox-mtv2-unified.md).
 That plan is the canonical history of how MTV2 was built; Phases 1–7 are all
 green as of the Phase 7 close-out commit.
+
+---
+
+## Phase A-D security audit — production-ready (2026-05-06)
+
+The `feature/autonomous-local-testing` branch shipped 4 security phases in one continuous session: Phase A (deploy local backlog, `61da57c1`), Phase B (file-by-file walkthrough, surfaced 6 NEW P0 + 7 NEW P1 + 19 NEW P2 + ~22 BUG/EDGE), Phase C1+C2+C3 (close-out, `213dbbda` → `33c0cb63` → `06ed5671`), Phase D (full regression + production-ready claim).
+
+**Net result:** 0 P0 / 0 P1 / 0 P2 / 0 BUG findings tracked open. 1046/1046 vitest. 36/37 × 3 cycles scenarios:all (S-INBOX-1 = documented Playwright flake). Worker `06ed5671` live on `mail.actionnow.ai`.
+
+### Cross-cutting patterns surfaced
+
+These show up everywhere in the codebase; treat them as first-class checks during any future security-adjacent change.
+
+1. **Wildcard middleware mounts have gaps at bare paths.** Hono's `app.use("/api/v1/mailboxes/:mailboxId/*", requireMailbox)` matches `:mailboxId/messages` and `:mailboxId/threads` but NOT bare `:mailboxId` (`PUT /api/v1/mailboxes/<id>`). Always pair the wildcard mount with a bare-path mount: `app.use("/api/v1/mailboxes/:mailboxId", requireMailbox)` immediately after. Phase C1's B-04 fix.
+2. **Fail-OPEN catches are silent broken locks.** Every `} catch {}` in an authz / authn / rate-limit / revocation path is a failure mode where the wrong answer (allow) wins on uncertainty. Convert each to fail-CLOSED with an explicit status (503 + Retry-After for transient infra; 401/403 for ambiguous identity). Phase C2's A-05/A-06/C-03/D-02 fixes.
+3. **Internal vs external delivery trust boundary.** When the system is BOTH the sender and the receiver — `internal-delivery.ts` short-circuits CF Email Routing — the inbound policy gates that protected `receiveEmail` did not apply. Internal sends could bypass spam/contact-status/policy checks. Phase C2's D-01 fix added the gates to internal delivery; Phase C3's BUG-D-1 then surfaced a related bug (R2-only existence check missing V2-D1-only mailboxes — silent inbound drop). The trust boundary lives at the *destination's policy*, not at the entry point.
+4. **OAuth JWT must narrow as tightly as PAT.** When OAuth (JWT-bearer) and PAT (raw-token) are both valid auth methods, the harder one (OAuth) must respect the same per-mailbox / per-tool / per-IP scopes the easier one does. Phase C1's C-01 fix plumbed `buildAuthzContextFromUserId` into OAuth dispatch so JWT bearers narrow the same way PATs do.
+5. **Wildcard-mount + new surface ≠ inheritance.** When you add a new mount path (`/agents/*`, V2 thread routes), the existing per-route gates do NOT automatically apply. Re-derive the authz needs from first principles for every new mount; don't assume sibling middleware covers you. Phase C1's C-02 + B-01/B-02 fixes.
+
+### Deploy procedure (canonical)
+
+`cloudflare-deploy` skill — one path, no exceptions. Token via Key MCP `cloudflare/api-token`, `npm run deploy` with `CLOUDFLARE_API_TOKEN` env var (token never lands on disk). Never `wrangler login`. Skip via `release/python/scripts/deploy_cloudflare.py [--skip-gates] [--dry-run]` for one-shot scripted deploys.
+
+Pre-deploy gates (skill-enforced): clean git tree, `npm test` green, `npm run typecheck` (the 2 documented MOCK_MODE warnings tolerated), `scenarios:all` ≥27/37 across 3 cycles. Post-deploy: probe matrix per finding (curls confirming each closed exploit returns the expected 4xx).
+
+### Post-deploy probe matrix (canonical)
+
+For every security-relevant change, after deploy and before declaring done, run the following 6-probe matrix against `https://mail.actionnow.ai/`:
+
+```bash
+# A-01 invite gate
+curl -fsS -X POST https://mail.actionnow.ai/api/auth/sign-in/email-otp \
+  -H 'content-type: application/json' \
+  -d '{"email":"never-invited@example.com"}'  # expect 403 (CF Access fronts; behind it, 403)
+
+# B-01/B-02 V2 thread IDOR
+curl -fsS https://mail.actionnow.ai/api/mailboxes/<other-user-mailbox>/threads/<id>  # 403
+
+# B-03 V1 list narrowing — must return ONLY caller's authorised set
+curl -fsS https://mail.actionnow.ai/api/v1/mailboxes -H 'authorization: Bearer <pat>'
+
+# B-04 V1 bare PUT/DELETE
+curl -fsS -X PUT https://mail.actionnow.ai/api/v1/mailboxes/<other-user-mailbox>  # 403
+
+# C-01 OAuth JWT mailbox narrowing
+curl -fsS -X POST https://mail.actionnow.ai/mcp \
+  -H 'authorization: Bearer <jwt>' \
+  -H 'content-type: application/json' \
+  -d '{"method":"tools/call","params":{"name":"get_email","arguments":{"mailboxId":"<other-user-mailbox>"}}}'  # insufficient_scope
+
+# C-02 EmailAgent authz gate
+curl -fsS https://mail.actionnow.ai/agents/email-agent/<other-user-mailbox>  # 403
+```
+
+Discovery doc state: `auth_methods_supported = ["client_secret_basic"]` (no `"none"` for introspection); `registration_endpoint` absent (DCR not advertised, P1-7 stop-advertising).
+
+### `scenarios:all` runner — per-agent isolation (post-2026-05-06)
+
+The autonomous-local-testing runner now stamps every browser-mcp call with a stable `agent_id="agentic-inbox-scenarios"` (override via `SCENARIO_AGENT_ID` env). Each session is launched with `headed: false` per session, not via the process-wide `set_headed`. Two consequences:
+
+- Cross-agent anonymous-namespace cross-talk is impossible — the runner's pool is private.
+- One agent's autonomous tests cannot flip another agent's interactive headed window. Fix landed in `python/mcp/browser_mcp/` 2026-05-06 (per-session `headless` field on `Session`, `headed: bool | None` on `session_create`).
+
+If a future CI runs scenarios on a fresh machine: nothing extra needed — `agent_id` defaults are sufficient; `npx playwright install chromium` is the only one-shot setup.

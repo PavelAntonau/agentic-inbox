@@ -251,3 +251,105 @@ covers 3 cycles + setup + slack), confirmed reachable via
   to a single death event; one diagnostic call beats 14 retries.
 
 ---
+
+---
+
+## L-2026-05-06 — Wildcard middleware mounts have gaps at bare paths (5-fix Phase C1 root cause)
+
+**Context.** Phase B walkthrough surfaced 6 NEW P0 findings. Five of them — A-01, B-01/B-02, B-03, B-04, C-02 — collapsed into one root cause when laid side by side. Each was a different symptom of the same architectural mistake.
+
+**Root cause.** Hono's wildcard middleware mount `app.use("/api/v1/mailboxes/:mailboxId/*", requireMailbox)` matches every sub-path beneath `:mailboxId/` but NOT the bare path itself. So `GET /api/v1/mailboxes/<other-user-mailbox>/messages` is gated, but `PUT /api/v1/mailboxes/<other-user-mailbox>` is not. The same gap recurred when V2 routes (`/api/mailboxes/:mailboxId/threads/...`) were added without an analogous middleware (no V2 equivalent of `requireMailbox` existed); when the EmailAgent surface was mounted at `/agents/*` (no per-mailbox authz at all); and when OAuth JWT was added as a parallel auth method to PAT (the `dispatchMcpRequest` path didn't run the per-mailbox narrowing the PAT path did).
+
+**Fix (Phase C1, single PR `af2f626`).** Five surgical mounts:
+
+```ts
+// B-04: bare-path mount alongside the existing wildcard
+app.use("/api/v1/mailboxes/:mailboxId", requireMailbox);
+
+// B-01/B-02: V2 wildcard mount mirroring V1
+app.use("/api/mailboxes/:mailboxId/*", requireMailboxV2);
+
+// C-02: per-mailbox authz at the agent surface mount
+app.all("/agents/email-agent/:mailboxId", agentAuthzGate);
+
+// C-01: OAuth JWT now runs the same buildAuthzContextFromUserId path PAT does
+// (see workers/app.ts dispatchMcpRequest — bearer.user_id flows into authzContext)
+```
+
+**Prevention.**
+
+- **Always pair a wildcard mount with a bare-path mount.** `app.use("X/*", mw)` does not include `X`. Make this a checklist item in every PR that adds a Hono mount.
+- **When adding a new mount surface, re-derive authz from first principles.** Don't assume "the existing middleware covers it" — middleware applies to its mount path, not to anything that semantically resembles it.
+- **For parallel auth methods (PAT + JWT, etc.), the harder method must respect the easier method's scopes.** A JWT bearer must narrow to per-mailbox / per-tool / per-IP exactly the way a PAT does, otherwise the harder credential is a bypass.
+
+---
+
+## L-2026-05-06 — Fail-OPEN catches are silent broken locks (Phase C2 fail-CLOSED sweep)
+
+**Context.** Phase B walkthrough cataloged 13 P1 findings. Eight of them shared a single shape: a `} catch {}` (no error binding, no logging, no rethrow) in an authz / authn / rate-limit / revocation / DKIM-verify path. Each one was a "failure mode where the wrong answer (allow) wins on uncertainty."
+
+**Root cause.** Catches without error-classification treat every exception identically. In a security-critical path, the exception classes are not interchangeable: `D1_ERROR: connection lost` (transient infra — fail-CLOSED with 503 + Retry-After) is fundamentally different from `JWT signature invalid` (caller error — 401). Lumping them under `} catch {}` and continuing as "ok" hands an attacker a way to force the failure mode that allows.
+
+**Fix (Phase C2, single PR `c46c129`).** Every fail-OPEN site converted to fail-CLOSED with the appropriate status:
+
+| Site | Old behavior | New behavior |
+|------|--------------|--------------|
+| `authz-context.ts:101-103` better-auth fetch | `catch {}` → continue with `null` user | re-throw on D1 errors; log + 503 |
+| `authz-context.ts:140-142` RevocationCache | `catch {}` → assume not revoked | 503 + `Retry-After: 5` on DO error |
+| `authz-context.ts:180-182` AgentTokenLimiter | `catch {}` → allow | 429 + `Retry-After: 5`; tighten any non-2xx to fail-CLOSED |
+| `verifyDraft` AI error | empty body returned | original body preserved (availability) |
+| `cloudflare-access-policy.ts` mock disjunct | non-prod fallback always | 503 in non-DEV; mock only when `import.meta.env.DEV` |
+| `peer-protection.ts:63-69` admin-cap parse | optional fields | required at type level; force callers to fail-CLOSED on parse failure |
+
+**Prevention.**
+
+- **`} catch {}` (no binding) is forbidden in any authz/authn/rate-limit/revocation path.** Add an ESLint rule or pre-commit grep to fail PRs that introduce one.
+- **Choose the right status for the failure class.** Transient infra → 503 + Retry-After. Caller error → 401/403. Hard limit → 429 + Retry-After. Silent allow is never the right answer in a security-critical path.
+- **Type-level enforcement beats runtime enforcement.** If a field is "required for the security check", make it required in the type — the compiler surfaces every broken caller, not the next pentest.
+
+---
+
+## L-2026-05-06 — Internal-vs-external trust boundary lives at the destination's policy (Phase C2 D-01 + Phase C3 BUG-D-1)
+
+**Context.** `internal-delivery.ts` short-circuits Cloudflare Email Routing when both sender and receiver are workspace mailboxes. The savings are real (no per-destination CF verification, faster delivery), but the implementation initially elided the inbound policy gates that protected `receiveEmail`. Internal sends could bypass spam / contact-status / policy checks. Then in Phase C3, a related bug surfaced: when V2 self-service mailbox creation was routed through D1 (no R2 settings JSON), `receiveEmail`'s existence check (R2-only) silently dropped all inbound mail to V2 mailboxes — no error, no bounce, no audit row.
+
+**Root cause.** The trust boundary is the *destination's policy*, not the *entry point*. Whether mail arrives via CF Email Routing (external sender) or via `internal-delivery.ts` (workspace sender), the destination's `external_inbound_enabled`, contact-status, and spam policies should run identically. The Phase C3 V2-mailbox-drop bug is the same shape: the existence check at the destination's policy boundary needed to consider every store the destination might live in (D1 OR R2), not just the historical R2 path.
+
+**Fix.** Phase C2 D-01 plumbed `inboundPolicyGate(destination, sender)` into `internal-delivery.ts`'s send path; Phase C3's `e753e54` extended `receiveEmail`'s existence check to accept either D1 OR R2 mailbox rows.
+
+**Prevention.**
+
+- **Trust boundary = destination policy. Always.** Don't gate on the entry point; gate on what the destination is configured to accept. This makes new entry points (a future "internal direct API" send, a future "scheduled-send" path, etc.) automatically inherit the right policy.
+- **Existence checks must consider every store an entity may live in.** Each storage backend (D1, R2, KV, DO) is a side door if the existence check has not been audited for completeness. When a new store is added, audit every `does X exist?` call site.
+
+---
+
+## L-2026-05-06 — browser-mcp set_headed was process-wide; per-session isolation is the fix
+
+**Context.** During Phase D's autonomous test cycles, the user surfaced two separate but related cross-agent friction modes:
+
+1. **Headed/headless flip cascade.** I called `browser_set_headed(false)` to run scenarios headlessly. Another agent on the same machine — running an interactive headed session — observed their browser silently flip to headless. Conversely, when the other agent flipped back to headed for their work, my next `session_create` inherited headed and a Chrome window popped open mid-scenario.
+2. **Anonymous-namespace cross-talk.** Cycle 3 of `scenarios:all` had 5 consecutive failures clustered at one timestamp. The failure logs surfaced a different agent's session alias (`noca-collab-recon`) appearing as the "active" session for our `browser_evaluate` calls — our scenarios' `browser_navigate` set `our` session active, but the next agent's `session_connect` flipped active to theirs in the shared anonymous pool.
+
+**Root cause.** Two separate but related design defects in `python/mcp/browser_mcp/`:
+
+1. The `headless` flag was process-wide, captured at `SessionManager.__init__` and read at every `chromium.launch_persistent_context(headless=self._headless)`. `set_headless` flipped the flag AND closed every existing session because the flag was a launch-time argument that couldn't be changed in place.
+2. The runner used the anonymous `agent_id` namespace by default. The "active session" for that namespace was a single global pointer that any agent could flip via `session_connect` or via `session_create` setting the new one active.
+
+**Fix (this session).**
+
+1. **`Session` dataclass gained `headless: bool`** captured at `create_session` time. `create_session(headless: bool | None = None)` resolves `effective_headless = self._headless if headless is None else bool(headless)` and passes it to the launch closure. Two sessions can coexist with opposite modes; the launch arg is per-session, not global.
+2. **`set_headless` semantics changed**: it only updates the default for FUTURE sessions. Existing sessions keep their captured flag. No sessions are closed.
+3. **Status / session-info responses expose the per-session flag** so agents can audit who is in what mode.
+4. **`session_create` exposes `headed: bool | None`** at the MCP boundary (more agent-friendly than `headless: bool | None`). Internally maps to `headless = None if headed is None else not headed`.
+5. **`agentic-inbox/scripts/scenarios/_runner.ts` stamps every call with `agent_id="agentic-inbox-scenarios"`** (override via `SCENARIO_AGENT_ID`) and passes `headed: false` per session. Cross-agent isolation is now structural, not advisory.
+
+8 new tests in `python/mcp/browser_mcp/tests/test_per_session_headless.py` cover: (1) `set_headless` does not close existing sessions; (2) per-session override beats global default; (3) two sessions with opposite modes coexist; (4) status / session-info expose the flag.
+
+**Prevention.**
+
+- **Treat process-wide flags in shared MCP services as anti-patterns.** When a flag affects how a session was launched, capture it on the session, not on the manager. The manager owns "the default for new sessions"; the session owns "what I was launched with."
+- **Anonymous shared pools are footguns under multi-agent load.** Stamp every session with a stable `agent_id` even in single-agent code paths. The runner's `SCENARIO_AGENT_ID` defaulting pattern (env-overrideable, sensible default) is the right shape.
+- **When a feature is "process-wide" and you can't see why, that's the bug.** Per-session is almost always achievable; "Playwright doesn't expose a per-session toggle" was the surface excuse — the real toggle is the launch arg, and that IS per-session because each session launches its own Chrome process. The original assumption was wrong; flagging it surfaced the structural fix.
+
+This is a reprimand-class cross-agent reliability fix, not just a project-local tweak. The browser-mcp change benefits every agent on the machine, not just the agentic-inbox runner.
