@@ -522,27 +522,6 @@ describe("validateBearer — PAT rejection paths", () => {
     expect(touched.calls).toBe(0);
   });
 
-  it("falls back to 'dev-pepper' when TOKEN_PEPPER is unset (matches T3.1 mint)", async () => {
-    // T3.1's routes/pats.ts uses `env.TOKEN_PEPPER ?? "dev-pepper"` to MINT.
-    // T3.3 must use the same fallback to VERIFY or PATs minted under the
-    // fallback would silently fail to authenticate. This test pins the
-    // contract: middleware proceeds with the dev-pepper hash and the lookup
-    // gets called (it's the lookup that decides accept/reject).
-    const { env: baseEnv } = await setupPatEnv();
-    const env = { ...baseEnv, TOKEN_PEPPER: undefined } as Env;
-    const token = generatePat();
-    let observedHash: string | null = null;
-    const { deps } = makeDeps({ pat: null });
-    deps.lookupPatByHash = async (_e, hash) => {
-      observedHash = hash;
-      return null;
-    };
-
-    await validateBearer(makeRequest(`Bearer ${token}`), env, deps);
-    const expectedFallbackHash = await hashPat(token, "dev-pepper");
-    expect(observedHash).toBe(expectedFallbackHash);
-  });
-
   it("PAT-prefixed token still respects the session-cookie guard", async () => {
     const { env } = await setupPatEnv();
     const token = generatePat();

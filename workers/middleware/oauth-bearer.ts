@@ -241,11 +241,15 @@ async function validatePatBearer(
   env: Env,
   deps: BearerDeps,
 ): Promise<BearerResult> {
-  // Mirror T3.1's `routes/pats.ts` fallback exactly — both surfaces MUST
-  // use the same pepper value or hashes diverge and PATs silently fail.
-  // The "dev-pepper" string is the documented dev-only constant; production
-  // sets TOKEN_PEPPER as a Worker secret.
-  const pepper = env.TOKEN_PEPPER ?? "dev-pepper";
+  // Mirror T3.1's `routes/pats.ts`: both surfaces MUST throw when
+  // TOKEN_PEPPER is unset — fail-closed. A misdeploy that loses the secret
+  // surfaces as a 500, not as silent degradation to a known-bad pepper.
+  const pepper = env.TOKEN_PEPPER;
+  if (!pepper) {
+    throw new Error(
+      "TOKEN_PEPPER must be set as a Worker secret in production",
+    );
+  }
 
   const now = (deps.now ?? Date.now)();
   const hash = await hashPat(token, pepper);

@@ -197,8 +197,13 @@ router.post("/mailboxes/:mailboxId/tokens", async (c) => {
     );
   }
 
-  // HMAC-SHA256 the secret with TOKEN_PEPPER
-  const pepper = c.env.TOKEN_PEPPER ?? "dev-pepper";
+  // HMAC-SHA256 the secret with TOKEN_PEPPER (fail-closed; matches PAT mint).
+  const pepper = c.env.TOKEN_PEPPER;
+  if (!pepper) {
+    throw new Error(
+      "TOKEN_PEPPER must be set as a Worker secret in production",
+    );
+  }
   const secretHash = await hashSecret(cfToken.client_secret, pepper);
 
   // Persist to D1

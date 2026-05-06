@@ -97,7 +97,12 @@ router.post("/", async (c) => {
     return c.json({ error: "expires_at must be in the future" }, 400);
   }
 
-  const pepper = c.env.TOKEN_PEPPER ?? "dev-pepper";
+  const pepper = c.env.TOKEN_PEPPER;
+  if (!pepper) {
+    throw new Error(
+      "TOKEN_PEPPER must be set as a Worker secret in production",
+    );
+  }
   const minted = await mintPat(pepper);
 
   const pat = await insertPat(orm, {
