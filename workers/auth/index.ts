@@ -15,10 +15,12 @@
 // binding (zero new dependencies). See sendOtpEmail() below.
 
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { emailOTP, jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { drizzle } from "drizzle-orm/d1";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "../lib/mocks/email-binding";
@@ -72,6 +74,56 @@ function loadStaticSigningKey(env: Env): StaticSigningJwk {
     privateKey: JSON.stringify(parsed.privateJwk),
     createdAt: new Date(0),
   };
+}
+
+/**
+ * Phase C1 / A-01 — invite-required signup decision (extracted for tests).
+ *
+ * Returns a `data` object the better-auth `before(user)` hook can return
+ * verbatim, OR throws `APIError("FORBIDDEN")` when the email is neither the
+ * bootstrap-owner nor on the invite list. The hook itself just calls this
+ * helper; keeping the predicate pure-by-injection (env + drizzle) lets the
+ * unit suite exercise every branch without spinning up a full better-auth
+ * runtime.
+ *
+ * Permitted creation paths (fail-CLOSED otherwise):
+ *   1. BOOTSTRAP_OWNER_EMAIL — promotes to `global_owner` role.
+ *   2. A `group_invitations` row matching the lower-cased email with
+ *      status in {pending, accepted}.
+ */
+export async function evaluateSignupGate<U extends { email?: unknown }>(
+  user: U,
+  env: Env,
+  orm: ReturnType<typeof drizzle>,
+): Promise<{ data: U }> {
+  const rawEmail = typeof user?.email === "string" ? user.email : "";
+  const normalizedEmail = rawEmail.trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw new APIError("FORBIDDEN", {
+      message: "Email is required for sign-up.",
+    });
+  }
+  if (isBootstrapEmail(rawEmail, env)) {
+    return { data: { ...user, role: "global_owner" } as U };
+  }
+  const invite = await orm
+    .select({ id: schema.group_invitations.id })
+    .from(schema.group_invitations)
+    .where(
+      and(
+        eq(
+          sql`lower(${schema.group_invitations.invitee_email})`,
+          normalizedEmail,
+        ),
+        inArray(schema.group_invitations.status, ["pending", "accepted"]),
+      ),
+    )
+    .get();
+  if (invite) return { data: user };
+  throw new APIError("FORBIDDEN", {
+    message:
+      "Sign-up is invite-only. Ask a workspace administrator to invite this email.",
+  });
 }
 
 /** Minimal session shape returned by better-auth's getSession. */
@@ -313,17 +365,31 @@ export function createAuth(env: Env): ServerAuth {
     databaseHooks: {
       user: {
         create: {
-          // Bootstrap-owner: when a user signs in for the first time and
-          // their email matches BOOTSTRAP_OWNER_EMAIL, promote to global_owner.
-          // Predicate is shared with bootstrapOwner() (CF Access path) so
-          // both promotion routes stay aligned (audit fix A-1, graph:
-          // avWqp-pNgG5Df1BboqefB — the prior implementation compared
-          // without `.trim()` and would diverge on a whitespace-padded env).
+          // Phase C1 / A-01 — invite-list-required user creation.
+          //
+          // emailOTP's sign-in flow creates a `users` row on first OTP success
+          // when no row exists for that email. Without this gate ANY external
+          // address can sign up by completing an OTP cycle, which becomes
+          // privilege escalation the moment an admin shares a mailbox with
+          // them or invites their email to a group. Subsumes audit P0-7
+          // (bootstrap self-promotion is one symptom of unrestricted user
+          // creation).
+          //
+          // Permitted creation paths (fail-CLOSED otherwise):
+          //   1. BOOTSTRAP_OWNER_EMAIL (whitespace-tolerant, case-insensitive
+          //      match via `isBootstrapEmail`). Promotes to `global_owner`
+          //      to keep parity with the CF Access bootstrap path.
+          //   2. A `group_invitations` row matching the lower-cased email
+          //      with status in {pending, accepted}. Both states evidence
+          //      an admin invitation: the row is minted with `pending`, and
+          //      the invitee may accept BEFORE the user row exists in some
+          //      flows — accept either.
+          //
+          // Anything else throws `APIError("FORBIDDEN")`. The OTP / sign-in
+          // pipeline surfaces the rejection to the caller as a 403.
           async before(user) {
-            if (isBootstrapEmail(user.email, env)) {
-              return { data: { ...user, role: "global_owner" } };
-            }
-            return { data: user };
+            const orm = drizzle(env.DB, { schema });
+            return evaluateSignupGate(user, env, orm);
           },
         },
       },

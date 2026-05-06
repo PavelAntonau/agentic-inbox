@@ -276,7 +276,15 @@ export type T36RejectReason =
   | "pat-ip-not-allowed"
   | "tool-scope-required"
   | "pat-mailbox-arg-required"
-  | "pat-mailbox-mismatch";
+  | "pat-mailbox-mismatch"
+  // Phase C1 / C-01 — generic mailbox-narrowing for OAuth JWT (and PAT
+  // without mailbox_id binding). `tool-mailbox-arg-required` fires when a
+  // MAILBOX_BOUND_TOOLS call omits its `mailboxId` argument; the bearer
+  // is otherwise valid. `mailbox-not-authorized` fires when the resolved
+  // mailbox is outside the caller's `authorized_mailbox_ids` (intersected
+  // with PAT mailbox_id when set).
+  | "tool-mailbox-arg-required"
+  | "mailbox-not-authorized";
 
 /**
  * Build a 403 `insufficient_scope` response with the same `WWW-Authenticate`

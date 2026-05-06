@@ -94,6 +94,13 @@ app.use(
     },
   }),
 );
+// Phase C1 / B-04: Hono's `/foo/:p/*` mount only matches sub-paths, NOT the
+// bare `/foo/X` triplet — so the V1 mailboxId middleware below was leaving
+// GET / PUT / DELETE on `/api/v1/mailboxes/:mailboxId` ungated. PUT in
+// particular overwrites the R2 settings JSON (forwarding / autoreply /
+// agentSystemPrompt) without authz, which is a single-curl mail-exfil
+// primitive. Mount the gate on BOTH the bare path AND the wildcard subtree.
+app.use("/api/v1/mailboxes/:mailboxId", requireMailbox);
 app.use("/api/v1/mailboxes/:mailboxId/*", requireMailbox);
 
 // -- Config ---------------------------------------------------------
@@ -111,7 +118,19 @@ app.get("/api/v1/config", (c) => {
 // -- Mailboxes ------------------------------------------------------
 
 app.get("/api/v1/mailboxes", async (c) => {
-  const allMailboxes = await listMailboxes(c.env);
+  // Phase C1 / B-03: pass authzContext into listMailboxes so non-global
+  // callers see ONLY their authorized set — D1 mailboxes for which they
+  // are owner OR a member of an associated group. global_owner /
+  // global_admin still get the full workspace inventory because
+  // `authzContext.role` is checked downstream by listMailboxes' caller.
+  // Absent authzContext (legacy dev-bypass posture, no auth middleware
+  // upstream) → return empty rather than the full workspace; trusted
+  // internal callers must opt out by NOT routing through this endpoint.
+  const ctx = c.var.authzContext;
+  const isGlobal = ctx?.role === "global_owner" || ctx?.role === "global_admin";
+  const allMailboxes = isGlobal
+    ? await listMailboxes(c.env)
+    : await listMailboxes(c.env, ctx);
   return c.json(allMailboxes.map((m) => ({ ...m, name: m.id })));
 });
 
@@ -804,12 +823,20 @@ async function receiveEmail(
   );
 
   const agentStub = env.EMAIL_AGENT.get(env.EMAIL_AGENT.idFromName(mailboxId));
+  // Phase C1 / C-02 — internal-only marker. EmailAgent.onRequest refuses
+  // /onNewEmail unless this exact header pair is present, so the public
+  // /agents/* mount cannot reach it.
+  const { INTERNAL_AGENT_HEADER, INTERNAL_AGENT_ON_NEW_EMAIL } =
+    await import("./agent");
   ctx.waitUntil(
     agentStub
       .fetch(
         new Request("https://agents/onNewEmail", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            [INTERNAL_AGENT_HEADER]: INTERNAL_AGENT_ON_NEW_EMAIL,
+          },
           body: JSON.stringify({
             mailboxId,
             emailId: messageId,

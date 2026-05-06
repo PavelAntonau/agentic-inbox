@@ -12,6 +12,7 @@ import { authzContext } from "./middleware/authz-context";
 import type { AuthzContext } from "./db/control-plane/forGroup";
 import { EmailMCP } from "./mcp";
 import { createAuth } from "./auth";
+import { requireMailboxV2 } from "./lib/mailbox-v2";
 import type { Env } from "./types";
 
 /**
@@ -308,6 +309,8 @@ async function dispatchMcpRequest(
     insufficientScopeResponse,
     MAILBOX_BOUND_TOOLS,
   } = await import("./lib/mcp-tool-policy");
+  const { buildAuthzContextFromUserId } =
+    await import("./lib/mcp-list-mailboxes");
 
   const startedAt = Date.now();
   const bearer = await validateBearer(request, env);
@@ -381,6 +384,65 @@ async function dispatchMcpRequest(
       const resolvedId = await resolveMailboxToId(env, mailboxArg);
       if (!resolvedId || resolvedId !== bearer.mailbox_id) {
         const r = insufficientScopeResponse("pat-mailbox-mismatch", { tool });
+        finishAudit(r, method, tool);
+        return r;
+      }
+    }
+
+    // ── C-01 (Phase C1) — per-call user-authz mailbox narrowing. ───────
+    //
+    // Closes the OAuth-JWT IDOR caught by Phase B walkthrough (T-B-C).
+    // T3.6 closed the PAT path via `bearer.mailbox_id` binding above; that
+    // check only fires when a PAT was minted with a mailbox_id constraint.
+    // OAuth JWT bearers (and PATs minted without a mailbox_id) had NO
+    // per-call narrowing, so a JWT for user X could call e.g.
+    // `tools/call get_email mailboxId=<other-user-mailbox>` and read X's
+    // peer's mail directly.
+    //
+    // Posture: build an authzContext from `bearer.user_id` (intersected
+    // with PAT mailbox_id when set), resolve the supplied `mailboxId`
+    // argument to its canonical D1 row id, and assert membership in
+    // `authorized_mailbox_ids`. global_owner / global_admin still pass
+    // (operational ceiling) — peer narrowing only restricts non-global
+    // roles, mirroring V1's `requireMailbox` posture.
+    //
+    // `list_mailboxes` is excluded from MAILBOX_BOUND_TOOLS; it has its
+    // own narrowing path immediately below (it never carries a
+    // `mailboxId` argument).
+    if (MAILBOX_BOUND_TOOLS.has(tool)) {
+      const toolCall = await extractToolCall(request);
+      const mailboxArg = toolCall.arguments?.mailboxId;
+      if (typeof mailboxArg !== "string" || !mailboxArg) {
+        const r = insufficientScopeResponse("tool-mailbox-arg-required", {
+          tool,
+        });
+        finishAudit(r, method, tool);
+        return r;
+      }
+      const resolvedId = await resolveMailboxToId(env, mailboxArg);
+      if (!resolvedId) {
+        const r = insufficientScopeResponse("mailbox-not-authorized", {
+          tool,
+        });
+        finishAudit(r, method, tool);
+        return r;
+      }
+      const patMailboxId =
+        bearer.source === "pat" ? (bearer.mailbox_id ?? null) : null;
+      const userCtx = await buildAuthzContextFromUserId(
+        env,
+        bearer.user_id,
+        patMailboxId,
+      );
+      const isGlobal =
+        userCtx?.role === "global_owner" || userCtx?.role === "global_admin";
+      if (
+        !userCtx ||
+        (!isGlobal && !userCtx.authorized_mailbox_ids.includes(resolvedId))
+      ) {
+        const r = insufficientScopeResponse("mailbox-not-authorized", {
+          tool,
+        });
         finishAudit(r, method, tool);
         return r;
       }
@@ -1104,6 +1166,16 @@ app.route("/api/groups", groupsRouter);
 app.route("/api/invitations", invitationsRouter);
 app.route("/api/notifications", notificationsRouter);
 
+// Phase C1 / B-01 + B-02 + B-04 sibling — V2 mailbox-narrow gate. Mounted
+// BEFORE the three V2 routers below so any /api/mailboxes/:mailboxId/* hit
+// is authz-narrowed to the caller's `authorized_mailbox_ids`. Reserved
+// segments (currently just `tree`) pass through unchanged. The bare-path
+// mount handles `DELETE /api/mailboxes/:id` (the V2 mailbox-delete) which
+// is structurally outside the wildcard pattern, mirroring V1's bare-path
+// requireMailbox mount in workers/index.ts (B-04).
+app.use("/api/mailboxes/:mailboxId", requireMailboxV2);
+app.use("/api/mailboxes/:mailboxId/*", requireMailboxV2);
+
 // Mailbox CRUD + share/transfer router (Phase 4 — D1-backed, distinct from /api/v1/mailboxes)
 const { default: mailboxesRouter } = await import("./routes/mailboxes");
 app.route("/api/mailboxes", mailboxesRouter);
@@ -1148,6 +1220,63 @@ app.route("/api/contacts", contactsRouter);
 
 // Mount the API routes
 app.route("/", apiApp);
+
+// Phase C1 / C-02 — /agents/* per-mailbox authz gate.
+//
+// The Cloudflare Agents SDK routes `/agents/<kebab-class>/<name>[/<sub>]`
+// to a Durable Object keyed on `<name>`. For `EmailAgent` the kebab class
+// is `email-agent` and `<name>` IS the mailbox address (the same string
+// `receiveEmail` passes to `EMAIL_AGENT.idFromName`). Without this gate
+// any authenticated user could open a chat WebSocket against any other
+// user's mailbox and ask the LLM to draft / send / move email on their
+// behalf — a 605-LoC privilege escalation surface.
+//
+// Posture: require `c.var.authzContext`, parse the `<name>` segment,
+// resolve to a D1 mailbox row, assert membership in
+// `authorized_mailbox_ids` (or a global role). The internal
+// `receiveEmail → stub.fetch("/onNewEmail")` path doesn't traverse this
+// mount — it goes directly to the DO's fetch — so internal auto-draft
+// continues to work unchanged. The DO carries a belt-and-suspenders
+// check inside `EmailAgent.onRequest` that refuses `/onNewEmail` unless
+// the request carries the internal marker header set by `receiveEmail`.
+app.use("/agents/*", async (c, next) => {
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+
+  const parts = new URL(c.req.url).pathname.split("/").filter(Boolean);
+  // parts := ["agents", "<kebab-class>", "<name>", ...]
+  if (parts.length < 3) {
+    return c.json({ error: "Bad agent path" }, 400);
+  }
+  const agentName = decodeURIComponent(parts[2]);
+  if (!agentName) return c.json({ error: "Bad agent path" }, 400);
+
+  if (!c.env.DB) {
+    return c.json({ error: "Agent authz unavailable" }, 503);
+  }
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { or, eq, sql } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const orm = drizzle(c.env.DB, { schema });
+  const row = await orm
+    .select({ id: schema.mailboxes.id, address: schema.mailboxes.address })
+    .from(schema.mailboxes)
+    .where(
+      or(
+        eq(schema.mailboxes.id, agentName),
+        eq(sql`lower(${schema.mailboxes.address})`, agentName.toLowerCase()),
+      ),
+    )
+    .get();
+  if (!row) return c.json({ error: "Not found" }, 404);
+
+  const isGlobal = ctx.role === "global_owner" || ctx.role === "global_admin";
+  if (!isGlobal && !ctx.authorized_mailbox_ids.includes(row.id)) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+  return next();
+});
 
 // Agent WebSocket routing - must be before React Router catch-all
 app.all("/agents/*", async (c) => {

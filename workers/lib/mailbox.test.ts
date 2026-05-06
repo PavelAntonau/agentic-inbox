@@ -322,3 +322,87 @@ describe("requireMailbox — P0-5 IDOR gate", () => {
     expect(body.error).toMatch(/unauthorized/i);
   });
 });
+
+// ── Phase C1 / B-04: bare-path mount tests ───────────────────────────────
+//
+// Hono's `/foo/:p/*` middleware mount only matches sub-paths, NOT the bare
+// `/foo/X` triplet. Phase 5's V1 mount left GET / PUT / DELETE on
+// `/api/v1/mailboxes/:mailboxId` ungated; PUT in particular overwrites R2
+// settings (forwarding, autoreply, agentSystemPrompt) without authz — a
+// single-curl mail-exfil primitive. Phase C1 mounts requireMailbox on BOTH
+// the bare and wildcard paths; these tests assert the bare-path posture.
+
+function makeBareApp(
+  env: { DB: unknown; BUCKET: R2Bucket; MAILBOX: unknown },
+  authz: AuthzContext | null = makeAuthz("global_owner"),
+) {
+  const app = new Hono<MailboxContext>();
+  app.use("*", async (c, next) => {
+    if (authz !== null) c.set("authzContext", authz);
+    await next();
+  });
+  // Phase C1 / B-04 — bare-path mount in addition to the wildcard.
+  app.use("/api/v1/mailboxes/:mailboxId", requireMailbox);
+  app.use("/api/v1/mailboxes/:mailboxId/*", requireMailbox);
+  // Bare-path inner handlers (GET / PUT / DELETE) — same surface that the
+  // walkthrough flagged as the catastrophic IDOR (PUT writes R2 settings).
+  app.put("/api/v1/mailboxes/:mailboxId", (c) =>
+    c.json({ wrote: true, mailboxId: c.req.param("mailboxId") }),
+  );
+  app.delete("/api/v1/mailboxes/:mailboxId", (c) => c.body(null, 204));
+  return {
+    fetch: (path: string, init?: RequestInit) =>
+      app.fetch(
+        new Request(`http://localhost${path}`, init),
+        env as unknown as Parameters<typeof app.fetch>[1],
+      ),
+  };
+}
+
+describe("requireMailbox — Phase C1 / B-04 bare-path gate", () => {
+  it("PUT /api/v1/mailboxes/:id by non-owner → 403 (was 200 = R2-overwrite IDOR)", async () => {
+    d1Row = { id: "uuid-alice", address: "alice@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeBareApp(env, makeAuthz("user", ["uuid-bob"]));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-alice", {
+      method: "PUT",
+      body: JSON.stringify({ settings: { agentSystemPrompt: "exfil" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("DELETE /api/v1/mailboxes/:id by non-owner → 403", async () => {
+    d1Row = { id: "uuid-alice", address: "alice@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeBareApp(env, makeAuthz("user", ["uuid-bob"]));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-alice", {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("PUT /api/v1/mailboxes/:id by owner → 200 (wraps the inner handler)", async () => {
+    d1Row = { id: "uuid-alice", address: "alice@actionnow.ai" };
+    const env = {
+      DB: {} as unknown,
+      BUCKET: makeR2Bucket(new Set()),
+      MAILBOX: makeMailboxNamespace(),
+    };
+    const app = makeBareApp(env, makeAuthz("user", ["uuid-alice"]));
+    const res = await app.fetch("/api/v1/mailboxes/uuid-alice", {
+      method: "PUT",
+      body: JSON.stringify({ settings: { fromName: "Alice" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+  });
+});

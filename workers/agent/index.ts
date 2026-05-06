@@ -268,6 +268,44 @@ function createEmailTools(env: Env, mailboxId: string) {
   };
 }
 
+/**
+ * Phase C1 / C-02 belt-and-suspenders — internal-only marker header.
+ *
+ * `receiveEmail` (workers/index.ts) drives the per-message auto-draft via a
+ * direct `agentStub.fetch("https://agents/onNewEmail", …)` call. That path
+ * never traverses the public `/agents/*` mount in workers/app.ts, so the
+ * authz gate there cannot reach it. Any external caller that hits
+ * `POST /agents/email-agent/<name>/onNewEmail` would otherwise dispatch the
+ * same auto-draft pipeline (the SDK rewrites the URL to `/onNewEmail`
+ * inside the DO) — defense-in-depth requires the DO to refuse external
+ * calls to this path. We require the internal call to set this exact
+ * marker header value; the public mount doesn't propagate request bodies
+ * with crafted headers because the public gate already 403s before the
+ * SDK forwards.
+ */
+export const INTERNAL_AGENT_HEADER = "x-internal-agent-source";
+export const INTERNAL_AGENT_ON_NEW_EMAIL = "receive-email";
+
+/**
+ * Phase C1 / C-02 — syntactic-shape gate for `EmailAgent.this.name`.
+ *
+ * Cheap input-validation belt-and-suspenders: refuses to invoke the model
+ * unless `name` looks like a mailbox identifier (D1 UUID with hex shape,
+ * or RFC 5321-shaped local-part@domain). Caps length at 320 characters
+ * (RFC 5321 §4.5.3.1.3 maximum). No DB hit; this guards only against
+ * grossly malformed agent names — the authoritative authz gate is the
+ * `/agents/*` middleware in workers/app.ts.
+ */
+function isPlausibleMailboxName(name: string): boolean {
+  if (typeof name !== "string" || !name) return false;
+  if (name.length > 320) return false;
+  // UUID-shape (with or without hyphens) — D1 mailboxes.id values.
+  if (/^[0-9a-fA-F-]{16,64}$/.test(name) && !name.includes("@")) return true;
+  // Email shape — local-part@domain with at least one dot in the domain.
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(name)) return true;
+  return false;
+}
+
 // Use `any` for the Env generic to avoid type conflicts between the custom
 // SEND_EMAIL binding shape and the AIChatAgent constraint.  The actual env
 // is fully typed inside the tools via the closure.
@@ -275,6 +313,22 @@ export class EmailAgent extends AIChatAgent<any> {
   async onChatMessage(onFinish: any) {
     const env = this.env as Env;
     const mailboxId = this.name;
+
+    // Phase C1 / C-02 belt-and-suspenders. The public `/agents/*` gate in
+    // workers/app.ts asserts the caller is authorized for this mailbox
+    // BEFORE the SDK forwards to the DO; this in-DO check is the second
+    // line of defense against any future code path that constructs a
+    // chat session without going through the public mount. We verify
+    // `this.name` parses as a plausible mailbox identifier (D1 UUID or
+    // RFC-shaped email) — refuse to invoke the model otherwise. Cheap
+    // syntactic guard, no DB hit on the chat hot path.
+    if (!isPlausibleMailboxName(mailboxId)) {
+      return new Response(JSON.stringify({ error: "Invalid agent name" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     const workersai = getWorkersAiFactory(env);
     const tools = createEmailTools(env, mailboxId);
     const systemPrompt = await getSystemPrompt(env, mailboxId);
@@ -297,7 +351,27 @@ export class EmailAgent extends AIChatAgent<any> {
    */
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    // Phase C1 / C-02 belt-and-suspenders. The public `/agents/*` gate in
+    // workers/app.ts narrows callers to their authorized mailboxes; this
+    // in-DO check enforces that `/onNewEmail` is unreachable EXCEPT via
+    // the internal `receiveEmail → stub.fetch(...)` path. The internal
+    // caller sets the marker header below; an external caller has no way
+    // to do so because the public gate would have 403'd them BEFORE the
+    // SDK rewrites the URL into this DO. Defence-in-depth: even if the
+    // public gate's authz logic regresses, the internal-only path stays
+    // walled off.
     if (url.pathname === "/onNewEmail" && request.method === "POST") {
+      const marker = request.headers.get(INTERNAL_AGENT_HEADER);
+      if (marker !== INTERNAL_AGENT_ON_NEW_EMAIL) {
+        return new Response(
+          JSON.stringify({ error: "Forbidden — internal-only path" }),
+          {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
       try {
         const emailData = (await request.json()) as {
           mailboxId: string;
