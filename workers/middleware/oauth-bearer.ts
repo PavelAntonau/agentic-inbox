@@ -172,14 +172,65 @@ function loadVerificationJwks(env: Env): ReturnType<typeof createLocalJWKSet> {
   });
 }
 
-/** Cache the JWKS per (env, raw-key) so cold-start cost only hits once. */
-const jwksCache = new WeakMap<Env, ReturnType<typeof createLocalJWKSet>>();
-function getJwks(env: Env): ReturnType<typeof createLocalJWKSet> {
-  const cached = jwksCache.get(env);
-  if (cached) return cached;
+/**
+ * Cache the JWKS by a hash of the signing-key string so a key rotation
+ * automatically invalidates the cache.
+ *
+ * Phase C3 / TASK-C3.10 — A-10 fix. The previous implementation keyed on
+ * `WeakMap<Env>` identity, which is per-isolate and never invalidates when
+ * the operator rotates `OAUTH_JWT_SIGNING_KEY` via `wrangler secret put`.
+ * After a rotation the next /mcp request would read the new env var, recompute
+ * the JWKS, and overwrite the cache entry — but on a long-lived isolate the
+ * old `Env` reference (with the new value) would still match the WeakMap
+ * entry that was populated under the OLD key, so we'd verify against stale
+ * material until the isolate cycled. Switching the cache key to a digest of
+ * the raw secret means a rotation is observed immediately on the next
+ * request: a different secret hashes to a different cache key, so the old
+ * entry is dead and the new one is computed once.
+ *
+ * The cache is bounded to one entry per active key (and at most a handful of
+ * stale entries during the brief overlap of a rotation, garbage-collected on
+ * the next eviction pass below) so the unbounded-growth risk is nil.
+ */
+type JwksCacheEntry = {
+  hash: string;
+  jwks: ReturnType<typeof createLocalJWKSet>;
+};
+let jwksCacheEntry: JwksCacheEntry | null = null;
+
+async function hashSigningKey(raw: string): Promise<string> {
+  const buf = new TextEncoder().encode(raw);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function getJwks(
+  env: Env,
+): Promise<ReturnType<typeof createLocalJWKSet>> {
+  const raw = env.OAUTH_JWT_SIGNING_KEY;
+  if (!raw) {
+    throw new Error(
+      "OAUTH_JWT_SIGNING_KEY missing — cannot verify /mcp bearer",
+    );
+  }
+  const hash = await hashSigningKey(raw);
+  if (jwksCacheEntry && jwksCacheEntry.hash === hash) {
+    return jwksCacheEntry.jwks;
+  }
   const fresh = loadVerificationJwks(env);
-  jwksCache.set(env, fresh);
+  jwksCacheEntry = { hash, jwks: fresh };
   return fresh;
+}
+
+/**
+ * Test-only escape hatch — clear the in-process JWKS cache so consecutive
+ * tests can rotate the signing key without leaking state across `it()`
+ * blocks. Production code must NEVER call this.
+ */
+export function __clearJwksCacheForTests(): void {
+  jwksCacheEntry = null;
 }
 
 /**
@@ -414,9 +465,17 @@ export async function validateBearer(
 
   let payload: JWTPayload;
   try {
-    const jwks = getJwks(env);
+    const jwks = await getJwks(env);
     const verified = await jwtVerify(token, jwks, {
       issuer: REQUIRED_ISSUER,
+      // Phase C3 / TASK-C3.11 (A-09) — pin the algorithm. Without this jose
+      // accepts any algorithm signed by a key in the JWKS; an attacker who
+      // can substitute a JWKS entry for a different alg (e.g. HS256 with a
+      // shared secret leaked elsewhere) would otherwise verify successfully.
+      // Our better-auth oauth-provider only ever issues EdDSA tokens (Ed25519
+      // per `node_modules/@better-auth/oauth-provider/dist/index.mjs`), so
+      // anything else is a forgery attempt.
+      algorithms: ["EdDSA"],
       // Do NOT pass `audience:` here — jose's audience match accepts arrays
       // and intersects on membership, which is exactly the leniency we want
       // to reject. We enforce exact-string match below.

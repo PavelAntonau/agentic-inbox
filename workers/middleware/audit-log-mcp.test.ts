@@ -113,7 +113,10 @@ describe("buildAuditRow", () => {
     });
   });
 
-  it("falls back to x-forwarded-for when cf-connecting-ip absent", () => {
+  it("Phase C3 / TASK-C3.1 — does NOT fall back to x-forwarded-for (audit P2-3)", () => {
+    // x-forwarded-for is spoofable at the public edge; only cf-connecting-ip
+    // is honoured. The previous fallback let a client supply their own
+    // pseudo-IP for the audit row by setting XFF.
     const req = new Request("https://mail.actionnow.ai/mcp", {
       method: "POST",
       headers: {
@@ -130,10 +133,10 @@ describe("buildAuditRow", () => {
       mcp_method: null,
       tool_name: null,
     });
-    expect(row.source_ip).toBe("198.51.100.42");
+    expect(row.source_ip).toBeNull();
   });
 
-  it("source_ip is null when neither header present", () => {
+  it("source_ip is null when cf-connecting-ip is absent", () => {
     const req = new Request("https://mail.actionnow.ai/mcp", { method: "GET" });
     const row = buildAuditRow({
       bearer,

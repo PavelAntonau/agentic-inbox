@@ -3,32 +3,25 @@
 //
 // T2.2 (mcp-oauth) — Audit-log writer for /mcp bearer-authenticated requests.
 //
-// Writes one row per /mcp request into the existing `audit_log` table
-// (workers/db/control-plane/schema.ts:368). Schema is shared with the rest of
-// the app's audit surface (workers/lib/audit-log.ts), which keeps observability
-// queries unified.
+// Phase C3 / TASK-C3.1 — Migrated to the unified `writeAudit` helper in
+// `workers/lib/audit-log.ts`. This module is now a thin shim that:
+//   • extracts the JSON-RPC method/tool from the request body (clone-only),
+//   • packages a `BearerOk` + http_status + duration_ms into an `McpAuditRow`,
+//   • forwards to `writeAudit` which writes the D1 row, applies size caps,
+//     uses `cf-connecting-ip` only for the source IP (no x-forwarded-for —
+//     audit P2-3), and wraps the insert in its own try/catch.
 //
-// Row shape:
+// Schema (single chokepoint at `audit_log`):
 //   action       = "mcp.request"
 //   actor_user_id= bearer.user_id
-//   actor_token_id = bearer.client_id  (reuse this column to record the OAuth
-//                  client_id; aligns with the existing semantic of "what
-//                  programmatic identity ran the action" — the column existed
-//                  for the legacy `agent_tokens` path being deprecated in
-//                  T3.4, and the OAuth client_id is the natural successor).
-//   target_type  = "mcp:tool" | "mcp:rpc"
-//   target_id    = JSON-RPC method/tool name when extractable, else "(unknown)"
+//   actor_token_id = bearer.client_id  (OAuth client_id for JWTs; pat:<id> for PATs)
+//   target_type  = "mcp:tool" when a tool was called; "mcp:rpc" otherwise
+//   target_id    = tool name OR mcp_method (truncated at 200 chars)
 //   meta_json    = { jti, scopes, http_status, duration_ms, mcp_method }
-//   ip           = best-effort client IP (cf-connecting-ip header)
-//
-// `target_type` distinguishes per-tool calls (`tools/call`) from generic RPC
-// like `tools/list` so observability dashboards can split them.
-//
-// Failures are swallowed (console.error) — an audit failure must not block the
-// MCP response, mirroring `appendAudit`'s fire-and-forget contract.
+//                  (truncated at 8 KB by writeAudit)
+//   ip           = cf-connecting-ip ONLY (audit P2-3)
 
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "../db/control-plane/schema";
+import { writeAudit, clientIp } from "../lib/audit-log";
 import type { BearerOk } from "./oauth-bearer";
 import type { Env } from "../types";
 
@@ -78,44 +71,44 @@ export async function extractMcpMethod(
   }
 }
 
-/** Fire-and-forget audit write. Logs and swallows on failure. */
+/**
+ * Fire-and-forget audit write — delegates to the unified `writeAudit` helper
+ * which carries the internal try/catch contract. Phase C3 / TASK-C3.1.
+ */
 export async function writeMcpAuditRow(
   env: Env,
   row: McpAuditRow,
 ): Promise<void> {
-  try {
-    const orm = drizzle(env.DB, { schema });
-    const meta = {
+  await writeAudit(env.DB, {
+    action: "mcp.request",
+    target: {
+      kind: row.tool_name ? "mcp:tool" : "mcp:rpc",
+      id: row.tool_name ?? row.mcp_method ?? "(unknown)",
+    },
+    actor_user_id: row.user_id,
+    actor_token_id: row.client_id,
+    meta: {
       jti: row.jti,
       scopes: row.scopes,
       http_status: row.http_status,
       duration_ms: row.duration_ms,
       mcp_method: row.mcp_method,
-    };
-    await orm
-      .insert(schema.audit_log)
-      .values({
-        at: Date.now(),
-        actor_user_id: row.user_id,
-        actor_token_id: row.client_id,
-        action: "mcp.request",
-        target_type: row.tool_name ? "mcp:tool" : "mcp:rpc",
-        target_id: row.tool_name ?? row.mcp_method ?? "(unknown)",
-        scope_group_id: null,
-        meta_json: JSON.stringify(meta),
-        ip: row.source_ip,
-      })
-      .run();
-  } catch (e) {
-    // Never block the MCP response on audit failures.
-    console.error("mcp.audit.write_failed", (e as Error).message);
-  }
+    },
+    ip: row.source_ip,
+    mcp_method: row.mcp_method,
+    tool_name: row.tool_name,
+  });
 }
 
 /**
  * Build a complete audit row from a successful bearer validation + a finished
  * /mcp request/response cycle. The handler does the time bookkeeping; this
  * helper just packages the values.
+ *
+ * Phase C3 / TASK-C3.1: source IP comes from `cf-connecting-ip` only — the
+ * previous fallback to `x-forwarded-for` is dropped (audit P2-3 — XFF is
+ * spoofable at the public edge, cf-connecting-ip is set by Cloudflare and
+ * cannot be tampered with by the client).
  */
 export function buildAuditRow(args: {
   bearer: BearerOk;
@@ -136,9 +129,6 @@ export function buildAuditRow(args: {
     duration_ms,
     mcp_method,
     tool_name,
-    source_ip:
-      request.headers.get("cf-connecting-ip") ??
-      request.headers.get("x-forwarded-for") ??
-      null,
+    source_ip: clientIp(request),
   };
 }

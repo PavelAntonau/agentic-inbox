@@ -23,16 +23,36 @@ export function meta() {
 
 type Step = "email" | "otp";
 
-const SAFE_REDIRECT_PATTERN = /^\/(?!\/)[^?#]*([?#].*)?$/;
+/**
+ * Phase C3 / TASK-C3.22 — D-12 fix.
+ *
+ * The previous regex was `^\/(?!\/)[^?#]*([?#].*)?$`, which rejected the
+ * `//evil.com` protocol-relative form but still accepted `/\\evil.com`
+ * because `\` was permitted inside the path body. Some browsers (notably
+ * older Safari and IE) normalise `\` to `/` before navigation, turning
+ * `/\\evil.com` into `//evil.com` AFTER the safeRedirect check has already
+ * approved it.
+ *
+ * The hardened pattern:
+ *   • Starts with a single `/`.
+ *   • Disallows `/` and `\` immediately after — `(?![\/\\])`.
+ *   • Path body forbids both `\` and `?#` — `[^\\?#]*`.
+ *   • Optional query/fragment captured but no further constraint (browser
+ *     parses these per RFC 3986).
+ */
+const SAFE_REDIRECT_PATTERN = /^\/(?![\/\\])[^\\?#]*([?#].*)?$/;
 
 function safeRedirect(raw: string | null): string {
   if (!raw) return "/";
-  // Only same-origin paths starting with a single `/`, no `//` (which would
-  // be a protocol-relative URL) and no `\`.
+  // Only same-origin paths starting with a single `/`, no `//` or `/\` (both
+  // browser-normalised to a protocol-relative URL on some platforms).
   if (!SAFE_REDIRECT_PATTERN.test(raw)) return "/";
   if (raw.startsWith("/login")) return "/";
   return raw;
 }
+
+// Phase C3 / TASK-C3.22 — exported so the test file can exercise it directly.
+export { safeRedirect, SAFE_REDIRECT_PATTERN };
 
 export default function LoginRoute() {
   const navigate = useNavigate();

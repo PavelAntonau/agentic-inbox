@@ -90,6 +90,110 @@ type AppVariables = {
 // Main app that wraps the API and adds React Router fallback
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+// Phase C3 / TASK-C3.6 — security-headers middleware (audit P2-1).
+//
+// Emits CSP + Referrer-Policy + X-Frame-Options + X-Content-Type-Options on
+// HTML responses (the SPA shell + the dev-mode /login picker). API
+// responses (`/api/*`, `/.well-known/*`, `/jwks`, `/mcp`) keep their
+// existing JSON shape untouched so MCP clients and curl-driven probes are
+// not surprised by security headers they cannot interpret.
+//
+// The CSP is intentionally tight:
+//   • `default-src 'self'` — same-origin everything.
+//   • `script-src 'self'` — no inline scripts, no eval. Vite's HMR injects
+//     the dev-server script during `npm run dev` only; the deployed bundle
+//     is fully self-hosted (verified against the wrangler-built manifest).
+//   • `style-src 'self' 'unsafe-inline'` — the dev /login picker uses an
+//     inline <style> block with palette tokens; inlining is also tolerated
+//     by the React Router build (Tailwind generates a CSS file but some
+//     small inline declarations remain). 'unsafe-inline' for styles is the
+//     OWASP-accepted relaxation.
+//   • `img-src 'self' data: blob:` — avatars (R2-served), data: URIs for
+//     SVG inlining, blob: for the avatar-crop preview.
+//   • `connect-src 'self'` — fetch / XHR / WebSocket / SSE same-origin only.
+//   • `frame-ancestors 'none'` — defense-in-depth alongside X-Frame-Options.
+//   • `object-src 'none'` — block plugin embedding.
+//   • `base-uri 'self'` — base-tag injection has no effect.
+//   • `form-action 'self'` — form posts cannot be redirected off-origin.
+//
+// The header is set AFTER the route handlers run so a per-route override is
+// still possible (none today) — `c.res.headers.set` mutates the outgoing
+// Response in place.
+const CSP_DIRECTIVES = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+function isApiPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/api/") ||
+    pathname === "/api" ||
+    pathname.startsWith("/.well-known/") ||
+    pathname === "/jwks" ||
+    pathname.startsWith("/mcp") ||
+    pathname.startsWith("/agents/") ||
+    pathname.startsWith("/__mock") ||
+    pathname.startsWith("/cdn-cgi/")
+  );
+}
+
+app.use("*", async (c, next) => {
+  await next();
+
+  const pathname = new URL(c.req.url).pathname;
+  if (isApiPath(pathname)) return;
+
+  // Inspect the actual response content-type — only emit CSP for HTML.
+  const ct = c.res.headers.get("content-type") ?? "";
+  const isHtml = ct.includes("text/html") || ct.includes("application/xhtml");
+  if (!isHtml) return;
+
+  // Hono stores the immutable response on `c.res`; `headers.set` mutates
+  // the outgoing Headers object before the platform returns it.
+  c.res.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
+  c.res.headers.set("X-Frame-Options", "DENY");
+  c.res.headers.set("X-Content-Type-Options", "nosniff");
+  c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+});
+
+// Phase C3 / TASK-C3.17 — worker-wide error redaction.
+//
+// Hono's `app.onError` fires for any handler that throws an unhandled error
+// (validator-shaped 400s pass through `c.json(...)` which never reaches
+// here, so user-facing validation messages keep their meaning). The handler
+// strips the raw exception message, logs full text + stack server-side
+// against a freshly minted correlation ID, and returns a generic JSON body
+// the caller can quote when filing a bug.
+//
+// Audit (C-07): `(e as Error).message` previously bubbled to clients
+// verbatim — DB errors, internal paths, occasionally secrets concatenated
+// into thrown error strings. Stripping the message + funnelling through a
+// correlation ID is the standard hardening posture; observability still has
+// the full text via `console.error` (which lands in CF Logs).
+app.onError((err, c) => {
+  const correlation_id = crypto.randomUUID();
+  console.error(
+    `app.unhandled_error correlation_id=${correlation_id} method=${c.req.method} path=${new URL(c.req.url).pathname}`,
+    (err as Error).message,
+    (err as Error).stack,
+  );
+  return c.json(
+    {
+      error: "internal_error",
+      correlation_id,
+    },
+    500,
+  );
+});
+
 // `/login` and `/logout` are public — they MUST run before the auth
 // middleware below or no-one could reach them without already being
 // authenticated. In dev (`CF_ACCESS_DEV_MODE=mock`) `/login` serves a
@@ -219,7 +323,30 @@ app.use("*", async (c, next) => {
     return mockAccessShim()(c, next);
   }
   if (import.meta.env.DEV || c.env.CF_ACCESS_DEV_MODE === "bypass") {
-    return next();
+    // Phase C3 / TASK-C3.12 — refuse to bypass on the production hostname
+    // and emit an audit row + boot-time warn for every bypassed request.
+    // The hostname check is the load-bearing guarantee: even if a future
+    // misconfiguration leaks `CF_ACCESS_DEV_MODE=bypass` into production,
+    // mail.actionnow.ai will still hit the real CF Access verification path
+    // immediately below.
+    if (c.env.CF_ACCESS_DEV_MODE === "bypass") {
+      const { isBypassPermitted, logBypassWarningOnce, writeBypassAudit } =
+        await import("./lib/cloudflare-access-policy");
+      logBypassWarningOnce();
+      if (!isBypassPermitted(c.req.url)) {
+        // Production hostname — refuse to bypass, fall through to real
+        // Access verification. The audit row records the refusal so we can
+        // tell "tried to bypass on prod" from "bypass succeeded on dev".
+        c.executionCtx.waitUntil(writeBypassAudit(c.env, c.req.raw));
+      } else {
+        c.executionCtx.waitUntil(writeBypassAudit(c.env, c.req.raw));
+        return next();
+      }
+    } else {
+      // import.meta.env.DEV branch — Vite/Vitest dev. No audit row needed
+      // (we're not on a hostname anyone could hit from the public internet).
+      return next();
+    }
   }
 
   const { POLICY_AUD, TEAM_DOMAIN } = c.env;
@@ -579,8 +706,12 @@ app.post("/api/users/me/avatar", async (c) => {
         await c.env.BUCKET.put(origKey, origBuf, {
           httpMetadata: { contentType: originalField.type },
         });
-      } catch {
-        // Best-effort — keep the cropped upload regardless.
+      } catch (e) {
+        // Best-effort — keep the cropped upload regardless. The cropped file
+        // (the actual avatar) has already been written above; only the
+        // re-edit-original copy is missing. Log so a sustained R2 outage is
+        // visible in observability instead of silently dropping originals.
+        console.error("avatar.original_put_failed", (e as Error).message);
       }
     }
   }
@@ -674,32 +805,129 @@ app.delete("/api/users/me/avatar", async (c) => {
   return c.json({ ok: true });
 });
 
+// Phase C3 / TASK-C3.5 — visibility resolution for an avatar fetch.
+//
+// Closes audit P2-4 + B-07. Returns the avatar object key when the actor is
+// permitted to see the target user, null otherwise. The cache-control header
+// becomes `private` once visibility is non-trivial because two different
+// callers can legitimately get different answers for the same target id.
+async function resolveAvatarKey(
+  env: Env,
+  actor: AuthzContext,
+  targetId: string,
+): Promise<{ avatar_url: string } | null> {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { eq, and, or, inArray } = await import("drizzle-orm");
+  const schema = await import("./db/control-plane/schema");
+  const { canSeeUser } = await import("./lib/visibility-filter");
+  const orm = drizzle(env.DB, { schema });
+
+  const target = await orm
+    .select({
+      id: schema.users.id,
+      email: schema.users.email,
+      display_name: schema.users.display_name,
+      visibility: schema.users.visibility,
+      status: schema.users.status,
+      avatar_url: schema.users.avatar_url,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.id, targetId))
+    .get();
+
+  if (!target?.avatar_url) return null;
+
+  // Self: always allowed (no further DB cost).
+  if (target.id === actor.user_id) {
+    return { avatar_url: target.avatar_url };
+  }
+
+  // Global ceiling — admins see everything.
+  if (actor.role === "global_owner" || actor.role === "global_admin") {
+    return { avatar_url: target.avatar_url };
+  }
+
+  // Resolve target's groups + actor's accepted contacts + the
+  // blocked-either-direction set (mirrors /api/users/search posture).
+  const targetGroups = await orm
+    .select({ group_id: schema.group_members.group_id })
+    .from(schema.group_members)
+    .where(eq(schema.group_members.user_id, target.id))
+    .all();
+
+  const accepted = await orm
+    .select({ contact_user_id: schema.contacts.contact_user_id })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.owner_user_id, actor.user_id),
+        eq(schema.contacts.status, "accepted"),
+      ),
+    )
+    .all();
+
+  const blocked = await orm
+    .select({
+      owner_user_id: schema.contacts.owner_user_id,
+      contact_user_id: schema.contacts.contact_user_id,
+    })
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.status, "blocked"),
+        or(
+          and(
+            eq(schema.contacts.owner_user_id, actor.user_id),
+            eq(schema.contacts.contact_user_id, target.id),
+          ),
+          and(
+            eq(schema.contacts.owner_user_id, target.id),
+            eq(schema.contacts.contact_user_id, actor.user_id),
+          ),
+        ),
+      ),
+    )
+    .all();
+
+  // inArray quirk: stay strictly typed.
+  void inArray;
+
+  const visible = canSeeUser({
+    actor: { user_id: actor.user_id, group_ids: actor.group_ids },
+    target: {
+      id: target.id,
+      email: target.email,
+      display_name: target.display_name,
+      visibility: target.visibility,
+      status: target.status,
+    },
+    targetGroupIds: targetGroups.map((r) => r.group_id),
+    acceptedContactIds: new Set(accepted.map((r) => r.contact_user_id)),
+    blockedUserIds: new Set(
+      blocked.flatMap((r) => [r.owner_user_id, r.contact_user_id]),
+    ),
+  });
+
+  return visible ? { avatar_url: target.avatar_url } : null;
+}
+
 // GET /avatars/:userId — fetch a user's avatar (Phase 3b)
 //
-// Any authenticated session may fetch any user's avatar. Visibility-
-// gated access is a Phase 4/5 concern when the field starts driving
-// discovery; for now any user with a set avatar is fetchable.
+// Phase C3 / TASK-C3.5 — visibility-gated. The actor must be permitted to
+// see the target user (same rule set as /api/users/search). Closes audit
+// P2-4 + B-07: previously every authenticated session could fetch every
+// user's avatar regardless of `users.visibility`.
 app.get("/avatars/:userId", async (c) => {
   const ctx = c.var.authzContext;
   if (!ctx) return c.json({ error: "Unauthorized" }, 401);
 
   const userId = c.req.param("userId");
-  const { drizzle } = await import("drizzle-orm/d1");
-  const { eq } = await import("drizzle-orm");
-  const schema = await import("./db/control-plane/schema");
-  const orm = drizzle(c.env.DB, { schema });
-
-  const user = await orm
-    .select({ avatar_url: schema.users.avatar_url })
-    .from(schema.users)
-    .where(eq(schema.users.id, userId))
-    .get();
-
-  if (!user?.avatar_url) {
+  const resolved = await resolveAvatarKey(c.env, ctx, userId);
+  if (!resolved) {
     return c.json({ error: "no avatar" }, 404);
   }
 
-  const obj = await c.env.BUCKET.get(user.avatar_url);
+  const obj = await c.env.BUCKET.get(resolved.avatar_url);
   if (!obj) {
     return c.json({ error: "no avatar" }, 404);
   }
@@ -707,7 +935,10 @@ app.get("/avatars/:userId", async (c) => {
   return new Response(obj.body, {
     headers: {
       "Content-Type": obj.httpMetadata?.contentType ?? "image/png",
-      "Cache-Control": "public, max-age=86400, must-revalidate",
+      // Phase C3 / TASK-C3.5: `private` not `public` — two different actors
+      // can legitimately get different answers (one sees the avatar, one
+      // gets 404 because of visibility), so a shared CDN cache would leak.
+      "Cache-Control": "private, max-age=86400, must-revalidate",
       ETag: obj.httpEtag,
     },
   });
@@ -716,24 +947,20 @@ app.get("/avatars/:userId", async (c) => {
 // GET /avatars/:userId/original — fetch the pre-crop original (UAT round 1
 // item 6). Returns 404 if no original was stored alongside the displayed
 // avatar (legacy avatars uploaded before dual-storage shipped). Same auth
-// posture as GET /avatars/:userId.
+// posture as GET /avatars/:userId — Phase C3 / TASK-C3.5 also gates on
+// visibility (audit P2-4 + B-07).
 app.get("/avatars/:userId/original", async (c) => {
   const ctx = c.var.authzContext;
   if (!ctx) return c.json({ error: "Unauthorized" }, 401);
 
   const userId = c.req.param("userId");
-  const { drizzle } = await import("drizzle-orm/d1");
-  const { eq } = await import("drizzle-orm");
-  const schema = await import("./db/control-plane/schema");
-  const orm = drizzle(c.env.DB, { schema });
-
-  const user = await orm
-    .select({ avatar_url: schema.users.avatar_url })
-    .from(schema.users)
-    .where(eq(schema.users.id, userId))
-    .get();
-
-  if (!user?.avatar_url) {
+  const resolved = await resolveAvatarKey(c.env, ctx, userId);
+  if (!resolved) {
+    return c.json({ error: "no avatar" }, 404);
+  }
+  // Re-shape so the existing for-loop below stays untouched.
+  const user = { avatar_url: resolved.avatar_url };
+  if (!user.avatar_url) {
     return c.json({ error: "no avatar" }, 404);
   }
 

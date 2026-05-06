@@ -145,6 +145,24 @@ app.get("/api/v1/mailboxes", async (c) => {
 });
 
 app.post("/api/v1/mailboxes", async (c) => {
+  // Phase C3 / TASK-C3.19 (B-08) — V1 mailbox creation is admin-only.
+  // Previously any authenticated caller could mint mailboxes for arbitrary
+  // addresses (subject only to the EMAIL_ADDRESSES allowlist), which let
+  // a regular user create a mailbox they then "owned" — bypassing the
+  // group-based mailbox provisioning flow that admins rely on.
+  const ctx = c.var.authzContext;
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+  const isGlobal = ctx.role === "global_owner" || ctx.role === "global_admin";
+  if (!isGlobal) {
+    return c.json(
+      {
+        error:
+          "Forbidden: mailbox creation requires global_owner or global_admin",
+      },
+      403,
+    );
+  }
+
   const {
     name,
     settings,

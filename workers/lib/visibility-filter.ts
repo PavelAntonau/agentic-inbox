@@ -148,6 +148,70 @@ export function filterVisibleUsers(opts: VisibilityFilterOptions): UserRef[] {
 }
 
 /**
+ * Phase C3 / TASK-C3.5 — single-user visibility predicate.
+ *
+ * Closes audit P2-4 + B-07 — `/avatars/:userId{,/original}` was leaking the
+ * R2 object body of any user the caller could enumerate (any authenticated
+ * user could fetch any other user's avatar regardless of their visibility
+ * setting). This predicate runs the same rule set as `filterVisibleUsers`
+ * but for one (actor, target) pair, returning `true` iff the actor is
+ * permitted to see the target.
+ *
+ * Same Phase 6+ rules apply:
+ *   1. Self → always visible.
+ *   2. Co-members (share at least one group) → always visible.
+ *   3. Accepted contacts → always visible.
+ *   4. visibility='everyone' AND status='active' → visible.
+ *   5. Blocked in either direction → never visible.
+ *   6. visibility='nobody' for non-self / non-co-member → never visible.
+ *   7. Disabled accounts → never visible.
+ *
+ * Inputs are pre-resolved by the caller so this predicate is pure (no I/O).
+ */
+export function canSeeUser(opts: {
+  actor: ActorRef;
+  target: UserRef;
+  /** Group_members rows for the target (caller pre-filters to target's rows). */
+  targetGroupIds: string[];
+  /** Accepted contacts of the actor (mirrors `acceptedContactIds` in the list filter). */
+  acceptedContactIds: Set<string>;
+  /** Blocked-either-direction set (mirrors `blockedUserIds` in the list filter). */
+  blockedUserIds: Set<string>;
+}): boolean {
+  const { actor, target, targetGroupIds, acceptedContactIds, blockedUserIds } =
+    opts;
+
+  // Self always visible — never blocked by visibility rules.
+  if (target.id === actor.user_id) return true;
+
+  // Disabled accounts: hidden from everyone except self (above).
+  if (target.status !== "active") return false;
+
+  // Blocked → never (either direction).
+  if (blockedUserIds.has(target.id)) return false;
+
+  // Co-members: any group overlap → visible.
+  const actorGroupSet = new Set(actor.group_ids);
+  if (targetGroupIds.some((g) => actorGroupSet.has(g))) return true;
+
+  // Accepted contacts: visible regardless of visibility setting.
+  if (acceptedContactIds.has(target.id)) return true;
+
+  // Visibility-driven decision for non-co-member, non-contact viewers.
+  switch (target.visibility) {
+    case "everyone":
+      return true;
+    case "contacts":
+      // Already excluded above (they would have been in acceptedContactIds).
+      return false;
+    case "nobody":
+      return false;
+    default:
+      return false;
+  }
+}
+
+/**
  * Score and sort users for autocomplete relevance.
  * Co-members rank higher than strangers; exact email prefix ranks highest.
  */

@@ -2,6 +2,85 @@
 // Licensed under the Apache 2.0 license
 
 import type { Env } from "../types";
+import { writeAudit } from "./audit-log";
+
+/**
+ * Phase C3 / TASK-C3.12 — bypass-mode audit signal (audit P2-6).
+ *
+ * `CF_ACCESS_DEV_MODE=bypass` is the explicit "skip CF Access JWT verify"
+ * switch we use during local development and for the autonomous-local-testing
+ * harness. It is structurally distinct from `mock` (which synthesises a JWT
+ * shape via `mockAccessShim`); `bypass` simply lets every request through
+ * with no auth. That's safe for `localhost` and acceptable for the test
+ * harness, but a regression that turns it on in production would silently
+ * disable the entire Access gate. Two layers of defence:
+ *
+ *   1. `assertBypassPermitted(c.req.url)` — refuses to bypass when the
+ *      request hostname is `mail.actionnow.ai` (production), forcing the
+ *      caller to fall through to real Access JWT verification regardless of
+ *      what the env var says. The Worker still serves the request; CF
+ *      Access just gets the chance to reject it.
+ *   2. `writeBypassAudit(env, request)` — emits an `auth.cf_access_bypass`
+ *      audit_log row for every bypassed request so a regression that DOES
+ *      hit a non-prod hostname still leaves a forensic trail.
+ *
+ * `logBypassWarningOnce` is a process-wide one-shot warn (per isolate) so
+ * the dev console doesn't get flooded — one line on first hit per cold-start
+ * is enough signal that the bypass posture is active.
+ */
+const PROD_HOSTNAME = "mail.actionnow.ai";
+
+let _bypassWarned = false;
+
+export function logBypassWarningOnce(): void {
+  if (_bypassWarned) return;
+  _bypassWarned = true;
+  console.warn(
+    "auth.cf_access_dev_mode=bypass — Cloudflare Access JWT verification is DISABLED. " +
+      "This must NEVER be set in production. See workers/lib/cloudflare-access-policy.ts.",
+  );
+}
+
+/**
+ * Returns `true` when the bypass is permitted for `requestUrl`, `false`
+ * when bypass MUST be refused (production hostname).
+ */
+export function isBypassPermitted(requestUrl: string): boolean {
+  try {
+    const u = new URL(requestUrl);
+    if (u.hostname === PROD_HOSTNAME) return false;
+    return true;
+  } catch {
+    // Malformed URL — refuse to bypass (fail-CLOSED).
+    return false;
+  }
+}
+
+/**
+ * Fire-and-forget audit row for every bypassed request. The row is the
+ * forensic anchor that lets us prove (after the fact) which requests went
+ * through the bypass and which paid the full Access verification cost.
+ */
+export async function writeBypassAudit(
+  env: Env,
+  request: Request,
+): Promise<void> {
+  const url = new URL(request.url);
+  await writeAudit(env.DB, {
+    action: "auth.cf_access_bypass",
+    target: { kind: "request", id: url.pathname },
+    actor_user_id: null,
+    actor_token_id: null,
+    meta: {
+      method: request.method,
+      hostname: url.hostname,
+      // Useful when sifting logs: were we in dev or did someone hit the env
+      // var directly on a non-prod custom domain?
+      dev_mode_value: env.CF_ACCESS_DEV_MODE ?? null,
+    },
+    ip: request.headers.get("cf-connecting-ip"),
+  });
+}
 
 // -----------------------------------------------------------------------
 // Mock-mode predicate (Phase C2 / A-04)

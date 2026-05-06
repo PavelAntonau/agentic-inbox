@@ -49,13 +49,22 @@ function newId(prefix = ""): string {
 }
 
 /**
- * Resolve a mailbox and verify ownership (or write/admin ACL).
- * Returns the full mailbox row, or null if not found / access denied.
+ * Resolve a mailbox and verify access at the requested level.
+ *
+ * Phase C3 / TASK-C3.18 — B-06 fix. Inbox-policy MUTATIONS now require
+ * owner or admin; the previous code accepted `write`-level ACL grants
+ * which let any "send mail as this mailbox" collaborator silently
+ * tighten the inbox policy (kill external mail, change allow-mode,
+ * etc.). Reads are unchanged: any owner / admin / write-level ACL holder
+ * can still see the policy state.
+ *
+ * @param level 'read' for GET, 'admin' for PATCH/POST/DELETE
  */
 async function resolveOwnedMailbox(
   orm: ReturnType<typeof drizzle>,
   mailboxId: string,
   userId: string,
+  level: "read" | "admin",
 ): Promise<typeof schema.mailboxes.$inferSelect | null> {
   const mailbox = await orm
     .select()
@@ -66,7 +75,7 @@ async function resolveOwnedMailbox(
   if (!mailbox) return null;
   if (mailbox.owner_user_id === userId) return mailbox;
 
-  // Check mailbox_acls for write or admin level
+  // Check mailbox_acls.
   const acl = await orm
     .select({ level: schema.mailbox_acls.level })
     .from(schema.mailbox_acls)
@@ -78,7 +87,16 @@ async function resolveOwnedMailbox(
     )
     .get();
 
-  if (acl && (acl.level === "write" || acl.level === "admin")) return mailbox;
+  if (!acl) return null;
+
+  if (level === "admin") {
+    // Mutations: admin only (drop write — Phase C3 / TASK-C3.18 / B-06).
+    return acl.level === "admin" ? mailbox : null;
+  }
+  // level === "read": any non-empty ACL grants read.
+  if (acl.level === "read" || acl.level === "write" || acl.level === "admin") {
+    return mailbox;
+  }
   return null;
 }
 
@@ -94,7 +112,12 @@ router.get("/:id/policies", async (c) => {
   const mailboxId = c.req.param("id");
   const orm = drizzle(c.env.DB, { schema });
 
-  const mailbox = await resolveOwnedMailbox(orm, mailboxId, ctx.user_id);
+  const mailbox = await resolveOwnedMailbox(
+    orm,
+    mailboxId,
+    ctx.user_id,
+    "read",
+  );
   if (!mailbox) return c.json({ error: "Mailbox not found" }, 404);
 
   const allowlist = await orm
@@ -130,7 +153,13 @@ router.patch("/:id/policies", async (c) => {
   const mailboxId = c.req.param("id");
   const orm = drizzle(c.env.DB, { schema });
 
-  const mailbox = await resolveOwnedMailbox(orm, mailboxId, ctx.user_id);
+  // Phase C3 / TASK-C3.18 (B-06) — mutations require owner or admin.
+  const mailbox = await resolveOwnedMailbox(
+    orm,
+    mailboxId,
+    ctx.user_id,
+    "admin",
+  );
   if (!mailbox) return c.json({ error: "Mailbox not found" }, 404);
 
   let body: {
@@ -250,7 +279,13 @@ router.post("/:id/policies/allowlist", async (c) => {
   const mailboxId = c.req.param("id");
   const orm = drizzle(c.env.DB, { schema });
 
-  const mailbox = await resolveOwnedMailbox(orm, mailboxId, ctx.user_id);
+  // Phase C3 / TASK-C3.18 (B-06) — allowlist mutations are admin-only.
+  const mailbox = await resolveOwnedMailbox(
+    orm,
+    mailboxId,
+    ctx.user_id,
+    "admin",
+  );
   if (!mailbox) return c.json({ error: "Mailbox not found" }, 404);
 
   let body: { sender_pattern?: unknown; kind?: unknown };
@@ -309,7 +344,13 @@ router.delete("/:id/policies/allowlist/:entryId", async (c) => {
   const entryId = c.req.param("entryId");
   const orm = drizzle(c.env.DB, { schema });
 
-  const mailbox = await resolveOwnedMailbox(orm, mailboxId, ctx.user_id);
+  // Phase C3 / TASK-C3.18 (B-06) — allowlist deletion is admin-only.
+  const mailbox = await resolveOwnedMailbox(
+    orm,
+    mailboxId,
+    ctx.user_id,
+    "admin",
+  );
   if (!mailbox) return c.json({ error: "Mailbox not found" }, 404);
 
   const entry = await orm

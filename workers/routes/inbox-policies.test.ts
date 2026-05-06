@@ -76,20 +76,31 @@ function makeAllowlistEntry(
 // ---------------------------------------------------------------------------
 
 /**
- * Mirrors resolveOwnedMailbox: returns the mailbox if the user owns it or has
- * a write/admin ACL, otherwise null.
+ * Mirrors `resolveOwnedMailbox(orm, mailboxId, userId, level)`.
+ *
+ * Phase C3 / TASK-C3.18 (B-06) — `level` discriminates GET (`'read'`) from
+ * mutations (`'admin'`). For `'admin'` we no longer accept `'write'` ACL
+ * grants; that delegated power is exclusive to mailbox creation/sharing
+ * flows, not policy mutation.
  */
 function resolveOwnedMailbox(
   mailbox: MailboxPolicyRow | null,
   acls: AclRow[],
   userId: string,
+  level: "read" | "admin" = "read",
 ): MailboxPolicyRow | null {
   if (!mailbox) return null;
   if (mailbox.owner_user_id === userId) return mailbox;
   const acl = acls.find(
     (a) => a.mailbox_id === mailbox.id && a.user_id === userId,
   );
-  if (acl && (acl.level === "write" || acl.level === "admin")) return mailbox;
+  if (!acl) return null;
+  if (level === "admin") {
+    return acl.level === "admin" ? mailbox : null;
+  }
+  if (acl.level === "read" || acl.level === "write" || acl.level === "admin") {
+    return mailbox;
+  }
   return null;
 }
 
@@ -201,33 +212,85 @@ describe("GET policies — default state", () => {
     expect(resolved).toBeNull();
   });
 
-  it("grants access via write-level ACL", () => {
+  it("GET — grants access via write-level ACL", () => {
     const mailbox = makeMailbox({ id: "m-1", owner_user_id: "u-bob" });
     const acls: AclRow[] = [
       { mailbox_id: "m-1", user_id: "u-alice", level: "write" },
     ];
     const ctx = makeCtx("u-alice");
-    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id);
+    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id, "read");
     expect(resolved).not.toBeNull();
   });
 
-  it("grants access via admin-level ACL", () => {
+  it("GET — grants access via admin-level ACL", () => {
     const mailbox = makeMailbox({ id: "m-1", owner_user_id: "u-bob" });
     const acls: AclRow[] = [
       { mailbox_id: "m-1", user_id: "u-alice", level: "admin" },
     ];
     const ctx = makeCtx("u-alice");
-    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id);
+    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id, "read");
     expect(resolved).not.toBeNull();
   });
 
-  it("denies access with only read-level ACL", () => {
+  it("GET — grants access via read-level ACL (Phase C3 / C3.18)", () => {
+    // Phase C3 / TASK-C3.18 — read-level ACL now grants GET (previously
+    // denied). The policy is informational so collaborators can see it
+    // before exercising their write/admin caps.
     const mailbox = makeMailbox({ id: "m-1", owner_user_id: "u-bob" });
     const acls: AclRow[] = [
       { mailbox_id: "m-1", user_id: "u-alice", level: "read" },
     ];
     const ctx = makeCtx("u-alice");
-    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id);
+    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id, "read");
+    expect(resolved).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase C3 / TASK-C3.18 (B-06) — admin-only mutations
+// ---------------------------------------------------------------------------
+
+describe("PATCH/POST/DELETE policies — admin-only (Phase C3 / B-06)", () => {
+  const mailbox = makeMailbox({ id: "m-1", owner_user_id: "u-bob" });
+  const ctx = makeCtx("u-alice");
+
+  it("owner can mutate (admin level)", () => {
+    const ownerCtx = makeCtx("u-bob");
+    const resolved = resolveOwnedMailbox(
+      mailbox,
+      [],
+      ownerCtx.user_id,
+      "admin",
+    );
+    expect(resolved).not.toBeNull();
+  });
+
+  it("admin-level ACL can mutate", () => {
+    const acls: AclRow[] = [
+      { mailbox_id: "m-1", user_id: "u-alice", level: "admin" },
+    ];
+    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id, "admin");
+    expect(resolved).not.toBeNull();
+  });
+
+  it("write-level ACL CANNOT mutate (the load-bearing C3.18 fix)", () => {
+    const acls: AclRow[] = [
+      { mailbox_id: "m-1", user_id: "u-alice", level: "write" },
+    ];
+    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id, "admin");
+    expect(resolved).toBeNull();
+  });
+
+  it("read-level ACL CANNOT mutate", () => {
+    const acls: AclRow[] = [
+      { mailbox_id: "m-1", user_id: "u-alice", level: "read" },
+    ];
+    const resolved = resolveOwnedMailbox(mailbox, acls, ctx.user_id, "admin");
+    expect(resolved).toBeNull();
+  });
+
+  it("no ACL → no mutation", () => {
+    const resolved = resolveOwnedMailbox(mailbox, [], ctx.user_id, "admin");
     expect(resolved).toBeNull();
   });
 });
