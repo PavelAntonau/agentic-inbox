@@ -12,7 +12,7 @@ import {
   bumpVersion,
   SETTINGS_KEYS,
 } from "../../lib/settings-cache";
-import { appendAudit } from "../../lib/audit-log";
+import { writeAudit } from "../../lib/audit-log";
 
 type AppVariables = {
   authzContext?: AuthzContext;
@@ -179,16 +179,15 @@ router.patch("/:key", async (c) => {
   // Bump version so in-memory cache invalidates within 30 s
   await bumpVersion(db, actor.user_id);
 
-  await appendAudit(
-    db,
+  await writeAudit(db, {
+    action: "settings.update",
+    target: { kind: "setting", id: key },
     actor,
-    "settings.update",
-    { kind: "setting", id: key },
-    {
+    meta: {
       from: previousValue,
       to: coercedValue,
     },
-  );
+  });
 
   return c.json({ ok: true, key, value: coercedValue });
 });

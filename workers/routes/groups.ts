@@ -6,7 +6,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import { forGroup, type AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
-import { appendAudit } from "../lib/audit-log";
+import { writeAudit } from "../lib/audit-log";
 
 type AppVariables = {
   authzContext?: AuthzContext;
@@ -144,15 +144,14 @@ router.post("/", async (c) => {
     })
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.created",
-    { kind: "group", id },
-    {
+  await writeAudit(c.env.DB, {
+    action: "group.created",
+    target: { kind: "group", id },
+    actor: ctx,
+    meta: {
       name,
     },
-  );
+  });
 
   return c.json(
     { id, name, description, owner_user_id: ctx.user_id, created_at: now },
@@ -271,13 +270,12 @@ router.patch("/:groupId", async (c) => {
     .where(eq(schema.groups.id, groupId))
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.updated",
-    { kind: "group", id: groupId },
-    updates,
-  );
+  await writeAudit(c.env.DB, {
+    action: "group.updated",
+    target: { kind: "group", id: groupId },
+    actor: ctx,
+    meta: updates,
+  });
 
   return c.json({ ok: true });
 });
@@ -317,15 +315,14 @@ router.delete("/:groupId", async (c) => {
 
   await db.delete(schema.groups).where(eq(schema.groups.id, groupId)).run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.deleted",
-    { kind: "group", id: groupId },
-    {
+  await writeAudit(c.env.DB, {
+    action: "group.deleted",
+    target: { kind: "group", id: groupId },
+    actor: ctx,
+    meta: {
       name: group.name,
     },
-  );
+  });
 
   return c.json({ ok: true });
 });
@@ -388,13 +385,12 @@ router.post("/:groupId/transfer", async (c) => {
     .where(eq(schema.groups.id, groupId))
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.ownership-transferred",
-    { kind: "group", id: groupId },
-    { from: group.owner_user_id, to: newOwnerId },
-  );
+  await writeAudit(c.env.DB, {
+    action: "group.ownership-transferred",
+    target: { kind: "group", id: groupId },
+    actor: ctx,
+    meta: { from: group.owner_user_id, to: newOwnerId },
+  });
 
   return c.json({ ok: true });
 });
@@ -544,16 +540,15 @@ router.post("/:groupId/members/:userId/role", async (c) => {
 
   const action =
     newRole === "admin" ? "group.member-promoted" : "group.member-demoted";
-  await appendAudit(
-    c.env.DB,
-    ctx,
+  await writeAudit(c.env.DB, {
     action,
-    { kind: "group_member", id: userId },
-    {
+    target: { kind: "group_member", id: userId },
+    actor: ctx,
+    meta: {
       group_id: groupId,
       new_role: newRole,
     },
-  );
+  });
 
   return c.json({ ok: true });
 });
@@ -611,15 +606,14 @@ router.delete("/:groupId/members/:userId", async (c) => {
         ),
       )
       .run();
-    await appendAudit(
-      c.env.DB,
-      ctx,
-      "group.member-left",
-      { kind: "group_member", id: userId },
-      {
+    await writeAudit(c.env.DB, {
+      action: "group.member-left",
+      target: { kind: "group_member", id: userId },
+      actor: ctx,
+      meta: {
         group_id: groupId,
       },
-    );
+    });
     return c.json({ ok: true });
   }
 
@@ -668,13 +662,12 @@ router.delete("/:groupId/members/:userId", async (c) => {
     )
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.member-removed",
-    { kind: "group_member", id: userId },
-    { group_id: groupId, removed_by: ctx.user_id },
-  );
+  await writeAudit(c.env.DB, {
+    action: "group.member-removed",
+    target: { kind: "group_member", id: userId },
+    actor: ctx,
+    meta: { group_id: groupId, removed_by: ctx.user_id },
+  });
 
   return c.json({ ok: true });
 });

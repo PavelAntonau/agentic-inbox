@@ -24,7 +24,7 @@ import {
   revokePatForUser,
 } from "../db/queries/pats";
 import { mintPat, newPatId } from "../lib/pat-tokens";
-import { appendAudit } from "../lib/audit-log";
+import { writeAudit } from "../lib/audit-log";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
 
@@ -119,19 +119,18 @@ router.post("/", async (c) => {
     expiresAt: expires_at ?? null,
   });
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "pat.create",
-    { kind: "oauth_personal_access_token", id: pat.id },
-    {
+  await writeAudit(c.env.DB, {
+    action: "pat.create",
+    target: { kind: "oauth_personal_access_token", id: pat.id },
+    actor: ctx,
+    meta: {
       label,
       scopes,
       mailbox_id: mailbox_id ?? null,
       ip_allowlist_count: ip_allowlist?.length ?? 0,
       expires_at: expires_at ?? null,
     },
-  );
+  });
 
   return c.json(
     {
@@ -179,13 +178,12 @@ router.delete("/:id", async (c) => {
   const revokedAt = await revokePatForUser(orm, ctx.user_id, id, now);
   if (revokedAt == null) return c.json({ error: "PAT not found" }, 404);
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "pat.revoke",
-    { kind: "oauth_personal_access_token", id },
-    { revoked_at: revokedAt },
-  );
+  await writeAudit(c.env.DB, {
+    action: "pat.revoke",
+    target: { kind: "oauth_personal_access_token", id },
+    actor: ctx,
+    meta: { revoked_at: revokedAt },
+  });
 
   return new Response(null, { status: 204 });
 });

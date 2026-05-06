@@ -6,7 +6,7 @@ import { eq, and, sql, or } from "drizzle-orm";
 import * as schema from "../db/control-plane/schema";
 import { forGroup, type AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
-import { appendAudit } from "../lib/audit-log";
+import { writeAudit } from "../lib/audit-log";
 import { upsertEmail } from "../lib/cloudflare-access-policy";
 import { getEmailBinding } from "../lib/mocks/email-binding";
 import { getSettings } from "../lib/settings-cache";
@@ -222,19 +222,18 @@ router.post("/", async (c) => {
     );
   }
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "workspace.invite-via-group",
-    { kind: "invitation", id: finalInvitationId },
-    {
+  await writeAudit(c.env.DB, {
+    action: "workspace.invite-via-group",
+    target: { kind: "invitation", id: finalInvitationId },
+    actor: ctx,
+    meta: {
       group_id: groupId,
       target: rawEmail,
       invitee_user_id_or_null: inviteeUserId,
       mail_send_status: sendError ? "failed" : "sent",
       mail_send_error: sendError,
     },
-  );
+  });
 
   // Privacy contract: ALWAYS return { sent: true } so callers cannot probe
   // whether the address corresponds to an existing user. Mail-send failures
@@ -305,13 +304,12 @@ router.post("/:id/accept", async (c) => {
     .where(eq(schema.group_invitations.id, id))
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.member-joined",
-    { kind: "group_member", id: ctx.user_id },
-    { group_id: invitation.group_id, invitation_id: id },
-  );
+  await writeAudit(c.env.DB, {
+    action: "group.member-joined",
+    target: { kind: "group_member", id: ctx.user_id },
+    actor: ctx,
+    meta: { group_id: invitation.group_id, invitation_id: id },
+  });
 
   return c.json({ ok: true });
 });
@@ -360,13 +358,12 @@ router.post("/:id/decline", async (c) => {
     .where(eq(schema.group_invitations.id, id))
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.invite-declined",
-    { kind: "invitation", id },
-    { group_id: invitation.group_id },
-  );
+  await writeAudit(c.env.DB, {
+    action: "group.invite-declined",
+    target: { kind: "invitation", id },
+    actor: ctx,
+    meta: { group_id: invitation.group_id },
+  });
 
   return c.json({ ok: true });
 });
@@ -414,13 +411,12 @@ router.post("/:id/cancel", async (c) => {
     .where(eq(schema.group_invitations.id, id))
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "group.invite-cancelled",
-    { kind: "invitation", id },
-    { group_id: invitation.group_id },
-  );
+  await writeAudit(c.env.DB, {
+    action: "group.invite-cancelled",
+    target: { kind: "invitation", id },
+    actor: ctx,
+    meta: { group_id: invitation.group_id },
+  });
 
   return c.json({ ok: true });
 });

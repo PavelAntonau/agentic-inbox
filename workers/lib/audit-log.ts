@@ -7,29 +7,20 @@ import type { AuthzContext } from "../db/control-plane/forGroup";
 
 /**
  * Phase C3 / TASK-C3.1 — unified audit-log helper.
+ * Phase E / TASK-E.3 — full migration: every call site uses `writeAudit`
+ *   directly. The legacy `appendAudit` shim is removed.
  *
- * Both the "human path" (`appendAudit`) and the "MCP path"
- * (`writeMcpAuditRow` over in `workers/middleware/audit-log-mcp.ts`) used to
- * have their own write shape: identical D1 insert, divergent metadata, two
- * separate try/catch contracts, two ways to derive the source IP. The audit
- * (P2-3) flagged the divergence: the MCP helper still honoured an
- * `x-forwarded-for` fallback, which is spoof-able at the public edge — the
- * canonical Workers-runtime client IP is `cf-connecting-ip` only.
- *
- * The unified helper below is the single chokepoint:
+ * `writeAudit` is the single chokepoint:
  *   • Insert is wrapped in an internal try/catch (fire-and-forget).
- *   • Both `actor_user_id` and `actor_token_id` are recorded when both can be
- *     derived (matches the dual-credential audit semantics — a service token
- *     row carries both the user it was issued to AND the token id).
- *   • Source IP is `cf-connecting-ip` only; `x-forwarded-for` is dropped.
+ *   • Pass an `AuthzContext` via `actor`, OR pass `actor_user_id` /
+ *     `actor_token_id` explicitly (the MCP path does the latter so it can
+ *     record both columns when a service token row carries both the user
+ *     it was issued to AND the token id).
+ *   • Source IP is `cf-connecting-ip` only; `x-forwarded-for` is dropped
+ *     (the MCP helper had a spoofable fallback before — audit P2-3).
  *   • Size caps protect against a misbehaving client filling D1: tool_name
  *     truncated at 200 chars, mcp_method truncated at 100 chars, meta_json
  *     truncated at 8 KB after stringify.
- *
- * The legacy `appendAudit(db, actor, action, target, meta?)` signature is
- * preserved as a thin wrapper for Worker B's files (groups, mailboxes,
- * pats, contacts, admin/*) which migrate piecemeal — the wrapper feeds the
- * unified helper underneath.
  */
 
 const TOOL_NAME_MAX = 200;
@@ -77,8 +68,18 @@ export interface AuditWrite {
   action: string;
   /** Free-form target descriptor. `kind` becomes `target_type`, `id` becomes `target_id`. */
   target: { kind: string; id: string };
-  /** Either or both — both are recorded when both are present. */
+  /**
+   * Phase E / TASK-E.3 — convenience: pass the AuthzContext directly and
+   * the helper splits it into `actor_user_id` / `actor_token_id` using the
+   * same rule the legacy shim used (token-issued requests record only the
+   * token id; user-credential requests record only the user id). When you
+   * already have the ids in hand (the MCP path does), pass them via the
+   * explicit fields below instead.
+   */
+  actor?: AuthzContext;
+  /** Explicit user-id override; pass when `actor` is not available. */
   actor_user_id?: string | null;
+  /** Explicit token-id override; pass when `actor` is not available. */
   actor_token_id?: string | null;
   /** Group scope when the action is group-bound; null otherwise. */
   scope_group_id?: string | null;
@@ -89,6 +90,34 @@ export interface AuditWrite {
   /** MCP-specific overrides — when set, override target_type/target_id. */
   mcp_method?: string | null;
   tool_name?: string | null;
+}
+
+/**
+ * Derive the (user_id, token_id) pair the D1 insert needs from whichever
+ * shape the caller supplied. Order of precedence:
+ *   1. Explicit `actor_user_id` / `actor_token_id` — both default to null
+ *      when missing.
+ *   2. `actor: AuthzContext` — token-issued contexts record only the token,
+ *      user-credential contexts record only the user.
+ *   3. Both null when neither is supplied (system-emitted audit rows).
+ */
+function deriveActor(row: AuditWrite): {
+  user: string | null;
+  token: string | null;
+} {
+  if (row.actor_user_id !== undefined || row.actor_token_id !== undefined) {
+    return {
+      user: row.actor_user_id ?? null,
+      token: row.actor_token_id ?? null,
+    };
+  }
+  if (row.actor) {
+    return {
+      user: row.actor.agent_token_id ? null : row.actor.user_id,
+      token: row.actor.agent_token_id ?? null,
+    };
+  }
+  return { user: null, token: null };
 }
 
 /**
@@ -130,12 +159,14 @@ export async function writeAudit(
           : undefined,
     );
 
+    const { user, token } = deriveActor(row);
+
     await orm
       .insert(schema.audit_log)
       .values({
         at: Date.now(),
-        actor_user_id: row.actor_user_id ?? null,
-        actor_token_id: row.actor_token_id ?? null,
+        actor_user_id: user,
+        actor_token_id: token,
         action: row.action,
         target_type,
         target_id,
@@ -151,31 +182,8 @@ export async function writeAudit(
   }
 }
 
-/**
- * Append a row to the audit_log table — legacy signature preserved for
- * call sites that haven't migrated to `writeAudit` yet.
- *
- * Designed to be fire-and-forget — internal try/catch swallows any error.
- *
- * @param db     D1Database binding
- * @param actor  Resolved authzContext for the requesting user
- * @param action Dot-namespaced action string (e.g. 'workspace.invite', 'settings.update')
- * @param target { kind: string; id: string } — what was acted on
- * @param meta   Optional free-form metadata (from/to values, method, etc.)
- */
-export async function appendAudit(
-  db: D1Database,
-  actor: AuthzContext,
-  action: string,
-  target: { kind: string; id: string },
-  meta?: Record<string, unknown>,
-): Promise<void> {
-  await writeAudit(db, {
-    action,
-    target,
-    actor_user_id: actor.agent_token_id ? null : actor.user_id,
-    actor_token_id: actor.agent_token_id ?? null,
-    meta,
-    ip: null,
-  });
-}
+// Phase E / TASK-E.3 — the legacy `appendAudit(db, actor, action, target,
+// meta?)` shim has been REMOVED. Every call site uses `writeAudit(db, {
+// action, target, actor, meta })` directly. The migration-completeness test
+// at `workers/lib/audit-log.test.ts` asserts no `appendAudit` reference
+// remains anywhere in `workers/`.

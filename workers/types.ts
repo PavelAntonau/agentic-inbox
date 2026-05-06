@@ -41,6 +41,18 @@ export interface Env extends Cloudflare.Env {
   RESEND_API_KEY?: string;
   // BETTER_AUTH_URL is declared in wrangler.jsonc and inherited via Cloudflare.Env.
   /**
+   * Phase E / TASK-E.2 (OQ-P0-7) — defense-in-depth second factor on the
+   * bootstrap-owner signup path. When set, the better-auth signup hook
+   * requires both `email == BOOTSTRAP_OWNER_EMAIL` AND a matching
+   * `x-bootstrap-token` header. When unset, the bootstrap path falls back
+   * to email-match only (Phase C1 / A-01 baseline).
+   *
+   * Set via `wrangler secret put BOOTSTRAP_OWNER_TOKEN`. Once the
+   * BOOTSTRAP_OWNER user has been created, the bootstrap path is single-use:
+   * additional global-owner signups are refused even with a matching token.
+   */
+  BOOTSTRAP_OWNER_TOKEN?: string;
+  /**
    * Autonomous-local-testing umbrella switch. Set to `"1"` in `.dev.vars`
    * (gitignored) to enable: mock CF Access shim, canned AI replies, R2-backed
    * outbox, fixture data for CF management API, /__mock/* router. Production

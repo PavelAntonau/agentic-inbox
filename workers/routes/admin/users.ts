@@ -8,7 +8,7 @@ import * as schema from "../../db/control-plane/schema";
 import type { AuthzContext } from "../../db/control-plane/forGroup";
 import type { Env } from "../../types";
 import { canAct } from "../../lib/peer-protection";
-import { appendAudit } from "../../lib/audit-log";
+import { writeAudit } from "../../lib/audit-log";
 import { upsertEmail } from "../../lib/cloudflare-access-policy";
 import { getSettings } from "../../lib/settings-cache";
 import { getEmailBinding } from "../../lib/mocks/email-binding";
@@ -168,17 +168,16 @@ router.post("/invite", async (c) => {
       .get();
 
     if (created) {
-      await appendAudit(
-        db,
+      await writeAudit(db, {
+        action: "workspace.invite",
+        target: { kind: "user", id: created.id },
         actor,
-        "workspace.invite",
-        { kind: "user", id: created.id },
-        {
+        meta: {
           method: "admin-invite",
           email,
           access_mocked: accessResult.mocked ?? false,
         },
-      );
+      });
 
       // Auto-provision an inbound mailbox when the invitee's email is on
       // a domain we own. Without this, the OTP email better-auth sends to
@@ -227,18 +226,17 @@ router.post("/invite", async (c) => {
     }
   } else {
     // User already exists — write audit but don't leak that fact in the response
-    await appendAudit(
-      db,
+    await writeAudit(db, {
+      action: "workspace.invite",
+      target: { kind: "user", id: existingUser.id },
       actor,
-      "workspace.invite",
-      { kind: "user", id: existingUser.id },
-      {
+      meta: {
         method: "admin-invite",
         email,
         already_existed: true,
         access_mocked: accessResult.mocked ?? false,
       },
-    );
+    });
   }
 
   // Send the invitation email. Plain-text spec: one paragraph, one URL
@@ -269,18 +267,17 @@ router.post("/invite", async (c) => {
     );
   }
 
-  await appendAudit(
-    db,
+  await writeAudit(db, {
+    action: "workspace.invite-mail",
+    target: { kind: "user", id: existingUser?.id ?? "pending" },
     actor,
-    "workspace.invite-mail",
-    { kind: "user", id: existingUser?.id ?? "pending" },
-    {
+    meta: {
       method: "admin-invite",
       email,
       mail_send_status: mailSendError ? "failed" : "sent",
       mail_send_error: mailSendError,
     },
-  );
+  });
 
   // Always return ok: true — privacy (E15/E16)
   return c.json({ ok: true });
@@ -381,16 +378,15 @@ router.post("/:id/promote", async (c) => {
     .where(eq(schema.users.id, targetId))
     .run();
 
-  await appendAudit(
-    db,
+  await writeAudit(db, {
+    action: "user.promote",
+    target: { kind: "user", id: targetId },
     actor,
-    "user.promote",
-    { kind: "user", id: targetId },
-    {
+    meta: {
       from: target.role,
       to: "global_admin",
     },
-  );
+  });
 
   return c.json({ ok: true, current_role: "global_admin" });
 });
@@ -446,16 +442,15 @@ router.post("/:id/demote", async (c) => {
     .where(eq(schema.users.id, targetId))
     .run();
 
-  await appendAudit(
-    db,
+  await writeAudit(db, {
+    action: "user.demote",
+    target: { kind: "user", id: targetId },
     actor,
-    "user.demote",
-    { kind: "user", id: targetId },
-    {
+    meta: {
       from: target.role,
       to: "user",
     },
-  );
+  });
 
   return c.json({ ok: true, current_role: "user" });
 });
@@ -517,16 +512,15 @@ router.delete("/:id", async (c) => {
   }
 
   // Audit before delete (the row will no longer exist)
-  await appendAudit(
-    db,
+  await writeAudit(db, {
+    action: "user.remove",
+    target: { kind: "user", id: targetId },
     actor,
-    "user.remove",
-    { kind: "user", id: targetId },
-    {
+    meta: {
       email: target.email,
       role: target.role,
     },
-  );
+  });
 
   await orm.delete(schema.users).where(eq(schema.users.id, targetId)).run();
 

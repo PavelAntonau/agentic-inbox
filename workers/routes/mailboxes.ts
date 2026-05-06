@@ -21,7 +21,7 @@ import { z } from "zod";
 import * as schema from "../db/control-plane/schema";
 import { forGroup, type AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
-import { appendAudit } from "../lib/audit-log";
+import { writeAudit } from "../lib/audit-log";
 import { buildMailboxTree } from "../lib/mailbox-tree";
 import { listMailboxes } from "../lib/email-helpers";
 import {
@@ -297,15 +297,14 @@ router.post("/", async (c) => {
     })
     .run();
 
-  void appendAudit(
-    c.env.DB,
+  void writeAudit(c.env.DB, {
+    action: "mailbox.create",
+    target: { kind: "mailbox", id: mailboxId },
     actor,
-    "mailbox.create",
-    { kind: "mailbox", id: mailboxId },
-    {
+    meta: {
       address,
     },
-  );
+  });
 
   return c.json(
     {
@@ -391,15 +390,14 @@ router.post("/:id/share", async (c) => {
     })
     .run();
 
-  void appendAudit(
-    c.env.DB,
+  void writeAudit(c.env.DB, {
+    action: "mailbox.share",
+    target: { kind: "mailbox", id: mailboxId },
     actor,
-    "mailbox.share",
-    { kind: "mailbox", id: mailboxId },
-    {
+    meta: {
       group_id,
     },
-  );
+  });
 
   return c.json({ ok: true });
 });
@@ -469,15 +467,14 @@ router.delete("/:id/share/:groupId", async (c) => {
     return c.json({ error: "Mailbox is not in that group" }, 404);
   }
 
-  void appendAudit(
-    c.env.DB,
+  void writeAudit(c.env.DB, {
+    action: "mailbox.unshare",
+    target: { kind: "mailbox", id: mailboxId },
     actor,
-    "mailbox.unshare",
-    { kind: "mailbox", id: mailboxId },
-    {
+    meta: {
       group_id: groupId,
     },
-  );
+  });
 
   return c.json({ ok: true });
 });
@@ -554,16 +551,15 @@ router.post("/:id/transfer", async (c) => {
     })
     .run();
 
-  void appendAudit(
-    c.env.DB,
+  void writeAudit(c.env.DB, {
+    action: "mailbox.transfer",
+    target: { kind: "mailbox", id: mailboxId },
     actor,
-    "mailbox.transfer",
-    { kind: "mailbox", id: mailboxId },
-    {
+    meta: {
       from_user_id: mailbox.owner_user_id,
       to_user_id: new_owner_user_id,
     },
-  );
+  });
 
   return c.json({ ok: true });
 });
@@ -589,15 +585,14 @@ router.delete("/:id", async (c) => {
     .where(eq(schema.mailboxes.id, mailboxId))
     .run();
 
-  void appendAudit(
-    c.env.DB,
+  void writeAudit(c.env.DB, {
+    action: "mailbox.delete",
+    target: { kind: "mailbox", id: mailboxId },
     actor,
-    "mailbox.delete",
-    { kind: "mailbox", id: mailboxId },
-    {
+    meta: {
       address: mailbox.address,
     },
-  );
+  });
 
   return c.body(null, 204);
 });

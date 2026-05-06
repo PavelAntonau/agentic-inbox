@@ -7,6 +7,7 @@
 // the existing tests/e2e/* suite which already boots the full app harness.
 
 import { describe, expect, it } from "vitest";
+import { buildCspDirectives } from "./lib/csp";
 
 // ---------------------------------------------------------------------------
 // TASK-C3.6 — CSP path classifier semantics
@@ -71,59 +72,58 @@ describe("CSP path classifier — Phase C3 / TASK-C3.6", () => {
 
 // ---------------------------------------------------------------------------
 // TASK-C3.6 — CSP directive shape
+// (Phase E / TASK-E.1 — upgraded to nonce + 'strict-dynamic'. The detailed
+// helper-level assertions live in workers/csp.test.ts; this file keeps the
+// "what the route shape looks like" smoke check.)
 // ---------------------------------------------------------------------------
-//
-// Independent assertion of the CSP directive content — we lock the strict
-// posture so a future loosening (e.g. adding 'unsafe-eval') is a deliberate,
-// reviewable diff. Mirrors the constant in workers/app.ts.
 
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join("; ");
+const SAMPLE_NONCE = "test-nonce-fixture";
+const CSP_WITH_NONCE = buildCspDirectives(SAMPLE_NONCE);
 
-describe("CSP directive content — Phase C3 / TASK-C3.6", () => {
+describe("CSP directive content — Phase C3 / TASK-C3.6 + Phase E / TASK-E.1", () => {
   it("default-src is self", () => {
-    expect(CSP_DIRECTIVES).toContain("default-src 'self'");
+    expect(CSP_WITH_NONCE).toContain("default-src 'self'");
   });
 
-  it("script-src allows self + 'unsafe-inline' but NOT 'unsafe-eval'", () => {
-    // RR7 hydration injects inline <script> tags carrying serialized loader
-    // data — those must be allowed for the SPA to hydrate. 'unsafe-eval'
-    // must NOT appear; eval-based dynamic code execution remains blocked.
-    // Defense-in-depth (sandboxed iframe + DOMPurify) covers email-body XSS
-    // independent of script-src; remaining XSS surfaces are protected by
-    // the still-strict connect-src / object-src / form-action / base-uri.
-    const scriptSrcLine = CSP_DIRECTIVES.split("; ").find((d) =>
+  it("script-src is nonce + 'strict-dynamic' — 'unsafe-inline' GONE (Phase E / TASK-E.1)", () => {
+    // RR7 hydration tags + ReactDOM bootstrap script all get the per-request
+    // nonce stamped on them by the HTMLRewriter in workers/app.ts. With
+    // 'strict-dynamic', any script those nonced scripts pull in transitively
+    // is also trusted — covering the entry-client chunk graph without
+    // enumerating hashes. 'unsafe-inline' MUST NOT appear; 'unsafe-eval'
+    // MUST NOT appear.
+    const scriptSrcLine = CSP_WITH_NONCE.split("; ").find((d) =>
       d.startsWith("script-src"),
     )!;
     expect(scriptSrcLine).toContain("'self'");
-    expect(scriptSrcLine).toContain("'unsafe-inline'");
+    expect(scriptSrcLine).toContain(`'nonce-${SAMPLE_NONCE}'`);
+    expect(scriptSrcLine).toContain("'strict-dynamic'");
+    expect(scriptSrcLine).not.toContain("'unsafe-inline'");
     expect(scriptSrcLine).not.toContain("'unsafe-eval'");
   });
 
+  it("style-src keeps 'unsafe-inline' — OWASP-accepted relaxation for inline <style>", () => {
+    const styleSrcLine = CSP_WITH_NONCE.split("; ").find((d) =>
+      d.startsWith("style-src"),
+    )!;
+    expect(styleSrcLine).toContain("'self'");
+    expect(styleSrcLine).toContain("'unsafe-inline'");
+  });
+
   it("frame-ancestors is 'none' (defense-in-depth alongside X-Frame-Options)", () => {
-    expect(CSP_DIRECTIVES).toContain("frame-ancestors 'none'");
+    expect(CSP_WITH_NONCE).toContain("frame-ancestors 'none'");
   });
 
   it("object-src is 'none' (no plugin embedding)", () => {
-    expect(CSP_DIRECTIVES).toContain("object-src 'none'");
+    expect(CSP_WITH_NONCE).toContain("object-src 'none'");
   });
 
   it("base-uri is 'self' (no base-tag injection)", () => {
-    expect(CSP_DIRECTIVES).toContain("base-uri 'self'");
+    expect(CSP_WITH_NONCE).toContain("base-uri 'self'");
   });
 
   it("form-action is 'self' (no off-origin form posts)", () => {
-    expect(CSP_DIRECTIVES).toContain("form-action 'self'");
+    expect(CSP_WITH_NONCE).toContain("form-action 'self'");
   });
 });
 

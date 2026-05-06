@@ -2,17 +2,23 @@
 // Licensed under the Apache 2.0 license
 //
 // Phase C3 / TASK-C3.1 — unified audit-log helper coverage.
+// Phase E / TASK-E.3 — legacy `appendAudit` shim removed; `writeAudit`
+//   now accepts `actor: AuthzContext` directly. Migration-completeness
+//   assertion below scans every workers/*.ts non-test file.
 //
-// We exercise the pure `clientIp` helper directly. The `writeAudit` /
-// `appendAudit` D1 paths are integration-tested via the existing route tests
-// (groups, mailboxes, etc.) — here we focus on:
+// We exercise the pure `clientIp` helper directly. The `writeAudit` D1
+// path is integration-tested via the existing route tests (groups,
+// mailboxes, etc.) — here we focus on:
 //   • cf-connecting-ip only (no x-forwarded-for fallback) — audit P2-3.
 //   • size caps (target_id ≤ 200, mcp_method ≤ 100, meta_json ≤ 8 KB).
 //   • internal try/catch — D1 throw is swallowed.
-//   • legacy `appendAudit` shape still feeds `writeAudit` underneath.
+//   • `actor: AuthzContext` shorthand — splits user/token id correctly.
+//   • TASK-E.3: NO `appendAudit` references remain anywhere in workers/.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { writeAudit, appendAudit, clientIp } from "./audit-log";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { writeAudit, clientIp } from "./audit-log";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 
 // -- clientIp ---------------------------------------------------------------
@@ -162,9 +168,12 @@ describe("writeAudit — Phase C3 / TASK-C3.1", () => {
   });
 });
 
-// -- appendAudit (legacy shape, feeds writeAudit) ---------------------------
+// -- writeAudit + actor shorthand -------------------------------------------
+// Phase E / TASK-E.3 — the legacy `appendAudit` shim was removed; the same
+// behavior is preserved by passing `actor: AuthzContext` to writeAudit. These
+// tests lock the actor-splitting contract.
 
-describe("appendAudit — Phase C3 / TASK-C3.1 legacy shim", () => {
+describe("writeAudit({ actor }) shorthand — Phase E / TASK-E.3", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
@@ -185,13 +194,12 @@ describe("appendAudit — Phase C3 / TASK-C3.1 legacy shim", () => {
 
   it("user actor — actor_user_id set, actor_token_id null", async () => {
     const { db, captured } = makeFakeDb();
-    await appendAudit(
-      db,
-      userActor,
-      "mailbox.create",
-      { kind: "mailbox", id: "m1" },
-      { name: "Inbox" },
-    );
+    await writeAudit(db, {
+      action: "mailbox.create",
+      target: { kind: "mailbox", id: "m1" },
+      actor: userActor,
+      meta: { name: "Inbox" },
+    });
     expect(captured).toHaveLength(1);
     const blob = JSON.stringify(captured);
     expect(blob.includes("user-1")).toBe(true);
@@ -200,9 +208,10 @@ describe("appendAudit — Phase C3 / TASK-C3.1 legacy shim", () => {
 
   it("token actor — actor_token_id set, actor_user_id null", async () => {
     const { db, captured } = makeFakeDb();
-    await appendAudit(db, tokenActor, "mcp.action", {
-      kind: "mailbox",
-      id: "m1",
+    await writeAudit(db, {
+      action: "mcp.action",
+      target: { kind: "mailbox", id: "m1" },
+      actor: tokenActor,
     });
     expect(captured).toHaveLength(1);
     const blob = JSON.stringify(captured);
@@ -214,7 +223,66 @@ describe("appendAudit — Phase C3 / TASK-C3.1 legacy shim", () => {
   it("D1 errors are swallowed (legacy fire-and-forget contract preserved)", async () => {
     const { db } = makeFakeDb({ throwOnRun: true });
     await expect(
-      appendAudit(db, userActor, "x.y", { kind: "user", id: "u1" }),
+      writeAudit(db, {
+        action: "x.y",
+        target: { kind: "user", id: "u1" },
+        actor: userActor,
+      }),
     ).resolves.toBeUndefined();
+  });
+});
+
+// -- migration completeness — Phase E / TASK-E.3 ----------------------------
+//
+// Walks workers/*.ts (excluding *.test.ts and audit-log.ts itself which
+// retains comment-only references explaining the migration) and asserts no
+// `appendAudit(` call remains. This is the load-bearing assertion the task's
+// "no remaining appendAudit references" requirement maps to.
+
+function* walk(dir: string): Generator<string> {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules") continue;
+      yield* walk(full);
+    } else if (entry.isFile()) {
+      yield full;
+    }
+  }
+}
+
+const MIGRATION_EXEMPT_FILES = new Set<string>([
+  // The helper file documents the removed shim in its header / comments.
+  "workers/lib/audit-log.ts",
+  // This test file itself talks about appendAudit in describe() strings.
+  "workers/lib/audit-log-c3.test.ts",
+]);
+
+describe("Phase E / TASK-E.3 migration completeness", () => {
+  it("no `appendAudit(` call site remains in workers/ (excluding tests + helper-internal comments)", () => {
+    // process.cwd() under vitest is the project root.
+    const root = path.resolve(process.cwd(), "workers");
+    const offenders: string[] = [];
+    for (const file of walk(root)) {
+      if (!file.endsWith(".ts")) continue;
+      if (file.endsWith(".test.ts")) continue;
+      const relPath = path.relative(process.cwd(), file);
+      if (MIGRATION_EXEMPT_FILES.has(relPath)) continue;
+      const text = fs.readFileSync(file, "utf8");
+      // Match `appendAudit(` — the call-site shape. Word boundary in front
+      // catches both bare calls (`appendAudit(`) and member calls
+      // (`mod.appendAudit(`); it also catches imports like
+      // `import { appendAudit } from …` which we want to flag as offenders
+      // because nothing should still be importing the removed export.
+      if (/\bappendAudit\b/.test(text)) {
+        offenders.push(relPath);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("`appendAudit` is no longer exported from workers/lib/audit-log.ts", async () => {
+    const mod = await import("./audit-log");
+    expect("appendAudit" in mod).toBe(false);
   });
 });

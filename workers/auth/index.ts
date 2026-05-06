@@ -79,6 +79,7 @@ function loadStaticSigningKey(env: Env): StaticSigningJwk {
 
 /**
  * Phase C1 / A-01 — invite-required signup decision (extracted for tests).
+ * Phase E / TASK-E.2 — bootstrap-token second factor on the bootstrap path.
  *
  * Returns a `data` object the better-auth `before(user)` hook can return
  * verbatim, OR throws `APIError("FORBIDDEN")` when the email is neither the
@@ -89,6 +90,14 @@ function loadStaticSigningKey(env: Env): StaticSigningJwk {
  *
  * Permitted creation paths (fail-CLOSED otherwise):
  *   1. BOOTSTRAP_OWNER_EMAIL — promotes to `global_owner` role.
+ *      Phase E / TASK-E.2 (OQ-P0-7) defense-in-depth gates:
+ *        a. If a `global_owner` user already exists in D1, the bootstrap
+ *           path is closed (single-use). Use the invite flow for additional
+ *           admins.
+ *        b. If `env.BOOTSTRAP_OWNER_TOKEN` is set, the request MUST carry
+ *           a matching `x-bootstrap-token` header (passed through here as
+ *           `bootstrapToken`). Without the env var, the bootstrap path
+ *           falls back to email-match only (Phase C1 / A-01 baseline).
  *   2. A `group_invitations` row matching the lower-cased email with
  *      status in {pending, accepted}.
  */
@@ -96,6 +105,7 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
   user: U,
   env: Env,
   orm: ReturnType<typeof drizzle>,
+  bootstrapToken?: string | null,
 ): Promise<{ data: U }> {
   const rawEmail = typeof user?.email === "string" ? user.email : "";
   // C3.3: route through the shared canonicalizer instead of inline
@@ -109,6 +119,44 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
     });
   }
   if (isBootstrapEmail(rawEmail, env)) {
+    // Phase E / TASK-E.2.a — single-use enforcement. Even with a matching
+    // bootstrap token, refuse to mint a SECOND global_owner. The very
+    // first OTP-completed signup wins; subsequent attempts route through
+    // the invite flow (or, more often, never reach this hook because
+    // better-auth's create hook only fires when no user row exists for
+    // the email).
+    const existingOwner = await orm
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.role, "global_owner"))
+      .get();
+    if (existingOwner) {
+      throw new APIError("FORBIDDEN", {
+        message:
+          "A bootstrap owner already exists. Use the invitation flow for additional admins.",
+      });
+    }
+
+    // Phase E / TASK-E.2.b — second factor when configured.
+    const expectedToken = env.BOOTSTRAP_OWNER_TOKEN;
+    if (typeof expectedToken === "string" && expectedToken.length > 0) {
+      // Constant-time comparison to deny the timing-side-channel that a
+      // naive `===` would expose. Both strings are normalized to ensure
+      // lengths match before the byte-wise compare; mismatch on length
+      // alone short-circuits to FORBIDDEN.
+      const presented =
+        typeof bootstrapToken === "string" ? bootstrapToken : "";
+      if (
+        presented.length !== expectedToken.length ||
+        !timingSafeEqualString(presented, expectedToken)
+      ) {
+        throw new APIError("FORBIDDEN", {
+          message:
+            "Bootstrap owner signup requires a valid bootstrap token header.",
+        });
+      }
+    }
+
     return {
       data: { ...user, email: normalizedEmail, role: "global_owner" } as U,
     };
@@ -131,6 +179,20 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
     message:
       "Sign-up is invite-only. Ask a workspace administrator to invite this email.",
   });
+}
+
+/**
+ * Constant-time string compare — both inputs are assumed equal-length when
+ * called (callers branch on length first to avoid leaking expected length).
+ * Returns false the moment any byte differs, but only after walking the
+ * full string — accumulator pattern keeps the timing flat.
+ */
+function timingSafeEqualString(a: string, b: string): boolean {
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
 }
 
 /** Minimal session shape returned by better-auth's getSession. */
@@ -173,10 +235,19 @@ export interface ServerAuth {
  * the resulting Response. Do NOT cache this — drizzle binds to the per-
  * request D1 connection, and reusing a stale instance across requests
  * would leak state.
+ *
+ * Phase E / TASK-E.2 — when a Request is supplied (only the /api/auth/*
+ * route mount needs it), the bootstrap-token header is captured into a
+ * closure and read by the `databaseHooks.user.create.before` hook so
+ * `evaluateSignupGate` can enforce the second factor without touching
+ * better-auth's internals. Other call sites (authz-context session reads)
+ * may omit the request — those paths never trigger user creation.
  */
-export function createAuth(env: Env): ServerAuth {
+export function createAuth(env: Env, request?: Request): ServerAuth {
   const db = drizzle(env.DB, { schema });
   const staticSigningKey = loadStaticSigningKey(env);
+  const bootstrapTokenHeader =
+    request?.headers.get("x-bootstrap-token") ?? null;
 
   // Phase C2 / P1-5: localhost trustedOrigins are gated to DEV builds only.
   // Listing localhost in prod's `trustedOrigins` lets better-auth's CSRF
@@ -404,7 +475,7 @@ export function createAuth(env: Env): ServerAuth {
           // pipeline surfaces the rejection to the caller as a 403.
           async before(user) {
             const orm = drizzle(env.DB, { schema });
-            return evaluateSignupGate(user, env, orm);
+            return evaluateSignupGate(user, env, orm, bootstrapTokenHeader);
           },
         },
       },

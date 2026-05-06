@@ -13,6 +13,7 @@ import type { AuthzContext } from "./db/control-plane/forGroup";
 import { EmailMCP } from "./mcp";
 import { createAuth } from "./auth";
 import { requireMailboxV2 } from "./lib/mailbox-v2";
+import { generateCspNonce, buildCspDirectives, CSP_NONCE_VAR } from "./lib/csp";
 import type { Env } from "./types";
 
 /**
@@ -85,12 +86,21 @@ type AppVariables = {
    *  (user_id, role, group_ids, authorized_mailbox_ids). Absent on the
    *  legacy dev-bypass path; downstream handlers MUST guard against it. */
   authzContext?: AuthzContext;
+  /** Phase E / TASK-E.1 — per-request CSP nonce. Set by the security-headers
+   *  middleware before the route handler runs; consumed by HTMLRewriter to
+   *  stamp `nonce="…"` on every `<script>` tag and emitted in the CSP header
+   *  as `'nonce-…' 'strict-dynamic'`. Marked optional so cross-shim
+   *  middleware (mockAccessShim) with a narrower Variables type still
+   *  composes cleanly; the security-headers middleware ALWAYS populates it
+   *  before any handler runs. */
+  [CSP_NONCE_VAR]?: string;
 };
 
 // Main app that wraps the API and adds React Router fallback
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // Phase C3 / TASK-C3.6 — security-headers middleware (audit P2-1).
+// Phase E / TASK-E.1 — upgraded to nonce + 'strict-dynamic' for `script-src`.
 //
 // Emits CSP + Referrer-Policy + X-Frame-Options + X-Content-Type-Options on
 // HTML responses (the SPA shell + the dev-mode /login picker). API
@@ -98,18 +108,25 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // existing JSON shape untouched so MCP clients and curl-driven probes are
 // not surprised by security headers they cannot interpret.
 //
-// The CSP is tight everywhere we can be tight; `script-src` accepts inline
-// scripts because React Router 7's hydration injects half a dozen inline
-// `<script>` tags carrying serialized loader data and route descriptors.
-// Without `'unsafe-inline'` for `script-src`, the SPA fails to hydrate on
-// load (S-AUTH-1 et al. surfaced 6 CSP-blocked inline scripts during Phase
-// C3 integration). Defense-in-depth is preserved by:
+// Pipeline:
+//   1. BEFORE the route handler, generate a fresh per-request nonce and
+//      stash it in `c.var.cspNonce`. Route handlers that build their own
+//      HTML (the dev /login picker) read it from there.
+//   2. After the handler returns, if the response is HTML, run an
+//      HTMLRewriter that stamps `nonce="<value>"` on every `<script>` tag.
+//      Covers RR7's serialized loader-data tags, ReactDOM's bootstrap
+//      script, AND any inline scripts a route inlined.
+//   3. Emit `script-src 'self' 'nonce-<value>' 'strict-dynamic'` — note
+//      that `'unsafe-inline'` is REMOVED. `'strict-dynamic'` then trusts
+//      any script the nonced scripts pull in transitively, so we don't
+//      have to enumerate the entry-client chunk graph.
+//
+// Defense-in-depth:
 //   • `default-src 'self'` — same-origin everything.
-//   • `script-src 'self' 'unsafe-inline'` — inline RR7 hydration tags
-//     allowed; remote/CDN scripts blocked. (Audit-grade hardening would use
-//     per-request nonce + `'strict-dynamic'`; that's a follow-up because
-//     RR7 needs entry.server.tsx integration to inject the nonce into every
-//     hydration tag. TODO(phase-D-or-later): nonce-based CSP.)
+//   • `script-src 'self' 'nonce-<value>' 'strict-dynamic'` — only nonced
+//     scripts (and what they load) execute; `'unsafe-inline'` cannot be
+//     re-introduced by an attacker-injected inline `<script>` because the
+//     nonce is unguessable per-request. Closes the Phase C3 carry-forward.
 //   • `style-src 'self' 'unsafe-inline'` — the dev /login picker uses an
 //     inline <style> block with palette tokens; inlining is also tolerated
 //     by the React Router build (Tailwind generates a CSS file but some
@@ -126,24 +143,8 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // XSS posture remains strong: email-body HTML is sanitized at storage time
 // (P2-D-2), rendered inside a sandboxed cross-origin iframe (P2-2), and the
 // SPA itself never injects user-controlled HTML into the shell. The CSP's
-// remaining tightness still blocks classic XSS payloads from triggering
-// connections, redirects, plugin embeds, or framing.
-//
-// The header is set AFTER the route handlers run so a per-route override is
-// still possible (none today) — `c.res.headers.set` mutates the outgoing
-// Response in place.
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join("; ");
+// nonce gate stops attacker-crafted inline scripts even if a sanitizer
+// regresses.
 
 function isApiPath(pathname: string): boolean {
   return (
@@ -159,22 +160,39 @@ function isApiPath(pathname: string): boolean {
 }
 
 app.use("*", async (c, next) => {
+  // Mint nonce up-front so any HTML route can pick it off `c.var.cspNonce`
+  // and stamp it on its own inline scripts (none do today, but the
+  // contract is in place).
+  const nonce = generateCspNonce();
+  c.set(CSP_NONCE_VAR, nonce);
+
   await next();
 
   const pathname = new URL(c.req.url).pathname;
   if (isApiPath(pathname)) return;
 
-  // Inspect the actual response content-type — only emit CSP for HTML.
   const ct = c.res.headers.get("content-type") ?? "";
   const isHtml = ct.includes("text/html") || ct.includes("application/xhtml");
   if (!isHtml) return;
 
-  // Hono stores the immutable response on `c.res`; `headers.set` mutates
-  // the outgoing Headers object before the platform returns it.
-  c.res.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
-  c.res.headers.set("X-Frame-Options", "DENY");
-  c.res.headers.set("X-Content-Type-Options", "nosniff");
-  c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  // HTMLRewriter walks the response stream and stamps `nonce` on every
+  // `<script>` tag. Idempotent: a tag that already carries a nonce gets
+  // overwritten with the per-request value (good — prevents stale nonces
+  // from a cached SSR render leaking through).
+  const rewritten = new HTMLRewriter()
+    .on("script", {
+      element(el) {
+        el.setAttribute("nonce", nonce);
+      },
+    })
+    .transform(c.res);
+
+  rewritten.headers.set("Content-Security-Policy", buildCspDirectives(nonce));
+  rewritten.headers.set("X-Frame-Options", "DENY");
+  rewritten.headers.set("X-Content-Type-Options", "nosniff");
+  rewritten.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  c.res = rewritten;
 });
 
 // Phase C3 / TASK-C3.17 — worker-wide error redaction.
@@ -278,7 +296,10 @@ app.get("/logout", (c) => {
 // The path-allowlist below ALSO excludes /api/auth/* from the JWT check so
 // even if a request slipped through ordering, the bypass still applies.
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
-  const auth = createAuth(c.env);
+  // Phase E / TASK-E.2 — pass the raw Request to createAuth so the
+  // databaseHooks.user.create.before hook can read the `x-bootstrap-token`
+  // header off it for the second-factor check.
+  const auth = createAuth(c.env, c.req.raw);
   return auth.handler(c.req.raw);
 });
 
@@ -732,7 +753,7 @@ app.post("/api/users/me/avatar", async (c) => {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
   const schema = await import("./db/control-plane/schema");
-  const { appendAudit } = await import("./lib/audit-log");
+  const { writeAudit } = await import("./lib/audit-log");
   const orm = drizzle(c.env.DB, { schema });
 
   const prev = await orm
@@ -753,13 +774,12 @@ app.post("/api/users/me/avatar", async (c) => {
     );
   }
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "avatar.set",
-    { kind: "user", id: ctx.user_id },
-    { object_key: objectKey, size: file.size, content_type: file.type },
-  );
+  await writeAudit(c.env.DB, {
+    action: "avatar.set",
+    target: { kind: "user", id: ctx.user_id },
+    actor: ctx,
+    meta: { object_key: objectKey, size: file.size, content_type: file.type },
+  });
 
   return c.json({
     ok: true,
@@ -775,7 +795,7 @@ app.delete("/api/users/me/avatar", async (c) => {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
   const schema = await import("./db/control-plane/schema");
-  const { appendAudit } = await import("./lib/audit-log");
+  const { writeAudit } = await import("./lib/audit-log");
   const orm = drizzle(c.env.DB, { schema });
 
   const prev = await orm
@@ -807,13 +827,12 @@ app.delete("/api/users/me/avatar", async (c) => {
     );
   }
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "avatar.clear",
-    { kind: "user", id: ctx.user_id },
-    {},
-  );
+  await writeAudit(c.env.DB, {
+    action: "avatar.clear",
+    target: { kind: "user", id: ctx.user_id },
+    actor: ctx,
+    meta: {},
+  });
 
   return c.json({ ok: true });
 });
@@ -1024,7 +1043,7 @@ app.patch("/api/users/me/visibility", async (c) => {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
   const schema = await import("./db/control-plane/schema");
-  const { appendAudit } = await import("./lib/audit-log");
+  const { writeAudit } = await import("./lib/audit-log");
   const orm = drizzle(c.env.DB, { schema });
 
   // Read current value for audit
@@ -1040,13 +1059,12 @@ app.patch("/api/users/me/visibility", async (c) => {
     .where(eq(schema.users.id, ctx.user_id))
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "visibility.change",
-    { kind: "user", id: ctx.user_id },
-    { from: current?.visibility ?? null, to: visibility },
-  );
+  await writeAudit(c.env.DB, {
+    action: "visibility.change",
+    target: { kind: "user", id: ctx.user_id },
+    actor: ctx,
+    meta: { from: current?.visibility ?? null, to: visibility },
+  });
 
   return c.json({ ok: true, visibility });
 });
@@ -1125,7 +1143,7 @@ app.patch("/api/users/me/profile", async (c) => {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
   const schema = await import("./db/control-plane/schema");
-  const { appendAudit } = await import("./lib/audit-log");
+  const { writeAudit } = await import("./lib/audit-log");
   const orm = drizzle(c.env.DB, { schema });
 
   // Snapshot current values for audit (only the keys being updated).
@@ -1149,13 +1167,12 @@ app.patch("/api/users/me/profile", async (c) => {
   for (const k of Object.keys(updates) as (keyof typeof updates)[]) {
     auditMeta[k] = { from: before?.[k] ?? null, to: updates[k] ?? null };
   }
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "profile.update",
-    { kind: "user", id: ctx.user_id },
-    auditMeta,
-  );
+  await writeAudit(c.env.DB, {
+    action: "profile.update",
+    target: { kind: "user", id: ctx.user_id },
+    actor: ctx,
+    meta: auditMeta,
+  });
 
   // Return the merged updated profile so the client can refresh state in one round-trip.
   const after = await orm
@@ -1216,7 +1233,7 @@ app.post("/api/users/discover-by-email", async (c) => {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq, and, or, sql } = await import("drizzle-orm");
   const schema = await import("./db/control-plane/schema");
-  const { appendAudit } = await import("./lib/audit-log");
+  const { writeAudit } = await import("./lib/audit-log");
   const orm = drizzle(c.env.DB, { schema });
 
   // Lookup by case-insensitive email (same path as users_email_nocase index).
@@ -1300,13 +1317,12 @@ app.post("/api/users/discover-by-email", async (c) => {
   }
 
   // Always emit audit row — keeps write count constant across branches.
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "contact.discover_attempt",
-    { kind: "user", id: target?.id ?? "no-match" },
-    { matched: target !== undefined, created: shouldCreate },
-  );
+  await writeAudit(c.env.DB, {
+    action: "contact.discover_attempt",
+    target: { kind: "user", id: target?.id ?? "no-match" },
+    actor: ctx,
+    meta: { matched: target !== undefined, created: shouldCreate },
+  });
 
   return c.json({ ok: true });
 });

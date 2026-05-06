@@ -23,7 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/control-plane/schema";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
-import { appendAudit } from "../lib/audit-log";
+import { writeAudit } from "../lib/audit-log";
 import {
   canSendContactRequest,
   canAcceptContactRequest,
@@ -286,13 +286,12 @@ router.post("/request", async (c) => {
     })
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "contact.request",
-    { kind: "contact", id: targetUserId },
-    { target_user_id: targetUserId },
-  );
+  await writeAudit(c.env.DB, {
+    action: "contact.request",
+    target: { kind: "contact", id: targetUserId },
+    actor: ctx,
+    meta: { target_user_id: targetUserId },
+  });
 
   return c.json({ ok: true }, 201);
 });
@@ -353,13 +352,12 @@ router.post("/:id/accept", async (c) => {
     })
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "contact.accept",
-    { kind: "contact", id: requesterId },
-    { requester_user_id: requesterId },
-  );
+  await writeAudit(c.env.DB, {
+    action: "contact.accept",
+    target: { kind: "contact", id: requesterId },
+    actor: ctx,
+    meta: { requester_user_id: requesterId },
+  });
 
   return c.json({ ok: true });
 });
@@ -419,13 +417,12 @@ router.post("/:id/decline", async (c) => {
     })
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "contact.decline",
-    { kind: "contact", id: requesterId },
-    { requester_user_id: requesterId },
-  );
+  await writeAudit(c.env.DB, {
+    action: "contact.decline",
+    target: { kind: "contact", id: requesterId },
+    actor: ctx,
+    meta: { requester_user_id: requesterId },
+  });
 
   return c.json({ ok: true });
 });
@@ -486,13 +483,12 @@ router.post("/:userId/block", async (c) => {
     )
     .run();
 
-  await appendAudit(
-    c.env.DB,
-    ctx,
-    "contact.block",
-    { kind: "contact", id: targetUserId },
-    { target_user_id: targetUserId },
-  );
+  await writeAudit(c.env.DB, {
+    action: "contact.block",
+    target: { kind: "contact", id: targetUserId },
+    actor: ctx,
+    meta: { target_user_id: targetUserId },
+  });
 
   return c.json({ ok: true });
 });

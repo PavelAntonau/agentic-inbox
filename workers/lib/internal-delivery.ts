@@ -261,7 +261,7 @@ export async function evaluateInternalDeliveryPolicy(
  * the gate from the write keeps the test surface flat.
  *
  * Best-effort audit log: failures are swallowed so an audit-row write
- * never blocks delivery (matches appendAudit's contract).
+ * never blocks delivery (matches writeAudit's fire-and-forget contract).
  */
 export async function deliverInternal(
   env: Env,
