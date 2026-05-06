@@ -271,9 +271,10 @@ app.use("*", authzContext());
 // Streamable HTTP is the default transport (`McpAgent.serve` per
 // `node_modules/agents/dist/index-WBy5hmm3.d.ts:344`).
 //
-// Per-tool scope enforcement is intentionally deferred — TODO(T3.6): wire
-// per-tool scope-to-required map at the EmailMCP dispatch layer once the
-// e2e suite drives the four named clients.
+// T3.6 (security audit 2026-05-06, Phase 4) — per-tool scope, PAT IP
+// allowlist, PAT mailbox_id binding, and list_mailboxes authzContext
+// narrowing all enforce here, BEFORE the McpAgent DO is invoked. See
+// workers/lib/mcp-tool-policy.ts and workers/lib/mcp-list-mailboxes.ts.
 const mcpHandler = EmailMCP.serve("/mcp", { binding: "EMAIL_MCP" });
 
 async function dispatchMcpRequest(
@@ -299,6 +300,14 @@ async function dispatchMcpRequest(
     await import("./middleware/oauth-bearer");
   const { extractMcpMethod, buildAuditRow, writeMcpAuditRow } =
     await import("./middleware/audit-log-mcp");
+  const {
+    extractToolCall,
+    getRequiredScope,
+    isIpInAllowlist,
+    resolveMailboxToId,
+    insufficientScopeResponse,
+    MAILBOX_BOUND_TOOLS,
+  } = await import("./lib/mcp-tool-policy");
 
   const startedAt = Date.now();
   const bearer = await validateBearer(request, env);
@@ -310,19 +319,93 @@ async function dispatchMcpRequest(
   // request internally so the McpAgent still gets the original body.
   const { method, tool } = await extractMcpMethod(request);
 
+  const finishAudit = (
+    response: Response,
+    auditMethod: string | null,
+    auditTool: string | null,
+  ): void => {
+    const auditRow = buildAuditRow({
+      bearer,
+      request,
+      http_status: response.status,
+      duration_ms: Date.now() - startedAt,
+      mcp_method: auditMethod,
+      tool_name: auditTool,
+    });
+    ctx.waitUntil(writeMcpAuditRow(env, auditRow));
+  };
+
+  // ── P0-3: PAT IP allowlist (runs for every request, not just tools/call) ─
+  if (
+    bearer.source === "pat" &&
+    bearer.ip_allowlist &&
+    bearer.ip_allowlist.length > 0
+  ) {
+    const sourceIp = request.headers.get("cf-connecting-ip");
+    if (!isIpInAllowlist(sourceIp, bearer.ip_allowlist)) {
+      const r = insufficientScopeResponse("pat-ip-not-allowed");
+      finishAudit(r, method, tool);
+      return r;
+    }
+  }
+
+  // ── tools/call enforcement — P0-2 + P0-3 mailbox + P0-4 list_mailboxes ──
+  if (method === "tools/call" && tool) {
+    // P0-2: per-tool required scope.
+    const required = getRequiredScope(tool);
+    if (required && !bearer.scopes.includes(required)) {
+      const r = insufficientScopeResponse("tool-scope-required", {
+        tool,
+        required_scope: required,
+      });
+      finishAudit(r, method, tool);
+      return r;
+    }
+
+    // P0-3: PAT mailbox_id binding for mailbox-bound tools.
+    if (
+      bearer.source === "pat" &&
+      bearer.mailbox_id !== null &&
+      bearer.mailbox_id !== undefined &&
+      MAILBOX_BOUND_TOOLS.has(tool)
+    ) {
+      const toolCall = await extractToolCall(request);
+      const mailboxArg = toolCall.arguments?.mailboxId;
+      if (typeof mailboxArg !== "string" || !mailboxArg) {
+        const r = insufficientScopeResponse("pat-mailbox-arg-required", {
+          tool,
+        });
+        finishAudit(r, method, tool);
+        return r;
+      }
+      const resolvedId = await resolveMailboxToId(env, mailboxArg);
+      if (!resolvedId || resolvedId !== bearer.mailbox_id) {
+        const r = insufficientScopeResponse("pat-mailbox-mismatch", { tool });
+        finishAudit(r, method, tool);
+        return r;
+      }
+    }
+
+    // P0-4: list_mailboxes short-circuit with authzContext narrowing.
+    // Bypasses the DO entirely — list_mailboxes has no DO state.
+    if (tool === "list_mailboxes") {
+      const { serveListMailboxes } = await import("./lib/mcp-list-mailboxes");
+      const toolCall = await extractToolCall(request);
+      const patMailboxId =
+        bearer.source === "pat" ? (bearer.mailbox_id ?? null) : null;
+      const r = await serveListMailboxes(
+        env,
+        bearer.user_id,
+        patMailboxId,
+        toolCall.id,
+      );
+      finishAudit(r, method, tool);
+      return r;
+    }
+  }
+
   const response = await mcpHandler.fetch(request, env, ctx);
-
-  const duration_ms = Date.now() - startedAt;
-  const auditRow = buildAuditRow({
-    bearer,
-    request,
-    http_status: response.status,
-    duration_ms,
-    mcp_method: method,
-    tool_name: tool,
-  });
-  ctx.waitUntil(writeMcpAuditRow(env, auditRow));
-
+  finishAudit(response, method, tool);
   return response;
 }
 app.all("/mcp", (c) =>

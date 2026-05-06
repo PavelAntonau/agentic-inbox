@@ -10,8 +10,9 @@
 //     NOT an array — array-aud is the openid-leak signature flagged by
 //     T1.1 finding B and explicitly rejected by D-mcp-auth-5).
 //   - iss == https://mail.actionnow.ai (baseURL).
-//   - At least one mcp:* scope present. Per-tool scope checks live downstream
-//     (TODO(T3.6): wire per-tool scope-to-required map at the dispatch layer).
+//   - At least one mcp:* scope present. Per-tool scope checks live in
+//     workers/lib/mcp-tool-policy.ts and are wired at workers/app.ts:
+//     dispatchMcpRequest (T3.6, security audit Phase 4, 2026-05-06).
 //   - Bearer-only on /mcp. Session cookies (`__Host-anai.session_token`) are
 //     rejected outright per D-mcp-auth anti-pattern `0olzaspBOKxkzjp2AZRkV`.
 //
@@ -87,9 +88,11 @@ export interface BearerOk {
   expires_at: number;
   /** Present when source === "pat". Caller wires per-row policy downstream. */
   pat_id?: string;
-  /** Optional PAT mailbox scope. T3.6 enforces; surfaced here for audit. */
+  /** Optional PAT mailbox scope. Enforced at workers/app.ts:dispatchMcpRequest
+   *  via workers/lib/mcp-tool-policy.MAILBOX_BOUND_TOOLS (T3.6). */
   mailbox_id?: string | null;
-  /** Optional PAT IP allowlist. T3.6 enforces; surfaced here for audit. */
+  /** Optional PAT IP allowlist. Enforced at workers/app.ts:dispatchMcpRequest
+   *  via workers/lib/mcp-tool-policy.isIpInAllowlist (T3.6). */
   ip_allowlist?: string[] | null;
 }
 
