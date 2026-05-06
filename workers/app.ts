@@ -98,11 +98,18 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // existing JSON shape untouched so MCP clients and curl-driven probes are
 // not surprised by security headers they cannot interpret.
 //
-// The CSP is intentionally tight:
+// The CSP is tight everywhere we can be tight; `script-src` accepts inline
+// scripts because React Router 7's hydration injects half a dozen inline
+// `<script>` tags carrying serialized loader data and route descriptors.
+// Without `'unsafe-inline'` for `script-src`, the SPA fails to hydrate on
+// load (S-AUTH-1 et al. surfaced 6 CSP-blocked inline scripts during Phase
+// C3 integration). Defense-in-depth is preserved by:
 //   • `default-src 'self'` — same-origin everything.
-//   • `script-src 'self'` — no inline scripts, no eval. Vite's HMR injects
-//     the dev-server script during `npm run dev` only; the deployed bundle
-//     is fully self-hosted (verified against the wrangler-built manifest).
+//   • `script-src 'self' 'unsafe-inline'` — inline RR7 hydration tags
+//     allowed; remote/CDN scripts blocked. (Audit-grade hardening would use
+//     per-request nonce + `'strict-dynamic'`; that's a follow-up because
+//     RR7 needs entry.server.tsx integration to inject the nonce into every
+//     hydration tag. TODO(phase-D-or-later): nonce-based CSP.)
 //   • `style-src 'self' 'unsafe-inline'` — the dev /login picker uses an
 //     inline <style> block with palette tokens; inlining is also tolerated
 //     by the React Router build (Tailwind generates a CSS file but some
@@ -116,12 +123,18 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 //   • `base-uri 'self'` — base-tag injection has no effect.
 //   • `form-action 'self'` — form posts cannot be redirected off-origin.
 //
+// XSS posture remains strong: email-body HTML is sanitized at storage time
+// (P2-D-2), rendered inside a sandboxed cross-origin iframe (P2-2), and the
+// SPA itself never injects user-controlled HTML into the shell. The CSP's
+// remaining tightness still blocks classic XSS payloads from triggering
+// connections, redirects, plugin embeds, or framing.
+//
 // The header is set AFTER the route handlers run so a per-route override is
 // still possible (none today) — `c.res.headers.set` mutates the outgoing
 // Response in place.
 const CSP_DIRECTIVES = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",

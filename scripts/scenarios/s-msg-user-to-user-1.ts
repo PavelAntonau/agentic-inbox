@@ -91,26 +91,35 @@ const scenario: Scenario = {
     }
     ctx.log(`alice mailbox ${aliceMb} provisioned ✓`);
 
-    // Switch to bob and provision his mailbox.
+    // Phase C3 / TASK-C3.19 (B-08 fix): the V1 POST /api/v1/mailboxes
+    // endpoint is now admin-only. Bob (a regular user) creates his
+    // mailbox via the V2 endpoint POST /api/mailboxes which is the
+    // self-service path designed for non-admins. V2 accepts `local_part`
+    // (the part before @<PRIMARY_DOMAIN>) and writes both a D1 row with
+    // owner_user_id=actor.user_id AND the mailbox_acls owner row.
     await impersonate(ctx, TEST_USERS.bob);
+    const bobLocal = `s-msg-u2u-1-bob-${runId}`;
     const mkBob = (await ctx.browser.call("browser_evaluate", {
       expression: `(async () => {
-        const res = await fetch('/api/v1/mailboxes', {
+        const res = await fetch('/api/mailboxes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'Bob', email: ${JSON.stringify(bobMb)} }),
+          body: JSON.stringify({
+            local_part: ${JSON.stringify(bobLocal)},
+            display_name: 'Bob',
+          }),
         });
-        return { status: res.status, body: (await res.text()).slice(0, 200) };
+        return { status: res.status, body: (await res.text()).slice(0, 400) };
       })()`,
     })) as { status: number; body: string };
-    if (mkBob.status !== 201) {
+    if (mkBob.status !== 201 && mkBob.status !== 200) {
       throw new Error(
-        `bob mailbox create expected 201, got ${mkBob.status}: ${mkBob.body}`,
+        `bob mailbox create (V2) expected 201, got ${mkBob.status}: ${mkBob.body}`,
       );
     }
-    ctx.log(`bob mailbox ${bobMb} provisioned ✓`);
+    ctx.log(`bob mailbox ${bobMb} provisioned via V2 (self-service) ✓`);
 
-    // Back to alice, send to bob.
+    // Back to alice for the send phase.
     await impersonate(ctx, TEST_USERS.alice);
     const subject = `S-MSG-U2U-1 hello bob ${runId}`;
     const send = (await ctx.browser.call("browser_evaluate", {

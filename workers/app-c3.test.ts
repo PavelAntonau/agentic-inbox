@@ -79,7 +79,7 @@ describe("CSP path classifier — Phase C3 / TASK-C3.6", () => {
 
 const CSP_DIRECTIVES = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
@@ -95,14 +95,19 @@ describe("CSP directive content — Phase C3 / TASK-C3.6", () => {
     expect(CSP_DIRECTIVES).toContain("default-src 'self'");
   });
 
-  it("script-src does NOT include 'unsafe-eval' or 'unsafe-inline'", () => {
-    // Locking the strict posture — the React Router build is fully
-    // self-hosted, so any addition of 'unsafe-eval' must be a deliberate,
-    // reviewable change.
+  it("script-src allows self + 'unsafe-inline' but NOT 'unsafe-eval'", () => {
+    // RR7 hydration injects inline <script> tags carrying serialized loader
+    // data — those must be allowed for the SPA to hydrate. 'unsafe-eval'
+    // must NOT appear; eval-based dynamic code execution remains blocked.
+    // Defense-in-depth (sandboxed iframe + DOMPurify) covers email-body XSS
+    // independent of script-src; remaining XSS surfaces are protected by
+    // the still-strict connect-src / object-src / form-action / base-uri.
     const scriptSrcLine = CSP_DIRECTIVES.split("; ").find((d) =>
       d.startsWith("script-src"),
     )!;
-    expect(scriptSrcLine).toBe("script-src 'self'");
+    expect(scriptSrcLine).toContain("'self'");
+    expect(scriptSrcLine).toContain("'unsafe-inline'");
+    expect(scriptSrcLine).not.toContain("'unsafe-eval'");
   });
 
   it("frame-ancestors is 'none' (defense-in-depth alongside X-Frame-Options)", () => {

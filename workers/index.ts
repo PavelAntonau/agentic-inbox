@@ -666,7 +666,22 @@ async function receiveEmail(
     throw new Error("received email with no valid recipient address");
 
   const messageId = crypto.randomUUID();
-  if (!(await env.BUCKET.head(`mailboxes/${mailboxId}.json`))) {
+  // Phase C3 / BUG-D-1: existence check accepts EITHER R2 settings JSON
+  // (legacy V1 mailbox) OR a D1 mailboxes row (V2 self-service mailbox).
+  // V2 creation writes only D1, so the original R2-only check silently
+  // dropped mail to V2-created mailboxes — invisible to senders, broke
+  // S-MSG-USER-TO-USER-1 once C3.19 routed self-service through V2.
+  const r2Exists = await env.BUCKET.head(`mailboxes/${mailboxId}.json`);
+  let d1Exists = false;
+  if (!r2Exists && env.DB) {
+    const d1Row = await env.DB.prepare(
+      "SELECT 1 FROM mailboxes WHERE lower(address) = ?1 LIMIT 1",
+    )
+      .bind(mailboxId.toLowerCase())
+      .first();
+    d1Exists = d1Row !== null;
+  }
+  if (!r2Exists && !d1Exists) {
     console.log(`Ignoring email for ${mailboxId}: mailbox does not exist`);
     return;
   }
