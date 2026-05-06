@@ -69,12 +69,15 @@ function mcpResult(result: Record<string, unknown>) {
  * draft replies, send messages, and manage folders.
  */
 export class EmailMCP extends McpAgent<Env> {
-  server = new McpServer({
-    name: "agentic-inbox",
-    version: "1.0.0",
-  });
+  // Constructed inside init() so DO hibernation wake-ups don't re-register
+  // tools against a still-populated McpServer (P0-1, audit 2026-05-06).
+  server!: McpServer;
 
   async init() {
+    this.server = new McpServer({
+      name: "agentic-inbox",
+      version: "1.0.0",
+    });
     const env = this.env;
 
     /**
