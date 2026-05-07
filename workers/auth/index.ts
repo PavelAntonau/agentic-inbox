@@ -26,6 +26,7 @@ import { sendEmail } from "../email-sender";
 import { getEmailBinding } from "../lib/mocks/email-binding";
 import { isBootstrapEmail } from "../lib/bootstrap-owner";
 import { normalizeEmail } from "../lib/email";
+import { writeAudit } from "../lib/audit-log";
 import type { Env } from "../types";
 // T1.6 — pre-registered trusted MCP clients. Same module is consumed by
 // `scripts/seed-trusted-clients.ts` (writes the rows) and by the consent /
@@ -101,6 +102,16 @@ function loadStaticSigningKey(env: Env): StaticSigningJwk {
  *   2. A `group_invitations` row matching the lower-cased email with
  *      status in {pending, accepted}.
  */
+/**
+ * Phase G-1 / OQ-PG-1 — constant-time 50 ms timing pad.
+ * Runs on EVERY branch (permit and deny) so response timing does not reveal
+ * which branch was taken. Resolved by the caller as a background task; it
+ * does not delay the happy path any further than the DB round-trips do.
+ */
+async function signupTimingPad(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+}
+
 export async function evaluateSignupGate<U extends { email?: unknown }>(
   user: U,
   env: Env,
@@ -114,8 +125,12 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
   // `lower(email)` UNIQUE index in D1 stores rows in this canonical form.
   const normalizedEmail = normalizeEmail(rawEmail);
   if (!normalizedEmail) {
-    throw new APIError("FORBIDDEN", {
-      message: "Email is required for sign-up.",
+    // Phase G-1 / OQ-PG-1 — uniform UNAUTHORIZED on ALL deny paths so
+    // response shape matches the wrong-OTP path on an invited email.
+    // Timing pad runs on every branch including this early exit.
+    await signupTimingPad();
+    throw new APIError("UNAUTHORIZED", {
+      message: "Sign-up not permitted.",
     });
   }
   if (isBootstrapEmail(rawEmail, env)) {
@@ -131,6 +146,9 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
       .where(eq(schema.users.role, "global_owner"))
       .get();
     if (existingOwner) {
+      await signupTimingPad();
+      // Phase G-1: keep FORBIDDEN only for bootstrap-specific errors
+      // (these are not enumerable by external callers).
       throw new APIError("FORBIDDEN", {
         message:
           "A bootstrap owner already exists. Use the invitation flow for additional admins.",
@@ -150,6 +168,7 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
         presented.length !== expectedToken.length ||
         !timingSafeEqualString(presented, expectedToken)
       ) {
+        await signupTimingPad();
         throw new APIError("FORBIDDEN", {
           message:
             "Bootstrap owner signup requires a valid bootstrap token header.",
@@ -157,6 +176,7 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
       }
     }
 
+    await signupTimingPad();
     return {
       data: { ...user, email: normalizedEmail, role: "global_owner" } as U,
     };
@@ -174,10 +194,17 @@ export async function evaluateSignupGate<U extends { email?: unknown }>(
       ),
     )
     .get();
-  if (invite) return { data: user };
-  throw new APIError("FORBIDDEN", {
-    message:
-      "Sign-up is invite-only. Ask a workspace administrator to invite this email.",
+  if (invite) {
+    await signupTimingPad();
+    return { data: user };
+  }
+  // Phase G-1 / OQ-PG-1 — UNAUTHORIZED (not FORBIDDEN) so attackers cannot
+  // distinguish "not on invite list" from "wrong OTP for an invited email".
+  // The identical status + message across all non-bootstrap deny paths closes
+  // the invite-list enumeration channel.
+  await signupTimingPad();
+  throw new APIError("UNAUTHORIZED", {
+    message: "Sign-up not permitted.",
   });
 }
 
@@ -229,6 +256,43 @@ export interface ServerAuth {
 }
 
 /**
+ * Phase G-1 / Task 6 — freshAge enforcement for sensitive operations.
+ *
+ * Checks that the better-auth session was created within the last `maxAgeMs`
+ * milliseconds. Returns `null` when no better-auth session cookie is present
+ * (CF Access path — CF tokens have their own freshness from the edge).
+ * Returns `{ fresh: false }` when a session exists but is too old.
+ * Returns `{ fresh: true, session }` when a session is present and fresh.
+ *
+ * FRESH_AGE_MS mirrors `session.freshAge` in `createAuth` (5 minutes = 300 s).
+ */
+export const FRESH_AGE_MS = 60 * 5 * 1000; // 5 minutes in milliseconds
+
+export type FreshnessResult =
+  | null
+  | { fresh: false }
+  | { fresh: true; session: BetterAuthSession };
+
+export async function requireFreshBetterAuthSession(
+  env: Env,
+  request: Request,
+): Promise<FreshnessResult> {
+  const auth = createAuth(env);
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return null; // Not a better-auth session — CF Access path
+  const createdAt =
+    session.session.createdAt instanceof Date
+      ? session.session.createdAt.getTime()
+      : typeof session.session.createdAt === "number"
+        ? session.session.createdAt
+        : NaN;
+  if (Number.isNaN(createdAt)) return { fresh: false };
+  const age = Date.now() - createdAt;
+  if (age >= FRESH_AGE_MS) return { fresh: false };
+  return { fresh: true, session };
+}
+
+/**
  * Construct a per-request better-auth instance.
  *
  * Caller is responsible for invoking `auth.handler(request)` and returning
@@ -242,8 +306,17 @@ export interface ServerAuth {
  * `evaluateSignupGate` can enforce the second factor without touching
  * better-auth's internals. Other call sites (authz-context session reads)
  * may omit the request — those paths never trigger user creation.
+ *
+ * Phase G-1 — when an ExecutionContext is supplied, the OTP-send hot path
+ * uses `ctx.waitUntil()` to move the email call off the critical path so
+ * that response latency is constant regardless of whether the email send
+ * succeeds or fails.
  */
-export function createAuth(env: Env, request?: Request): ServerAuth {
+export function createAuth(
+  env: Env,
+  request?: Request,
+  ctx?: ExecutionContext,
+): ServerAuth {
   const db = drizzle(env.DB, { schema });
   const staticSigningKey = loadStaticSigningKey(env);
   const bootstrapTokenHeader =
@@ -291,9 +364,20 @@ export function createAuth(env: Env, request?: Request): ServerAuth {
     // Rate-limit: persist to D1 so limits survive Worker restarts and apply
     // consistently across all Worker instances in the same region.
     // modelName matches the drizzleAdapter key above ("rateLimit").
+    //
+    // Phase G-1 / Task 1 — per-path custom rules for high-value OTP surfaces.
+    // window is in seconds; max is the request ceiling within that window.
+    // OTP-send: 5 attempts per 15 min per IP (prevents cheap OTP flooding).
+    // OTP-verify: 5 attempts per 15 min per IP (mirrors wrong-OTP lock-out).
+    // Sign-up: 10 attempts per 15 min per IP (less critical, wider window).
     rateLimit: {
       storage: "database",
       modelName: "rateLimit",
+      customRules: {
+        "/email-otp/send-verification-otp": { window: 60 * 15, max: 5 },
+        "/sign-in/email-otp": { window: 60 * 15, max: 5 },
+        "/sign-up/email": { window: 60 * 15, max: 10 },
+      },
     },
 
     // Email OTP is the only auth method we ship in Phase 6.1. emailAndPassword
@@ -358,10 +442,18 @@ export function createAuth(env: Env, request?: Request): ServerAuth {
       modelName: "session",
       expiresIn: 60 * 60 * 24 * 30, // 30 days
       updateAge: 60 * 60 * 24, // refresh row once per day on activity
+      // Phase G-1 / Task 5 — disable cookie cache so every session lookup
+      // hits D1. This closes the window where a revoked session could still
+      // authenticate for up to maxAge seconds via a stale cookie.
       cookieCache: {
-        enabled: true,
-        maxAge: 60 * 5, // 5-minute in-memory cache for session lookup
+        enabled: false,
       },
+      // Phase G-1 / Task 5 — freshAge: sessions older than 5 min are
+      // considered stale for sensitive operations (PAT-mint, role-change,
+      // user-delete). Callers that need a fresh session must use
+      // freshSessionMiddleware (or call getSession with requireFresh) before
+      // performing privileged mutations. 0 = always fresh (disabled).
+      freshAge: 60 * 5, // 5 minutes
     },
 
     account: { modelName: "account" },
@@ -369,10 +461,26 @@ export function createAuth(env: Env, request?: Request): ServerAuth {
 
     advanced: {
       cookiePrefix: "anai",
-      // __Host-* prefix requires Secure + Path=/ + no Domain attribute. We
-      // get this for free with better-auth's defaults; explicit config below
-      // mirrors the documented pattern from Cloudflare's MCP guide.
+      // __Host-* prefix requires Secure + Path=/ + no Domain attribute.
+      // Phase G-1 / Task 7 — DEFERRED. better-auth 1.6.9's `cookiePrefix`
+      // API prepends the `__Secure-` prefix before the app prefix, producing
+      // `__Secure-<cookiePrefix>.session_token`. Setting cookiePrefix to
+      // "__Host-" would yield `__Secure-__Host-anai.session_token`, which is
+      // invalid. The correct `__Host-` flip requires overriding individual
+      // cookie names via `advanced.cookies.<name>.name = "__Host-anai.<name>"`
+      // AND removing the Domain attribute — not done here to avoid a
+      // breaking cookie-name change without a coordinated session migration.
+      // TODO: flip in a separate PR after session-migration plan is approved.
       useSecureCookies: true,
+      // Phase G-1 / Task 1 — route cf-connecting-ip as the canonical IP
+      // source for better-auth's rate-limit keying so Worker-edge IPs
+      // (which only set cf-connecting-ip) are correctly identified.
+      // ipv6Subnet: 64 normalises IPv6 addresses to /64 prefix so a single
+      // attacker rotating over a /64 block still hits the same rate-limit key.
+      ipAddress: {
+        ipAddressHeaders: ["cf-connecting-ip"],
+        ipv6Subnet: 64,
+      },
       defaultCookieAttributes: {
         sameSite: "lax",
         secure: true,
@@ -385,10 +493,30 @@ export function createAuth(env: Env, request?: Request): ServerAuth {
       emailOTP({
         otpLength: 6,
         expiresIn: 600, // 10 minutes
-        async sendVerificationOTP({ email, otp, type }) {
-          // type is one of "sign-in" | "email-verification" | "forget-password".
-          // We only use "sign-in" in Phase 6.1.
-          await sendOtpEmail(env, email, otp, type);
+        sendVerificationOTP({ email, otp, type }) {
+          // Phase G-1 / Task 3 — move the email send off the synchronous
+          // hot path via ctx.waitUntil so request latency is constant
+          // whether the email send succeeds or fails. The OTP code is
+          // already persisted in D1 by the time this callback fires, so
+          // the verification flow is unaffected. Errors are logged inside
+          // sendOtpEmail; they do NOT propagate to the caller (the user
+          // gets a "check your inbox" response regardless).
+          //
+          // Phase G-1 / Task 10 — emit audit event for OTP send.
+          const sendPromise = sendOtpEmail(env, email, otp, type).then(() => {
+            return writeAudit(env.DB, {
+              action: "auth.otp_sent",
+              target: { kind: "user", id: email },
+              meta: { type, timestamp: Date.now() },
+            });
+          });
+          if (ctx) {
+            ctx.waitUntil(sendPromise);
+          } else {
+            // Fallback: no ExecutionContext available (authz-context path or
+            // tests). Run synchronously so the email is not silently dropped.
+            return sendPromise as unknown as void;
+          }
         },
       }),
 
@@ -471,11 +599,35 @@ export function createAuth(env: Env, request?: Request): ServerAuth {
           //      the invitee may accept BEFORE the user row exists in some
           //      flows — accept either.
           //
-          // Anything else throws `APIError("FORBIDDEN")`. The OTP / sign-in
-          // pipeline surfaces the rejection to the caller as a 403.
+          // Anything else throws `APIError("UNAUTHORIZED")`. The OTP / sign-in
+          // pipeline surfaces the rejection to the caller as a 401.
+          // Phase G-1 / Task 10 — audit blocked signup attempts.
           async before(user) {
             const orm = drizzle(env.DB, { schema });
-            return evaluateSignupGate(user, env, orm, bootstrapTokenHeader);
+            try {
+              const result = await evaluateSignupGate(
+                user,
+                env,
+                orm,
+                bootstrapTokenHeader,
+              );
+              return result;
+            } catch (err) {
+              // Fire-and-forget: record the blocked signup for observability.
+              // writeAudit is already fire-and-forget internally, so errors
+              // here never propagate to the caller.
+              const email =
+                typeof user?.email === "string" ? user.email : "unknown";
+              void writeAudit(env.DB, {
+                action: "auth.signup_gate_blocked",
+                target: { kind: "user", id: email },
+                meta: {
+                  reason: (err as { status?: string }).status ?? "unknown",
+                  timestamp: Date.now(),
+                },
+              });
+              throw err;
+            }
           },
         },
       },

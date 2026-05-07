@@ -32,6 +32,7 @@ import {
 } from "../db/queries/mcp-inbox-binding";
 import { mintPat, newPatId } from "../lib/pat-tokens";
 import { writeAudit } from "../lib/audit-log";
+import { requireFreshBetterAuthSession } from "../auth";
 import type { AuthzContext } from "../db/control-plane/forGroup";
 import type { Env } from "../types";
 
@@ -87,6 +88,31 @@ const CreatePatSchema = z
 router.post("/", async (c) => {
   const ctx = c.var.authzContext!;
   const orm = drizzle(c.env.DB, { schema });
+
+  // Phase G-1 / Task 6 — PAT mint is a sensitive operation; require a fresh
+  // better-auth session (≤ 5 min old). CF Access token path (null) is allowed
+  // through — that token has its own freshness guarantee from the edge.
+  const freshness = await requireFreshBetterAuthSession(c.env, c.req.raw);
+  if (freshness !== null && !freshness.fresh) {
+    void writeAudit(c.env.DB, {
+      action: "auth.fresh_session_denied",
+      target: { kind: "user", id: ctx.user_id },
+      meta: { operation: "pat.create" },
+      actor: ctx,
+    });
+    return c.json(
+      {
+        error: "Session too old for this operation",
+        code: "FRESH_SESSION_REQUIRED",
+      },
+      401,
+    );
+  }
+
+  // Phase G-1 / Task 10 — emit audit for PAT mint (auth.pat_minted namespace).
+  // The existing `pat.create` writeAudit below covers the successful case;
+  // the FRESH_SESSION_DENIED case is handled above. We emit auth.pat_minted
+  // after the insert so it only fires when the mint actually succeeds.
 
   const body = await c.req.json().catch(() => null);
   const parsed = CreatePatSchema.safeParse(body);
@@ -172,6 +198,14 @@ router.post("/", async (c) => {
       ip_allowlist_count: ip_allowlist?.length ?? 0,
       expires_at: expires_at ?? null,
     },
+  });
+
+  // Phase G-1 / Task 10 — auth.pat_minted security audit event.
+  void writeAudit(c.env.DB, {
+    action: "auth.pat_minted",
+    target: { kind: "oauth_personal_access_token", id: pat.id },
+    actor: ctx,
+    meta: { label, scopes, mailbox_id: mailbox_id ?? null },
   });
 
   return c.json(

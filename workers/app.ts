@@ -299,7 +299,9 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
   // Phase E / TASK-E.2 — pass the raw Request to createAuth so the
   // databaseHooks.user.create.before hook can read the `x-bootstrap-token`
   // header off it for the second-factor check.
-  const auth = createAuth(c.env, c.req.raw);
+  // Phase G-1 / Task 3 — pass ctx so sendVerificationOTP can defer the
+  // email send via ctx.waitUntil, keeping OTP-send latency constant.
+  const auth = createAuth(c.env, c.req.raw, c.executionCtx);
   return auth.handler(c.req.raw);
 });
 
