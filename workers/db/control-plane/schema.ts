@@ -435,6 +435,14 @@ export const rate_limit = sqliteTable(
 );
 
 // 12. audit_log — append-only
+//
+// Phase G / G-3 — three new columns added via migration 0018:
+//   status     — "success" | "denied" | "error" | NULL (legacy rows)
+//   tenant_id  — group_id at audit time, denormalised for partitioning
+//   user_agent — UA header truncated at 500 chars
+//
+// New compound indexes: audit_log_action_at, audit_log_tenant_at,
+// audit_log_ip_at — see migration 0018_audit_log_extend.sql.
 export const audit_log = sqliteTable(
   "audit_log",
   {
@@ -448,11 +456,39 @@ export const audit_log = sqliteTable(
     scope_group_id: text("scope_group_id"),
     meta_json: text("meta_json"),
     ip: text("ip"),
+    // Phase G / G-3 — columns added by migration 0018
+    status: text("status"),
+    tenant_id: text("tenant_id"),
+    user_agent: text("user_agent"),
   },
   (t) => ({
     atIdx: index("audit_log_at").on(t.at),
+    // Phase G / G-3 — compound indexes for alerter queries
+    actionAtIdx: index("audit_log_action_at").on(t.action, t.at),
+    tenantAtIdx: index("audit_log_tenant_at").on(t.tenant_id, t.at),
+    ipAtIdx: index("audit_log_ip_at").on(t.ip, t.at),
   }),
 );
+
+/**
+ * Phase G / G-3 — string-literal union of all audit-log action values that
+ * auth flows may emit. Callers (Teammate A's auth routes, the Cron alerter,
+ * and the `writeAudit` typings) import this type to ensure compile-time
+ * exhaustiveness without a runtime enum object.
+ *
+ * Keep existing action strings in the codebase (mailbox.*, mcp.*, etc.) —
+ * they are untyped strings passed ad-hoc and remain valid. This union is
+ * intentionally scoped to the auth namespace introduced in Phase G.
+ */
+export type AuthAuditAction =
+  | "auth.signup_gate_blocked"
+  | "auth.otp_sent"
+  | "auth.otp_verified"
+  | "auth.otp_failed"
+  | "auth.fresh_session_denied"
+  | "auth.pat_minted"
+  | "auth.invitation_redeemed"
+  | "auth.signin_success";
 
 // Phase 2 — Inbox external allowlist (migration 0007)
 // Entries for mailboxes where external_allow_mode = 'allowlist'.

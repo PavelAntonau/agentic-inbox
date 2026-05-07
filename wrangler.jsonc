@@ -104,5 +104,19 @@
 				"RevocationCache"
 			]
 		}
-	]
+	],
+	// Phase G / G-3 — Analytics Engine dataset for auth-event observability.
+	// Binding name: AUTH_ANALYTICS  Dataset name: auth_events
+	// Pass env.AUTH_ANALYTICS + ctx to writeAudit for the AE mirror path.
+	"analytics_engine_datasets": [
+		{ "binding": "AUTH_ANALYTICS", "dataset": "auth_events" }
+	],
+	// Phase G / G-3 — Cron trigger for the tier-1 auth alerter.
+	// Handler: workers/cron/auth-alerter.ts → exported `scheduled` handler.
+	// Fires every 2 minutes. Slack webhook provisioned via:
+	//   wrangler secret put SLACK_ALERT_WEBHOOK_URL
+	// Secret value stored in Key MCP: service="slack" account="phase-g-alerts"
+	"triggers": {
+		"crons": ["*/2 * * * *"]
+	}
 }

@@ -59,4 +59,30 @@ export interface Env extends Cloudflare.Env {
    * deploys must NEVER set this. See workers/lib/mock-mode.ts.
    */
   MOCK_MODE?: string;
+  /**
+   * Phase G / G-3 — Analytics Engine dataset for auth-event observability.
+   * Binding declared in wrangler.jsonc under `analytics_engine_datasets`.
+   * Pass to `writeAudit({ analyticsEngine: env.AUTH_ANALYTICS, ctx })` on
+   * auth paths to mirror the D1 row to Analytics Engine (best-effort).
+   * Absent in local dev unless explicitly bound via wrangler --local.
+   */
+  AUTH_ANALYTICS?: AnalyticsEngineDataset;
+  /**
+   * Phase G / G-3 — Slack webhook URL for the tier-1 auth alerter cron.
+   * Set via `wrangler secret put SLACK_ALERT_WEBHOOK_URL`.
+   * Secret value provisioned from Key MCP:
+   *   service="slack"  account="phase-g-alerts"
+   * Absent → alerter skips silently (safe for dev/staging).
+   */
+  SLACK_ALERT_WEBHOOK_URL?: string;
+  /**
+   * Phase G / G-2 — Cloudflare Turnstile server-side secret key.
+   * Used by workers/middleware/turnstile.ts to verify tokens submitted by
+   * the login form before sending an OTP.
+   * Set via `wrangler secret put TURNSTILE_SECRET_KEY`.
+   * Obtain the value from the Cloudflare dashboard → Turnstile → your widget
+   * → Secret Key (see docs/phase-g-dashboard-config.md §4).
+   * Absent → Turnstile middleware fails closed (returns 403 TURNSTILE_FAILED).
+   */
+  TURNSTILE_SECRET_KEY?: string;
 }

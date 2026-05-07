@@ -9,6 +9,8 @@ import type { AuthzContext } from "../db/control-plane/forGroup";
  * Phase C3 / TASK-C3.1 — unified audit-log helper.
  * Phase E / TASK-E.3 — full migration: every call site uses `writeAudit`
  *   directly. The legacy `appendAudit` shim is removed.
+ * Phase G / G-3 — extended with status, tenant_id, user_agent columns and
+ *   an Analytics Engine mirror via `ctx.waitUntil` (AUTH_ANALYTICS binding).
  *
  * `writeAudit` is the single chokepoint:
  *   • Insert is wrapped in an internal try/catch (fire-and-forget).
@@ -20,12 +22,14 @@ import type { AuthzContext } from "../db/control-plane/forGroup";
  *     (the MCP helper had a spoofable fallback before — audit P2-3).
  *   • Size caps protect against a misbehaving client filling D1: tool_name
  *     truncated at 200 chars, mcp_method truncated at 100 chars, meta_json
- *     truncated at 8 KB after stringify.
+ *     truncated at 8 KB after stringify, user_agent truncated at 500 chars.
  */
 
 const TOOL_NAME_MAX = 200;
 const MCP_METHOD_MAX = 100;
 const META_JSON_MAX = 8 * 1024;
+/** Phase G / G-3 — user-agent header cap (500 chars). */
+const USER_AGENT_MAX = 500;
 
 function truncate(s: string | null, max: number): string | null {
   if (s === null) return null;
@@ -90,6 +94,30 @@ export interface AuditWrite {
   /** MCP-specific overrides — when set, override target_type/target_id. */
   mcp_method?: string | null;
   tool_name?: string | null;
+  /**
+   * Phase G / G-3 — outcome classification.
+   * "success" | "denied" | "error" — or omit for non-auth rows.
+   */
+  status?: "success" | "denied" | "error" | null;
+  /**
+   * Phase G / G-3 — group_id at audit time, denormalized for partitioned
+   * alerter queries. Matches scope_group_id in most cases; separated so
+   * auth events (which may not have a group scope) can still carry it.
+   */
+  tenant_id?: string | null;
+  /**
+   * Phase G / G-3 — User-Agent header value. Truncated at USER_AGENT_MAX
+   * (500 chars) before storage.
+   */
+  user_agent?: string | null;
+  /**
+   * Phase G / G-3 — Analytics Engine binding and ExecutionContext for the
+   * write-data-point mirror. When provided, a `writeDataPoint` call is
+   * dispatched via `ctx.waitUntil()` and never blocks the D1 insert.
+   * If the binding is absent the mirror is silently skipped.
+   */
+  analyticsEngine?: AnalyticsEngineDataset | null;
+  ctx?: Pick<ExecutionContext, "waitUntil"> | null;
 }
 
 /**
@@ -124,11 +152,19 @@ function deriveActor(row: AuditWrite): {
  * Single audit-log writer. Wraps the D1 insert in try/catch so callers never
  * have to worry about audit failures bubbling up — fire-and-forget by
  * construction.
+ *
+ * Phase G / G-3: also mirrors the row to Analytics Engine via
+ * `ctx.waitUntil(analyticsEngine.writeDataPoint(...))`. The mirror is best-
+ * effort — any error is swallowed and never propagates. If the binding or
+ * ctx is absent, the mirror is silently skipped.
  */
 export async function writeAudit(
   db: D1Database,
   row: AuditWrite,
 ): Promise<void> {
+  // Snapshot `at` once so the D1 row and AE datapoint share the same timestamp.
+  const at = Date.now();
+
   try {
     const orm = drizzle(db, { schema });
 
@@ -161,10 +197,15 @@ export async function writeAudit(
 
     const { user, token } = deriveActor(row);
 
+    // Phase G / G-3 — new columns.
+    const status = row.status ?? null;
+    const tenant_id = row.tenant_id ?? null;
+    const user_agent = truncate(row.user_agent ?? null, USER_AGENT_MAX);
+
     await orm
       .insert(schema.audit_log)
       .values({
-        at: Date.now(),
+        at,
         actor_user_id: user,
         actor_token_id: token,
         action: row.action,
@@ -173,12 +214,42 @@ export async function writeAudit(
         scope_group_id: row.scope_group_id ?? null,
         meta_json,
         ip: row.ip ?? null,
+        // Phase G / G-3
+        status,
+        tenant_id,
+        user_agent,
       })
       .run();
   } catch (e) {
     // Fire-and-forget: never block the operation on audit failures. Log so
     // observability can spot a sustained outage; the row is lost on purpose.
     console.error("audit.write_failed", (e as Error).message);
+  }
+
+  // Phase G / G-3 — Analytics Engine mirror (best-effort, never blocks D1).
+  // Guards: binding may be absent in tests or non-auth paths.
+  if (row.analyticsEngine && row.ctx) {
+    const ae = row.analyticsEngine;
+    const { user, token } = deriveActor(row);
+    const mirror = async (): Promise<void> => {
+      try {
+        ae.writeDataPoint({
+          indexes: [row.action, row.status ?? "null", row.tenant_id ?? "null"],
+          doubles: [at],
+          blobs: [
+            user ?? "",
+            token ?? "",
+            row.target?.kind ?? "",
+            row.target?.id ?? "",
+            row.ip ?? "",
+            truncate(row.user_agent ?? null, USER_AGENT_MAX) ?? "",
+          ],
+        });
+      } catch {
+        // Intentionally swallowed — AE failure must not propagate.
+      }
+    };
+    row.ctx.waitUntil(mirror());
   }
 }
 
