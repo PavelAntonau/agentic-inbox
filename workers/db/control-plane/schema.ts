@@ -767,3 +767,60 @@ export const oauth_personal_access_token = sqliteTable(
     // Migration 0016 drops it; this schema no longer declares it.
   }),
 );
+
+// Phase F (one-inbox-one-client) — migration 0017.
+//
+// Sentinel table that owns the (user_id, mailbox_id) → MCP credential
+// binding for the /mcp surface. Each (user, inbox) pair has at most ONE
+// active credential, either a PAT (`kind='pat'`) or an OAuth client
+// (`kind='oauth'`). The composite primary key enforces uniqueness; the
+// CHECK constraint (declared in migration 0017's SQL — drizzle has no
+// first-class CHECK helper at the schema level) enforces XOR between
+// `pat_id` and `oauth_client_id`.
+//
+// Lifecycle:
+//
+//   - PAT mint for mailbox X: in a single d1.batch, INSERT pat row +
+//     INSERT binding(user, X, 'pat', pat_id=newId). A pre-existing
+//     binding for (user, X) raises SQLITE_CONSTRAINT → routes/pats.ts
+//     translates to 409 `inbox-credential-exists`.
+//   - PAT delete (hard): DELETE FROM oauth_personal_access_token WHERE id=?
+//     ON DELETE CASCADE drops the binding row.
+//   - OAuth /mcp first call for mailbox X: dispatcher resolves the
+//     mailbox and looks up binding(user, X). Missing → INSERT binding
+//     (kind='oauth', oauth_client_id=jwt.client_id) and proceed; the
+//     PRIMARY KEY race-protects concurrent first-calls. Existing
+//     kind='pat' → 403 `inbox-bound-to-pat`. Existing kind='oauth' but
+//     different client_id → 403 `inbox-bound-to-other-client`.
+//   - User-initiated revoke
+//     (DELETE /api/users/me/mailboxes/:id/mcp-credential): deletes the
+//     underlying credential row (PAT row OR oauth_consent + oauth_client
+//     pruning + tombstone), CASCADE drops the binding.
+export const mcp_inbox_binding = sqliteTable(
+  "mcp_inbox_binding",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    /** 'pat' | 'oauth'. CHECK constraint declared in migration 0017. */
+    kind: text("kind").notNull(),
+    patId: text("pat_id").references(() => oauth_personal_access_token.id, {
+      onDelete: "cascade",
+    }),
+    oauthClientId: text("oauth_client_id").references(
+      () => oauth_client.clientId,
+      { onDelete: "cascade" },
+    ),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.mailboxId] }),
+    patIdIdx: index("mcp_inbox_binding_pat_id_idx").on(t.patId),
+    oauthClientIdIdx: index("mcp_inbox_binding_oauth_client_id_idx").on(
+      t.oauthClientId,
+    ),
+  }),
+);
