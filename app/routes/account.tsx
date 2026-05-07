@@ -57,7 +57,7 @@ const VISIBILITY_OPTIONS: {
 ];
 
 export function meta() {
-  return [{ title: "Account | Agentic Inbox" }];
+  return [{ title: "Account | ActionNowAI Mail" }];
 }
 
 export default function AccountRoute() {

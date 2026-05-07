@@ -11,7 +11,7 @@ import LastLoginPanel from "~/components/admin/obs/LastLoginPanel";
 import AuditLogBrowser from "~/components/admin/obs/AuditLogBrowser";
 
 export function meta() {
-  return [{ title: "Admin — Observability | Agentic Inbox" }];
+  return [{ title: "Admin — Observability | ActionNowAI Mail" }];
 }
 
 export default function AdminObservabilityRoute() {

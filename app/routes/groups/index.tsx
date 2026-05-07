@@ -15,7 +15,7 @@ interface OutletContext {
 }
 
 export function meta() {
-  return [{ title: "Groups | Agentic Inbox" }];
+  return [{ title: "Groups | ActionNowAI Mail" }];
 }
 
 export default function GroupsIndex() {

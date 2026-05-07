@@ -63,7 +63,7 @@ const ACCOUNT_TYPE_OPTIONS: {
 ];
 
 export function meta() {
-  return [{ title: "Profile | Agentic Inbox" }];
+  return [{ title: "Profile | ActionNowAI Mail" }];
 }
 
 export default function ProfileRoute() {

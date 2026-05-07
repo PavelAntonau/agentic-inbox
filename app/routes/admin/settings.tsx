@@ -8,7 +8,7 @@ import SettingsRow, {
 } from "~/components/admin/SettingsRow";
 
 export function meta() {
-  return [{ title: "Admin — Settings | Agentic Inbox" }];
+  return [{ title: "Admin — Settings | ActionNowAI Mail" }];
 }
 
 interface SettingsApiResponse {

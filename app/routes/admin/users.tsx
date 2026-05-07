@@ -32,7 +32,7 @@ interface UsersApiResponse {
 // ---------------------------------------------------------------------------
 
 export function meta() {
-  return [{ title: "Admin — Users | Agentic Inbox" }];
+  return [{ title: "Admin — Users | ActionNowAI Mail" }];
 }
 
 // ---------------------------------------------------------------------------

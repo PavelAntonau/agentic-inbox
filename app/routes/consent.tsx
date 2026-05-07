@@ -90,7 +90,7 @@ interface ConsentActionData {
 }
 
 export function meta() {
-  return [{ title: "Authorize access | Agentic Inbox" }];
+  return [{ title: "Authorize access | ActionNowAI Mail" }];
 }
 
 /* -------------------------------------------------------------------------- */

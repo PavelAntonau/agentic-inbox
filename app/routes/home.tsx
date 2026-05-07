@@ -19,7 +19,7 @@ import { useCreateMailbox, useMailboxes } from "~/queries/mailboxes";
 import { queryKeys } from "~/queries/keys";
 
 export function meta() {
-  return [{ title: "Agentic Inbox" }];
+  return [{ title: "ActionNowAI Mail" }];
 }
 
 export default function HomeRoute() {

@@ -18,7 +18,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
 
 export function meta() {
-  return [{ title: "Sign in | Agentic Inbox" }];
+  return [{ title: "Sign in | ActionNowAI Mail" }];
 }
 
 type Step = "email" | "otp";
@@ -165,7 +165,7 @@ export default function LoginRoute() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-semibold text-text-bright">
-            Agentic Inbox
+            ActionNowAI Mail
           </h1>
           <p className="text-sm text-text-muted mt-1">
             {step === "email"

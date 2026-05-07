@@ -12,7 +12,7 @@ import SendContactRequestDialog from "~/components/contacts/SendContactRequestDi
 type Tab = "all" | "sent" | "incoming" | "accepted" | "blocked";
 
 export function meta() {
-  return [{ title: "Contacts | Agentic Inbox" }];
+  return [{ title: "Contacts | ActionNowAI Mail" }];
 }
 
 interface ContactsApiResponse {

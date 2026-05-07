@@ -75,7 +75,7 @@ export class EmailMCP extends McpAgent<Env> {
 
   async init() {
     this.server = new McpServer({
-      name: "agentic-inbox",
+      name: "actionnowai-mail",
       version: "1.0.0",
     });
     const env = this.env;

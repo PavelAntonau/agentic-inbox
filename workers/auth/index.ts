@@ -502,7 +502,7 @@ async function sendOtpEmail(
   otp: string,
   _type: "sign-in" | "email-verification" | "forget-password" | "change-email",
 ) {
-  const subject = "Your Agentic Inbox sign-in code";
+  const subject = "Your ActionNowAI Mail sign-in code";
 
   const text = [
     `Your sign-in code is: ${otp}`,
@@ -510,13 +510,13 @@ async function sendOtpEmail(
     "This code expires in 10 minutes.",
     "If you didn't request this, you can ignore this email — your account is safe.",
     "",
-    "— Agentic Inbox",
+    "— ActionNowAI Mail",
   ].join("\n");
 
   const html = `<!doctype html>
 <html><body style="margin:0;padding:24px;background:#0b1220;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#e2e8f0;">
   <div style="max-width:480px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:12px;padding:32px;">
-    <h1 style="margin:0 0 16px;font-size:20px;color:#f1f5f9;">Sign in to Agentic Inbox</h1>
+    <h1 style="margin:0 0 16px;font-size:20px;color:#f1f5f9;">Sign in to ActionNowAI Mail</h1>
     <p style="margin:0 0 24px;color:#94a3b8;line-height:1.5;">Use the code below to sign in:</p>
     <div style="font-size:32px;font-weight:700;letter-spacing:0.25em;color:#22d3ee;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:16px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${otp}</div>
     <p style="margin:24px 0 0;color:#64748b;font-size:13px;line-height:1.5;">This code expires in 10 minutes. If you didn't request it, ignore this message — your account stays safe.</p>
@@ -525,7 +525,7 @@ async function sendOtpEmail(
 
   await sendEmail(getEmailBinding(env), {
     to,
-    from: { name: "Agentic Inbox", email: "auth@actionnow.ai" },
+    from: { name: "ActionNowAI Mail", email: "auth@actionnow.ai" },
     subject,
     text,
     html,

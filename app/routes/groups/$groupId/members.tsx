@@ -42,7 +42,7 @@ interface OutletContext {
 // ---------------------------------------------------------------------------
 
 export function meta() {
-  return [{ title: "Members | Agentic Inbox" }];
+  return [{ title: "Members | ActionNowAI Mail" }];
 }
 
 export default function GroupMembersRoute() {

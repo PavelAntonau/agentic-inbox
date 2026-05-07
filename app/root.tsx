@@ -120,7 +120,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           href="/apple-touch-icon.png"
         />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Agentic Inbox</title>
+        <title>ActionNowAI Mail</title>
         {/* Apply theme class on <html> BEFORE first paint to avoid the
          * flash-of-wrong-theme. Reads localStorage["anai-theme"]; falls
          * back to system preference. The ThemeToggle in the header
