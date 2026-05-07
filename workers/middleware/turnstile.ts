@@ -177,23 +177,27 @@ export function requireTurnstile(): MiddlewareHandler<TurnstileEnv> {
       return turnstileFailedResponse();
     }
 
-    // Extract token from body or header. Clone the request so the downstream
-    // handler can still read the body.
+    // Extract token from body or header. The underlying Request body stream
+    // can be read exactly once — `c.req.json()` / `c.req.formData()` would
+    // consume it, leaving better-auth's downstream handler unable to re-read
+    // the body and failing with "Body has already been used. … Use tee()
+    // first if you need to read it twice." We therefore clone `c.req.raw`
+    // BEFORE parsing so the original stream is preserved for `next()`.
+    //
+    // The header-only path (X-Turnstile-Token) skips body parsing entirely.
     let token: string | null = null;
     const contentType = c.req.header("content-type") ?? "";
 
     if (contentType.includes("application/json")) {
       try {
-        const body = await c.req.json<Record<string, unknown>>();
+        const body = (await c.req.raw.clone().json()) as Record<
+          string,
+          unknown
+        >;
         token =
           typeof body["cf_turnstile_response"] === "string"
-            ? body["cf_turnstile_response"]
-            : null;
-        // Re-attach the body so downstream can read it again. Hono's c.req.json()
-        // clones under the hood on modern runtimes; if not, wrap:
-        if (token === null)
-          token =
-            typeof body["cf-turnstile-response"] === "string"
+            ? (body["cf_turnstile_response"] as string)
+            : typeof body["cf-turnstile-response"] === "string"
               ? (body["cf-turnstile-response"] as string)
               : null;
       } catch {
@@ -204,7 +208,7 @@ export function requireTurnstile(): MiddlewareHandler<TurnstileEnv> {
       contentType.includes("multipart/form-data")
     ) {
       try {
-        const form = await c.req.formData();
+        const form = await c.req.raw.clone().formData();
         token = form.get("cf-turnstile-response") as string | null;
       } catch {
         // malformed form — fall through to header check
