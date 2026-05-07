@@ -242,28 +242,31 @@ app.onError((err, c) => {
 // `/login` and `/logout` are public — they MUST run before the auth
 // middleware below or no-one could reach them without already being
 // authenticated. In dev (`CF_ACCESS_DEV_MODE=mock`) `/login` serves a
-// branded mock-identity picker; in prod it 302s to Cloudflare Access.
-app.get("/login", (c) => {
+// branded mock-identity picker; in prod the React app serves the
+// better-auth email-OTP form (Phase G T3.5 cutover, 2026-05-07).
+app.get("/login", async (c, next) => {
   if (c.env.CF_ACCESS_DEV_MODE === "mock") {
     return c.html(renderDevLoginPicker(c.env), 200, {
       "Cache-Control": "no-store",
     });
   }
-  if (c.env.TEAM_DOMAIN && c.env.POLICY_AUD) {
-    const url = new URL(c.env.TEAM_DOMAIN);
-    return c.redirect(
-      `${url.origin}/cdn-cgi/access/login/${c.env.POLICY_AUD}`,
-      302,
-    );
-  }
-  return c.text("Login is unavailable: Cloudflare Access not configured.", 500);
+  // Phase G T3.5 cutover: CF Access dropped from mail.actionnow.ai. The
+  // React app's /login route renders the email-OTP form gated by
+  // Turnstile. The legacy 302-to-CF-Access-login branch is retired —
+  // POLICY_AUD/TEAM_DOMAIN may remain set as harmless config; the
+  // worker's CF Access JWT middleware still validates JWTs when
+  // present, but no longer requires them. Falling through hands the
+  // request to the react-router catch-all.
+  return next();
 });
 
-app.post("/login", async (c) => {
+app.post("/login", async (c, next) => {
   if (c.env.CF_ACCESS_DEV_MODE !== "mock") {
-    // Production has no POST flow — the real Cloudflare Access page handles
-    // credentials at the edge, not here.
-    return c.redirect("/login", 303);
+    // Phase G T3.5 cutover: POST /login has no production handler — the
+    // React app's login form posts to /api/auth/sign-in/email-otp,
+    // handled by better-auth (workers/auth/index.ts). Fall through to
+    // the react-router catch-all so any client-side routing handles it.
+    return next();
   }
   const form = await c.req.formData();
   const choice = (form.get("identity") ?? "").toString().trim();
@@ -460,18 +463,21 @@ app.use("*", async (c, next) => {
   }
 
   const { POLICY_AUD, TEAM_DOMAIN } = c.env;
-
-  // Fail closed in production if Access is not configured.
-  if (!POLICY_AUD || !TEAM_DOMAIN) {
-    return c.text(
-      "Cloudflare Access must be configured in production. Set POLICY_AUD and TEAM_DOMAIN.",
-      500,
-    );
-  }
-
   const token = c.req.header("cf-access-jwt-assertion");
-  if (!token) {
-    return c.text("Missing required CF Access JWT", 403);
+
+  // Phase G T3.5 cutover (2026-05-07): CF Access has been dropped from
+  // mail.actionnow.ai. When CF Access is not in front of the request
+  // (no `cf-access-jwt-assertion` header) OR no longer configured at
+  // all (POLICY_AUD/TEAM_DOMAIN unset), fall through to authzContext —
+  // which validates via better-auth session cookies (Path 1 in
+  // workers/middleware/authz-context.ts:78-127). Pre-cutover behavior
+  // was 403; this is the dual-accept Phase F's design always intended
+  // and that the cutover relies on.
+  //
+  // Invalid-but-present JWT still fails closed below — that's a tamper
+  // attempt, not a missing-CF-Access scenario.
+  if (!token || !POLICY_AUD || !TEAM_DOMAIN) {
+    return next();
   }
 
   try {
