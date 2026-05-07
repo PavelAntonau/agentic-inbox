@@ -56,17 +56,25 @@ export function generateCspNonce(): string {
  * Phase C3 carry-forward this task closes.
  */
 export function buildCspDirectives(nonce: string | null): string {
+  // Phase G-2 / G T3.5 cutover (2026-05-07) — Turnstile widget loader and
+  // verify endpoint must be allowlisted alongside the nonce baseline.
+  // The widget loads `https://challenges.cloudflare.com/turnstile/v0/api.js`
+  // (script-src), renders an iframe pointing at challenges.cloudflare.com
+  // (frame-src), and POSTs the user's challenge response from the client
+  // (connect-src). img-src adds `https:` so React-rendered avatars and
+  // external mailbox imagery render.
   const scriptSrc =
     nonce !== null
-      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
-      : "script-src 'self' 'strict-dynamic'";
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com`
+      : "script-src 'self' 'strict-dynamic' https://challenges.cloudflare.com";
   return [
     "default-src 'self'",
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    "connect-src 'self' https://challenges.cloudflare.com",
+    "frame-src https://challenges.cloudflare.com",
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",

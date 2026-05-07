@@ -117,6 +117,45 @@ describe("buildCspDirectives — Phase E / TASK-E.1", () => {
   it("CSP_NONCE_VAR symbol is the Hono context key the middleware sets", () => {
     expect(CSP_NONCE_VAR).toBe("cspNonce");
   });
+
+  // ---------------------------------------------------------------------
+  // Phase G-2 / G T3.5 — Turnstile allowlist baked into the canonical CSP.
+  // The previous architecture had a separate `securityHeadersMiddleware`
+  // that overwrote this CSP with a static (no-nonce) Turnstile-aware
+  // policy — which silently disabled nonce-based script execution and
+  // broke React Router hydration in production. Source of truth is now
+  // `buildCspDirectives`; the assertions below are the regression guards.
+  // ---------------------------------------------------------------------
+  it("script-src includes https://challenges.cloudflare.com (Turnstile widget loader)", () => {
+    const csp = buildCspDirectives("any");
+    const scriptSrc = csp.split("; ").find((d) => d.startsWith("script-src"))!;
+    expect(scriptSrc).toContain("https://challenges.cloudflare.com");
+  });
+
+  it("script-src null-nonce variant ALSO includes Turnstile (the widget runs even when nonce is missing)", () => {
+    const csp = buildCspDirectives(null);
+    const scriptSrc = csp.split("; ").find((d) => d.startsWith("script-src"))!;
+    expect(scriptSrc).toContain("https://challenges.cloudflare.com");
+  });
+
+  it("frame-src includes https://challenges.cloudflare.com (Turnstile iframe)", () => {
+    const csp = buildCspDirectives("any");
+    expect(csp).toContain("frame-src https://challenges.cloudflare.com");
+  });
+
+  it("connect-src includes https://challenges.cloudflare.com (Turnstile client-side fetch)", () => {
+    const csp = buildCspDirectives("any");
+    const connectSrc = csp
+      .split("; ")
+      .find((d) => d.startsWith("connect-src"))!;
+    expect(connectSrc).toContain("https://challenges.cloudflare.com");
+  });
+
+  it("img-src adds https: (external avatars + mailbox imagery)", () => {
+    const csp = buildCspDirectives("any");
+    const imgSrc = csp.split("; ").find((d) => d.startsWith("img-src"))!;
+    expect(imgSrc).toContain("https:");
+  });
 });
 
 describe("CSP nonce → render-time substitution — Phase E / TASK-E.1", () => {
