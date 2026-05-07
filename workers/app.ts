@@ -1514,6 +1514,11 @@ app.route("/api/mailboxes", inboxPoliciesRouter);
 const { default: threadsRouter } = await import("./routes/threads");
 app.route("/api/mailboxes", threadsRouter);
 
+// MCP-credential router (Phase F — per-mailbox MCP credential read/revoke)
+const { default: mcpCredentialRouter } =
+  await import("./routes/mcp-credential");
+app.route("/api/mailboxes", mcpCredentialRouter);
+
 // Observability router (Phase 6 — admin obs panels)
 const { default: observabilityRouter } = await import("./routes/observability");
 app.route("/api/admin/obs", observabilityRouter);
