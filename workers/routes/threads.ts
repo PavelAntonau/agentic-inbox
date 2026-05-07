@@ -18,6 +18,7 @@ import { ThreadNotFoundError, ConflictError } from "../durableObject/index";
 import type { MailboxDO } from "../durableObject";
 import type { Env } from "../types";
 import { Folders } from "../../shared/folders";
+import { emitRateLimitEvent } from "../lib/rl-events";
 
 type AppVariables = {
   authzContext?: AuthzContext;
@@ -152,6 +153,9 @@ router.get("/:mid/threads/:tid", async (c) => {
 // ── POST /api/mailboxes/:mid/threads/:tid/messages ─────────────────
 
 router.post("/:mid/threads/:tid/messages", async (c) => {
+  // Phase v1.1 G-5 / TASK-1.4 — gate-entry timestamp for AE latency.
+  // Post-auth route: shard on user_id (session id), not IP.
+  const t0 = Date.now();
   const mailboxId = c.req.param("mid");
   const threadId = c.req.param("tid");
   const ctx = c.var.authzContext!;
@@ -222,6 +226,16 @@ router.post("/:mid/threads/:tid/messages", async (c) => {
       expectedVersion,
       message,
     );
+    // Phase v1.1 G-5 / TASK-1.4 — AE emit on message append success.
+    // Schema: blobs=[route,actor,outcome] / doubles=[count,latency_ms] / indexes=[ip_or_session_id]
+    emitRateLimitEvent(c.env, {
+      route: "/api/messages",
+      actor: ctx.user_id,
+      outcome: "MESSAGE_OK",
+      ipOrSessionId: ctx.user_id,
+      count: 1,
+      latencyMs: Date.now() - t0,
+    });
     return c.json(
       {
         id: result.tip_message_id,
@@ -232,9 +246,26 @@ router.post("/:mid/threads/:tid/messages", async (c) => {
     );
   } catch (err) {
     if (err instanceof ThreadNotFoundError) {
+      // Phase v1.1 G-5 / TASK-1.4 — AE emit on message append fail.
+      emitRateLimitEvent(c.env, {
+        route: "/api/messages",
+        actor: ctx.user_id,
+        outcome: "MESSAGE_FAIL",
+        ipOrSessionId: ctx.user_id,
+        count: 1,
+        latencyMs: Date.now() - t0,
+      });
       return c.json({ error: "Thread not found" }, 404);
     }
     if (err instanceof ConflictError) {
+      emitRateLimitEvent(c.env, {
+        route: "/api/messages",
+        actor: ctx.user_id,
+        outcome: "MESSAGE_FAIL",
+        ipOrSessionId: ctx.user_id,
+        count: 1,
+        latencyMs: Date.now() - t0,
+      });
       return c.json(
         {
           error: "stale",
@@ -244,6 +275,14 @@ router.post("/:mid/threads/:tid/messages", async (c) => {
         409,
       );
     }
+    emitRateLimitEvent(c.env, {
+      route: "/api/messages",
+      actor: ctx.user_id,
+      outcome: "MESSAGE_FAIL",
+      ipOrSessionId: ctx.user_id,
+      count: 1,
+      latencyMs: Date.now() - t0,
+    });
     throw err;
   }
 });

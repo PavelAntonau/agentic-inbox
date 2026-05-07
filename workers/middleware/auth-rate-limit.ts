@@ -25,6 +25,7 @@
 
 import type { MiddlewareHandler } from "hono";
 import type { Env } from "../types";
+import { emitRateLimitEvent } from "../lib/rl-events";
 
 /** Rate-limit window — 15 minutes in seconds. */
 const WINDOW_SECONDS = 60 * 15;
@@ -98,6 +99,8 @@ export function authRateLimitByEmail(): MiddlewareHandler<{
 }> {
   return async (c, next) => {
     const path = new URL(c.req.url).pathname;
+    const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+    const t0 = Date.now();
     const { email, replay } = await readEmailFromJson(c.req.raw);
     if (replay !== c.req.raw) {
       // Currently a no-op (clone() preserves the original body) but kept
@@ -147,6 +150,16 @@ export function authRateLimitByEmail(): MiddlewareHandler<{
             (existing!.last_request + WINDOW_SECONDS * 1000 - now) / 1000,
           ),
         );
+        // Phase v1.1 G-5 / TASK-1.4 — AE emit on rate-limit hit.
+        // Schema: blobs=[route,actor,outcome] / doubles=[count,latency_ms] / indexes=[ip_or_session_id]
+        emitRateLimitEvent(c.env, {
+          route: "auth-rate-limit-by-email",
+          actor: email,
+          outcome: "RATE_LIMITED_EMAIL",
+          ipOrSessionId: ip,
+          count,
+          latencyMs: Date.now() - t0,
+        });
         return tooManyRequestsResponse(retryAfter);
       }
     } catch (err) {
@@ -158,6 +171,16 @@ export function authRateLimitByEmail(): MiddlewareHandler<{
       );
     }
 
+    // Phase v1.1 G-5 / TASK-1.4 — AE emit on allow-through.
+    // Schema: blobs=[route,actor,outcome] / doubles=[count,latency_ms] / indexes=[ip_or_session_id]
+    emitRateLimitEvent(c.env, {
+      route: "auth-rate-limit-by-email",
+      actor: email,
+      outcome: "ALLOW",
+      ipOrSessionId: ip,
+      count: 1,
+      latencyMs: Date.now() - t0,
+    });
     return next();
   };
 }

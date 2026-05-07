@@ -126,28 +126,68 @@
 			]
 		}
 	],
-	// Phase G / G-3 — Analytics Engine dataset for auth-event observability.
-	// Binding name: AUTH_ANALYTICS  Dataset name: auth_events
-	// Pass env.AUTH_ANALYTICS + ctx to writeAudit for the AE mirror path.
+	// Phase v1.1 G-5 — Analytics Engine dataset for rate-limit observability.
+	// Binding name: AE  Dataset name: rate_limit_events
 	//
-	// TEMPORARILY DISABLED 2026-05-07 by Pavel's directive (Phase G T3.5
-	// cutover). The Analytics Engine feature is not yet enabled on this CF
-	// account; enabling it requires a one-click dashboard action at
-	// https://dash.cloudflare.com/3e96bfb3a3edded75b781064e5d743a3/workers/analytics-engine
-	// Cutover proceeds without the AE mirror — audit-log writes still hit
-	// D1 (the canonical store) and the cron alerter still polls D1 for
-	// tier-1 anomalies. workers/lib/audit-log.ts:231 guards the AE write
-	// with `if (row.analyticsEngine && row.ctx)` so the absent binding is
-	// a no-op, not a crash. Test `audit-log-g3.test.ts` covers this case.
+	// Per D-G5-EMIT-PROVENANCE (`uoMZ8W6h0qozp_Q2251jT`), every emit site
+	// stamps a fixed schema:
+	//   blobs   = [route, actor, outcome]
+	//   doubles = [count, latency_ms]
+	//   indexes = [ip_or_session_id]
+	// Schema comment lives at every emit site (AE has no enforced schema).
 	//
-	// To re-enable after the operator clicks Enable in the dashboard:
-	//   1. Uncomment the `analytics_engine_datasets` block below.
-	//   2. `npm run deploy` (with CLOUDFLARE_API_TOKEN env).
-	// Tracked as a Phase 3 follow-up in DECISIONS.md / action plan.
+	// AE re-enable is operator-only (Cloudflare dash → Workers & Pages →
+	// mail-actionnow-ai → Settings → Bindings → Add → Analytics Engine).
+	// There is no API path to flip the account-level toggle; deploys with
+	// this block declared will fail with API error 10089 until the
+	// dashboard click is performed (see commit e2482f3 for prior context).
 	//
+	// Phase G / G-3 follow-up — the legacy `AUTH_ANALYTICS`/`auth_events`
+	// binding (auth-event mirror, distinct dataset) remains commented out
+	// pending its own re-enable cycle. workers/lib/audit-log.ts:231 still
+	// guards the legacy mirror with `if (row.analyticsEngine && row.ctx)`,
+	// so its absence is a no-op, not a crash.
 	// "analytics_engine_datasets": [
-	//	{ "binding": "AUTH_ANALYTICS", "dataset": "auth_events" }
+	//	{ "binding": "AUTH_ANALYTICS", "dataset": "auth_events" },
 	// ],
+	"analytics_engine_datasets": [
+		{ "binding": "AE", "dataset": "rate_limit_events" }
+	],
+	// Phase v1.1 G-5 — Workers Rate Limit binding (Cloudflare native edge
+	// rate limiter; runs IN-Worker via `await env.RL_*.limit({key})`).
+	//
+	// Namespace registry — D-G5-NAMESPACE-REGISTRY (`qOehAbS93fLh-VkJ4u9cf`)
+	// fixes sequential allocation; namespace IDs are immutable once chosen.
+	//   1001 = RL_LOGIN          — pre-auth /login POST          (5 req / 10s)
+	//   1002 = RL_LOGIN_VERIFY   — pre-auth /login/verify POST  (10 req / 60s)
+	//   1003 = RL_API_MESSAGES   — post-auth /api/messages       (200 req / 60s)
+	//
+	// Per D-PG-G5-ARCH (`Ul_YET43hsABcWM901XDm`): edge counter is per-colo
+	// loose; the existing app-layer rate-limiter
+	// (workers/middleware/auth-rate-limit.ts) remains the global tight
+	// limiter. Both run; D-PG-1 sizing rule (`MoK4pLGOtP08xrr_Ewkvd`) holds.
+	//
+	// Thresholds chosen via formula `cf_threshold = max(app_sustained,
+	// k × P99)` with k=2 (login pre-auth) / 3 (verify pre-auth) / 4-5
+	// (post-auth). Re-tune via wrangler.jsonc + redeploy ONLY (req_api_only_threshold
+	// `CYC23X_1LUXNiEh8byU5D`) — never via dashboard.
+	"ratelimits": [
+		{
+			"name": "RL_LOGIN",
+			"namespace_id": "1001",
+			"simple": { "limit": 5, "period": 10 }
+		},
+		{
+			"name": "RL_LOGIN_VERIFY",
+			"namespace_id": "1002",
+			"simple": { "limit": 10, "period": 60 }
+		},
+		{
+			"name": "RL_API_MESSAGES",
+			"namespace_id": "1003",
+			"simple": { "limit": 200, "period": 60 }
+		}
+	],
 	// Phase G / G-3 — Cron trigger for the tier-1 auth alerter.
 	// Handler: workers/cron/auth-alerter.ts → exported `scheduled` handler.
 	// Fires every 2 minutes. Sends a single email per fingerprint to

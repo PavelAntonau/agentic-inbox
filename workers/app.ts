@@ -19,6 +19,7 @@ import { requireTurnstile } from "./middleware/turnstile";
 import { authRateLimitByEmail } from "./middleware/auth-rate-limit";
 import { assertOauthClientsRequirePkce } from "./auth/pkce-assertion";
 import { scheduled as authAlerterScheduled } from "./cron/auth-alerter";
+import { emitRateLimitEvent } from "./lib/rl-events";
 import type { Env } from "./types";
 
 /**
@@ -320,8 +321,35 @@ app.post(
   authRateLimitByEmail(),
   requireTurnstile(),
   async (c) => {
+    const t0 = Date.now();
+    const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+    // Best-effort capture of the email up-front for the AE actor field; the
+    // body is consumed by auth.handler so we read it from a clone first.
+    let actor = "unknown";
+    try {
+      const parsed = (await c.req.raw.clone().json()) as Record<
+        string,
+        unknown
+      >;
+      if (typeof parsed["email"] === "string") {
+        actor = String(parsed["email"]).trim().toLowerCase();
+      }
+    } catch {
+      // Body wasn't JSON — leave actor as "unknown".
+    }
     const auth = createAuth(c.env, c.req.raw, c.executionCtx);
-    return auth.handler(c.req.raw);
+    const response = await auth.handler(c.req.raw);
+    // Phase v1.1 G-5 / TASK-1.4 — AE emit on OTP send.
+    // Schema: blobs=[route,actor,outcome] / doubles=[count,latency_ms] / indexes=[ip_or_session_id]
+    emitRateLimitEvent(c.env, {
+      route: "/api/auth/email-otp/send-verification-otp",
+      actor,
+      outcome: response.ok ? "OTP_SEND_OK" : "OTP_SEND_FAIL",
+      ipOrSessionId: ip,
+      count: 1,
+      latencyMs: Date.now() - t0,
+    });
+    return response;
   },
 );
 
@@ -335,6 +363,8 @@ app.post(
 // `constantTimeEqual` internally — we ensure `storeOTP: "hashed"` in
 // workers/auth/index.ts so the compare runs on equal-length HMAC hex).
 app.post("/api/auth/sign-in/email-otp", authRateLimitByEmail(), async (c) => {
+  const t0 = Date.now();
+  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
   const auth = createAuth(c.env, c.req.raw, c.executionCtx);
   // Capture the email up-front so the audit row carries the user
   // identifier even when better-auth rejects (the body is consumed by
@@ -359,6 +389,16 @@ app.post("/api/auth/sign-in/email-otp", authRateLimitByEmail(), async (c) => {
       },
     }),
   );
+  // Phase v1.1 G-5 / TASK-1.4 — AE emit on OTP verify.
+  // Schema: blobs=[route,actor,outcome] / doubles=[count,latency_ms] / indexes=[ip_or_session_id]
+  emitRateLimitEvent(c.env, {
+    route: "/api/auth/sign-in/email-otp",
+    actor: typeof email === "string" ? email.trim().toLowerCase() : "unknown",
+    outcome: response.ok ? "OTP_VERIFY_OK" : "OTP_VERIFY_FAIL",
+    ipOrSessionId: ip,
+    count: 1,
+    latencyMs: Date.now() - t0,
+  });
   return response;
 });
 
