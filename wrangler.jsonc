@@ -33,7 +33,16 @@
 		// the client widget; the secret drives server-side siteverify.
 		// Default value is Cloudflare's public always-passes test key for
 		// dev/testing; production deploys must override with the real key.
-		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+		// Phase G / G-3 — tier-1 auth alerter destination + sender.
+		// ADMIN_ALERT_EMAIL receives the alert (off-domain by design — admin
+		// preference 2026-05-07: a mail.actionnow.ai outage must not suppress
+		// alerts about itself; Slack/Teams/etc. intentionally not used).
+		// ADMIN_ALERT_FROM is the Resend sender — must be on a verified
+		// domain. The alerter also requires the existing RESEND_API_KEY
+		// secret. If any of the three is missing, the alerter skips silently.
+		"ADMIN_ALERT_EMAIL": "pavel@digifirst.org",
+		"ADMIN_ALERT_FROM": "noreply@actionnow.ai"
 	},
 	// Outbound mail goes through Resend (workers/lib/resend-client.ts) — the
 	// previous Cloudflare Email Routing `send_email` binding was reply-only /
@@ -120,9 +129,9 @@
 	],
 	// Phase G / G-3 — Cron trigger for the tier-1 auth alerter.
 	// Handler: workers/cron/auth-alerter.ts → exported `scheduled` handler.
-	// Fires every 2 minutes. Slack webhook provisioned via:
-	//   wrangler secret put SLACK_ALERT_WEBHOOK_URL
-	// Secret value stored in Key MCP: service="slack" account="phase-g-alerts"
+	// Fires every 2 minutes. Sends a single email per fingerprint to
+	// `vars.ADMIN_ALERT_EMAIL` via Resend (`RESEND_API_KEY` secret), with
+	// a 5-minute in-isolate dedup window. No Slack/Teams/etc.
 	"triggers": {
 		"crons": ["*/2 * * * *"]
 	}

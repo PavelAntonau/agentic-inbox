@@ -13,3 +13,11 @@ TEAM_DOMAIN=https://your-team.cloudflareaccess.com
 # key (public) lives in wrangler.jsonc `vars.TURNSTILE_SITE_KEY`; for the
 # always-passes test pair use `1x00000000000000000000AA`.
 # TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
+# Phase G-3 — auth alerter (workers/cron/auth-alerter.ts). Recipient and
+# sender live in wrangler.jsonc `vars` (non-secret operational config).
+# RESEND_API_KEY is also required (set via `wrangler secret put`); for local
+# dev, leaving it unset makes the alerter skip silently.
+# ADMIN_ALERT_EMAIL=pavel@digifirst.org
+# ADMIN_ALERT_FROM=noreply@actionnow.ai
+# RESEND_API_KEY=re_local_dev_key

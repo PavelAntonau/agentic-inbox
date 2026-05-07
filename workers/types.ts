@@ -68,13 +68,22 @@ export interface Env extends Cloudflare.Env {
    */
   AUTH_ANALYTICS?: AnalyticsEngineDataset;
   /**
-   * Phase G / G-3 — Slack webhook URL for the tier-1 auth alerter cron.
-   * Set via `wrangler secret put SLACK_ALERT_WEBHOOK_URL`.
-   * Secret value provisioned from Key MCP:
-   *   service="slack"  account="phase-g-alerts"
-   * Absent → alerter skips silently (safe for dev/staging).
+   * Phase G / G-3 — Recipient mailbox for the tier-1 auth alerter cron.
+   * Set in wrangler.jsonc `vars.ADMIN_ALERT_EMAIL` (non-secret — the
+   * destination address is operational config, not a credential).
+   * Admin preference 2026-05-07: a single off-domain email channel
+   * (e.g. pavel@digifirst.org) so a mail.actionnow.ai outage doesn't
+   * suppress alerts about itself. Slack/Teams/etc. intentionally not used.
+   * Absent → alerter skips silently.
    */
-  SLACK_ALERT_WEBHOOK_URL?: string;
+  ADMIN_ALERT_EMAIL?: string;
+  /**
+   * Phase G / G-3 — Sender address for the tier-1 auth alerter. Must be
+   * on a Resend-verified domain — the established default is
+   * `noreply@actionnow.ai`. Set in wrangler.jsonc `vars.ADMIN_ALERT_FROM`.
+   * Absent → alerter skips silently.
+   */
+  ADMIN_ALERT_FROM?: string;
   /**
    * Phase G / G-2 — Cloudflare Turnstile server-side secret key.
    * Used by workers/middleware/turnstile.ts to verify tokens submitted by

@@ -4,41 +4,54 @@
 // Phase G / G-3 — Cron Worker: tier-1 auth alert detection.
 //
 // Triggered every 2 minutes by the cron schedule in wrangler.jsonc.
-// Polls D1 for three burst-detection conditions and POSTs a Slack
-// notification when a threshold is crossed.
+// Polls D1 for three burst-detection conditions and emails the admin
+// when a threshold is crossed.
+//
+// Channel: a single email to `env.ADMIN_ALERT_EMAIL` via Resend (the same
+// transactional-mail provider the app already uses for OTP sends and
+// invitations). Slack/Teams/etc. are intentionally NOT supported — admin
+// preference 2026-05-07: keep the alert channel limited to a reliable
+// off-domain mailbox (e.g. pavel@digifirst.org) so a mail.actionnow.ai
+// outage doesn't suppress alerts about itself.
 //
 // Dedup: a small in-memory map (keyed by alert fingerprint) suppresses
-// re-alerting within a 5-minute window.  Because Workers are stateless the
+// re-alerting within a 5-minute window. Because Workers are stateless the
 // map resets on each cold start, but for a 2-min cron the same isolate is
-// typically reused, keeping the window effective.  A durable dedup would
-// require a separate KV/DO — rejected as over-engineered for tier-1 alerting
-// (false-positive duplicates every cold start are acceptable; a missed alert
-// is not).
+// typically reused, keeping the window effective. A durable dedup would
+// require a separate KV/DO — rejected as over-engineered for tier-1
+// alerting (false-positive duplicates every cold start are acceptable; a
+// missed alert is not).
 //
 // Tier-1 conditions:
 //   1. OTP burst        — ≥10 auth.otp_failed for the same IP in 5 min.
 //   2. FreshAge denials — ≥5  auth.fresh_session_denied for the same user in 5 min.
 //   3. Signup brute     — ≥20 auth.signup_gate_blocked for the same IP in 1 hr.
 //
-// Slack webhook URL must be provisioned by the operator:
-//   wrangler secret put SLACK_ALERT_WEBHOOK_URL
-// The secret value is stored in Key MCP at:
-//   service="slack"  account="phase-g-alerts"
-// Retrieve with: mcp__key__tool_get_secret(service="slack", account="phase-g-alerts")
+// Required env (production):
+//   RESEND_API_KEY     — secret, set via `wrangler secret put RESEND_API_KEY`
+//   ADMIN_ALERT_EMAIL  — non-secret, set in wrangler.jsonc `vars` (recipient)
+//   ADMIN_ALERT_FROM   — non-secret, set in wrangler.jsonc `vars` (sender;
+//                        must be on a Resend-verified domain — the established
+//                        default is `noreply@actionnow.ai`)
+// Any of the three absent → alerter skips silently (safe for dev / staging
+// without alert wiring).
 
 import type { Env } from "../types";
+import { sendViaResend } from "../lib/resend-client";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface AlerterEnv extends Env {
-  /** Set via `wrangler secret put SLACK_ALERT_WEBHOOK_URL`. */
-  SLACK_ALERT_WEBHOOK_URL?: string;
+  /** Recipient mailbox for tier-1 alerts. Set in wrangler.jsonc `vars`. */
+  ADMIN_ALERT_EMAIL?: string;
+  /** Sender address — must be on a Resend-verified domain. */
+  ADMIN_ALERT_FROM?: string;
 }
 
 interface AlertCondition {
-  /** Human-readable name for Slack message. */
+  /** Human-readable name for the email subject + body. */
   label: string;
   /** SQL to run. Returns rows with { key: string; count: number }. */
   sql: string;
@@ -47,6 +60,12 @@ interface AlertCondition {
   /** Minimum count that triggers an alert. */
   threshold: number;
 }
+
+/**
+ * Channel-agnostic sink for delivered alerts. Throws on send failure so
+ * `runAlertChecks` can skip the dedup-mark and retry on the next tick.
+ */
+export type AlertSink = (subject: string, body: string) => Promise<void>;
 
 // ---------------------------------------------------------------------------
 // In-memory dedup window (see module comment).
@@ -66,34 +85,43 @@ function markAlerted(fingerprint: string, now: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// Slack posting
+// Resend-backed AlertSink factory
 // ---------------------------------------------------------------------------
 
-export async function postSlack(
-  webhookUrl: string,
-  text: string,
-): Promise<void> {
-  const res = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) {
-    console.error("auth_alerter.slack_failed", res.status, await res.text());
-  }
+/**
+ * Build a sink that emails `env.ADMIN_ALERT_EMAIL` via Resend. Returns
+ * `undefined` when any required field is absent — the alerter then skips
+ * silently. Fail-loud at the binding boundary is intentional: a misconfigured
+ * production deploy that thinks it has alerting wired up is worse than a
+ * dev environment that quietly skips.
+ */
+export function makeResendSink(env: AlerterEnv): AlertSink | undefined {
+  const recipient = env.ADMIN_ALERT_EMAIL?.trim();
+  const sender = env.ADMIN_ALERT_FROM?.trim();
+  const apiKey = env.RESEND_API_KEY;
+  if (!recipient || !sender || !apiKey) return undefined;
+
+  return async (subject: string, body: string): Promise<void> => {
+    await sendViaResend(apiKey, {
+      from: { email: sender, name: "ActionNowAI Auth Alerts" },
+      to: recipient,
+      subject,
+      text: body,
+    });
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Core polling logic (exported for testability)
+// Core polling logic (exported for testability).
 // ---------------------------------------------------------------------------
 
 export async function runAlertChecks(
   db: D1Database,
-  webhookUrl: string | undefined,
+  sink: AlertSink | undefined,
   now: number = Date.now(),
 ): Promise<void> {
-  if (!webhookUrl) {
-    // No webhook configured — skip silently (e.g., dev environments).
+  if (!sink) {
+    // No sink configured — skip silently (e.g., dev without alert wiring).
     return;
   }
 
@@ -161,16 +189,22 @@ export async function runAlertChecks(
       const fingerprint = `${condition.label}::${row.key}`;
       if (isDup(fingerprint, now)) continue;
 
-      const text =
-        `*[Phase G / Auth Alert]* ${condition.label}\n` +
-        `Key: \`${row.key}\`  Count: *${row.count}*  ` +
-        `(window ending ${new Date(now).toISOString()})`;
+      const subject = `[ActionNowAI / Phase G] ${condition.label}`;
+      const body =
+        `${condition.label}\n\n` +
+        `Key:    ${row.key}\n` +
+        `Count:  ${row.count}\n` +
+        `Window: rolling, ending ${new Date(now).toISOString()}\n\n` +
+        `This alert was generated by the cron auth-alerter at\n` +
+        `workers/cron/auth-alerter.ts. The alerter polls every 2 minutes;\n` +
+        `the same fingerprint is suppressed for 5 minutes after delivery.\n`;
 
       try {
-        await postSlack(webhookUrl, text);
+        await sink(subject, body);
         markAlerted(fingerprint, now);
       } catch (e) {
-        console.error("auth_alerter.post_failed", (e as Error).message);
+        // Sink throw → keep fingerprint un-marked so the next tick retries.
+        console.error("auth_alerter.send_failed", (e as Error).message);
       }
     }
   }
@@ -185,7 +219,8 @@ export const scheduled: ExportedHandlerScheduledHandler<AlerterEnv> = async (
   env,
   _ctx,
 ) => {
-  await runAlertChecks(env.DB, env.SLACK_ALERT_WEBHOOK_URL);
+  const sink = makeResendSink(env);
+  await runAlertChecks(env.DB, sink);
 };
 
 // Default export expected by wrangler when this is the cron worker's main.
