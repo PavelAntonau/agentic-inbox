@@ -278,12 +278,21 @@ def resolve_zone_id(token: str, verbose: bool = False) -> Optional[str]:
 # ─── Rule composition ──────────────────────────────────────────────────
 
 
-def compose_expression(zone_id: str, with_method: bool) -> str:
+def compose_expression(
+    zone_id: str, with_method: bool, with_upstream_exclusion: bool
+) -> str:
     """Build the rate-limit rule expression.
 
-    The upstream_zone exclusion uses the canonical zone-ID-pinned form,
-    NOT the published CF doc's buggy `(cf.worker.upstream_zone == ""
-    or cf.worker.upstream_zone != "")` tautology. See
+    `cf.worker.upstream_zone` is gated to Advanced Rate Limiting plans
+    (Pro+); Free-plan deploys MUST omit the exclusion clause and accept
+    that same-zone Worker subrequests count against the visitor IP's
+    budget. Verified empirically 2026-05-07 — the API rejects with
+    HTTP 400 / `not entitled: the use of field cf.worker.upstream_zone
+    is not allowed, an higher Advanced Rate Limiting plan is required`.
+
+    When `with_upstream_exclusion=True` (Pro+ deploys), the exclusion
+    uses the canonical zone-ID-pinned form, NOT the published CF doc's
+    buggy `(cf.worker.upstream_zone == "" or != "")` tautology. See
     `.research/v1.1-g5-upstream-zone-finding.md` in cld-net for the
     truth-table analysis (TASK-2.4).
     """
@@ -295,13 +304,17 @@ def compose_expression(zone_id: str, with_method: bool) -> str:
         )
     else:
         match_clause = path_clause
-    upstream_clause = (
-        f'(cf.worker.upstream_zone eq "" or cf.worker.upstream_zone ne "{zone_id}")'
-    )
-    return f"{match_clause} and {upstream_clause}"
+    if with_upstream_exclusion:
+        upstream_clause = (
+            f'(cf.worker.upstream_zone eq "" or cf.worker.upstream_zone ne "{zone_id}")'
+        )
+        return f"{match_clause} and {upstream_clause}"
+    return match_clause
 
 
-def compose_rule(zone_id: str, with_method: bool) -> dict:
+def compose_rule(
+    zone_id: str, with_method: bool, with_upstream_exclusion: bool
+) -> dict:
     return {
         "action": "block",
         "ratelimit": {
@@ -310,7 +323,7 @@ def compose_rule(zone_id: str, with_method: bool) -> dict:
             "requests_per_period": RULE_REQUESTS_PER_PERIOD,
             "mitigation_timeout": RULE_MITIGATION_TIMEOUT,
         },
-        "expression": compose_expression(zone_id, with_method),
+        "expression": compose_expression(zone_id, with_method, with_upstream_exclusion),
         "description": RULE_DESCRIPTION,
         "enabled": True,
     }
@@ -352,6 +365,7 @@ def deploy_rule(
     *,
     dry_run: bool,
     force_path_only: bool,
+    with_upstream_exclusion: bool,
     verbose: bool,
 ) -> tuple[bool, dict, str]:
     """Returns (ok, response, mode_used) where mode_used is 'with-method' or 'path-only'."""
@@ -366,7 +380,11 @@ def deploy_rule(
 
     last_err: Optional[CFError] = None
     for mode in candidate_modes:
-        rule = compose_rule(zone_id, with_method=(mode == "with-method"))
+        rule = compose_rule(
+            zone_id,
+            with_method=(mode == "with-method"),
+            with_upstream_exclusion=with_upstream_exclusion,
+        )
         log(f"  attempt: mode={mode}")
         log(f"    expression: {rule['expression']}")
         if dry_run:
@@ -393,16 +411,18 @@ def deploy_rule(
                     verbose=verbose,
                 )
             else:
+                # PUT phase entrypoint: name/kind/phase are implicit from the
+                # URL path; CF rejects them in the body with HTTP 400
+                # `invalid JSON: unknown field "kind"`. Only `rules` and the
+                # optional `description` are accepted.
                 log("    PUT new phase entrypoint ruleset (none existed)")
                 resp = cf_request(
                     token,
                     "PUT",
                     f"/zones/{zone_id}/rulesets/phases/{PHASE}/entrypoint",
                     {
-                        "name": "default",
-                        "kind": "zone",
-                        "phase": PHASE,
                         "rules": [rule],
+                        "description": ("v1.1 G-5 — login rate-limit (OTP-send POST)"),
                     },
                     verbose=verbose,
                 )
@@ -443,6 +463,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Skip the http.request.method attempt and go straight to path-only.",
     )
+    p.add_argument(
+        "--with-upstream-exclusion",
+        action="store_true",
+        help=(
+            "Include the cf.worker.upstream_zone exclusion clause. Requires "
+            "Pro+ plan (Advanced Rate Limiting). Free-plan deploys MUST omit "
+            "(default). Verified empirically 2026-05-07 — Free returns "
+            "HTTP 400 'not entitled' on this field."
+        ),
+    )
     p.add_argument("--verbose", action="store_true", help="Log API I/O.")
     args = p.parse_args(argv)
 
@@ -466,6 +496,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         zone_id,
         dry_run=args.dry_run,
         force_path_only=args.force_path_only,
+        with_upstream_exclusion=args.with_upstream_exclusion,
         verbose=args.verbose,
     )
     elapsed = time.monotonic() - t0
