@@ -6,6 +6,7 @@ import { useToastManager } from "~/ui/toast";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { Folders } from "shared/folders";
+import { useConfirm } from "~/components/ConfirmDialog";
 import EmailPanelDialogs from "~/components/email-panel/EmailPanelDialogs";
 import EmailPanelHeader from "~/components/email-panel/EmailPanelHeader";
 import EmailPanelToolbar from "~/components/email-panel/EmailPanelToolbar";
@@ -62,6 +63,7 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
   };
   const updateEmail = useUpdateEmail();
   const deleteEmailMut = useDeleteEmail();
+  const confirm = useConfirm();
   const moveEmailMut = useMoveEmail();
   const sendEmailMut = useSendEmail();
   const replyMut = useReplyToEmail();
@@ -151,13 +153,17 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
       closePanel();
     }
   };
-  const handleDelete = () => {
-    if (mailboxId) {
-      if (!window.confirm("Are you sure you want to delete this email?"))
-        return;
-      deleteEmailMut.mutate({ mailboxId, id: email.id });
-      closePanel();
-    }
+  const handleDelete = async () => {
+    if (!mailboxId) return;
+    const ok = await confirm({
+      title: "Delete this email?",
+      body: "The email will be moved to Trash and removed from this folder.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteEmailMut.mutate({ mailboxId, id: email.id });
+    closePanel();
   };
 
   const handleEditDraft = (draftMsg?: Email) => {
@@ -180,7 +186,13 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
   const handleDeleteDraft = async (draftMsg?: Email) => {
     const target = draftMsg || email;
     if (!mailboxId) return;
-    if (!window.confirm("Discard this draft?")) return;
+    const ok = await confirm({
+      title: "Discard this draft?",
+      body: "Your draft will be permanently removed.",
+      confirmLabel: "Discard",
+      destructive: true,
+    });
+    if (!ok) return;
     deleteEmailMut.mutate({ mailboxId, id: target.id });
     toastManager.add({ title: "Draft discarded" });
     if (target.id === emailId) closePanel();

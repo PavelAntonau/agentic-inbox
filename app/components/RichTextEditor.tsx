@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Button, Tooltip } from "~/ui";
+import { Button, Dialog, Input, Tooltip } from "~/ui";
 import {
   ArrowClockwiseIcon,
   ArrowCounterClockwiseIcon,
@@ -26,7 +26,7 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface RichTextEditorProps {
   value: string;
@@ -73,17 +73,36 @@ export default function RichTextEditor({
     }
   }, [value, editor]);
 
+  // Phase F (one-inbox-one-client, 2026-05-06): replaced window.prompt
+  // with an inline kumo Dialog. Native window.prompt rendered outside
+  // the app theme and on Safari iOS stole the lock screen for a beat.
+  // `linkInputValue` is seeded with the current link href on open;
+  // submitting empty unsets the link, matching the prior behavior.
+  const [linkInputOpen, setLinkInputOpen] = useState(false);
+  const [linkInputValue, setLinkInputValue] = useState("");
+
   const setLink = useCallback(() => {
     if (!editor) return;
-    const previousUrl = editor.getAttributes("link").href;
-    const url = window.prompt("URL", previousUrl);
-    if (url === null) return;
+    const previousUrl = (editor.getAttributes("link").href as string) ?? "";
+    setLinkInputValue(previousUrl);
+    setLinkInputOpen(true);
+  }, [editor]);
+
+  const applyLink = useCallback(() => {
+    if (!editor) return;
+    const url = linkInputValue.trim();
     if (url === "") {
       editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
+    } else {
+      editor
+        .chain()
+        .focus()
+        .extendMarkRange("link")
+        .setLink({ href: url })
+        .run();
     }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-  }, [editor]);
+    setLinkInputOpen(false);
+  }, [editor, linkInputValue]);
 
   if (!editor) return null;
 
@@ -234,6 +253,49 @@ export default function RichTextEditor({
       <div className="flex-1 overflow-y-auto">
         <EditorContent editor={editor} />
       </div>
+
+      {/* Link URL prompt (replaces window.prompt — Phase F) */}
+      <Dialog.Root
+        open={linkInputOpen}
+        onOpenChange={setLinkInputOpen}
+        role="dialog"
+      >
+        <Dialog size="sm">
+          <div className="px-6 pt-6 pb-2">
+            <Dialog.Title>Insert link</Dialog.Title>
+            <Dialog.Description className="mt-1">
+              Paste or type the URL. Leave blank to remove the link.
+            </Dialog.Description>
+          </div>
+          <div className="px-6 py-4">
+            <Input
+              type="url"
+              value={linkInputValue}
+              onChange={(e) => setLinkInputValue(e.target.value)}
+              placeholder="https://example.com"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyLink();
+                }
+              }}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+            <Dialog.Close
+              render={(props) => (
+                <Button {...props} variant="ghost" type="button">
+                  Cancel
+                </Button>
+              )}
+            />
+            <Button variant="primary" onClick={applyLink}>
+              {linkInputValue.trim() === "" ? "Remove link" : "Apply"}
+            </Button>
+          </div>
+        </Dialog>
+      </Dialog.Root>
     </div>
   );
 }

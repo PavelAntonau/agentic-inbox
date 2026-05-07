@@ -9,6 +9,7 @@ import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import InviteToGroupDialog from "~/components/groups/InviteToGroupDialog";
 import MemberRow from "~/components/groups/MemberRow";
 import TransferOwnershipDialog from "~/components/groups/TransferOwnershipDialog";
+import { useConfirm } from "~/components/ConfirmDialog";
 import type { GroupSummary } from "../_layout";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,7 @@ export default function GroupMembersRoute() {
   const navigate = useNavigate();
   const { refetchGroups } = useOutletContext<OutletContext>();
   const toastManager = useToastManager();
+  const confirm = useConfirm();
 
   const [members, setMembers] = useState<MemberDetail[]>([]);
   const [ownerUserId, setOwnerUserId] = useState<string>("");
@@ -140,8 +142,18 @@ export default function GroupMembersRoute() {
     }
 
     const confirmed = isLeave
-      ? window.confirm("Leave this group?")
-      : window.confirm(`Remove ${label} from this group?`);
+      ? await confirm({
+          title: "Leave this group?",
+          body: "You will lose access to its inboxes immediately.",
+          confirmLabel: "Leave",
+          destructive: true,
+        })
+      : await confirm({
+          title: `Remove ${label}?`,
+          body: `${label} will lose access to this group's inboxes immediately.`,
+          confirmLabel: "Remove",
+          destructive: true,
+        });
     if (!confirmed) return;
 
     const res = await fetch(`/api/groups/${groupId}/members/${userId}`, {

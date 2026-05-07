@@ -26,6 +26,7 @@ import { useParams } from "react-router";
 import { Folders } from "shared/folders";
 import { formatListDate } from "shared/dates";
 import MailboxSplitView from "~/components/MailboxSplitView";
+import { useConfirm } from "~/components/ConfirmDialog";
 import { getSnippetText } from "~/lib/utils";
 import {
   useDeleteEmail,
@@ -144,6 +145,7 @@ export default function EmailListRoute() {
 
   const queryClient = useQueryClient();
   const updateEmail = useUpdateEmail();
+  const confirm = useConfirm();
   const markThreadRead = useMarkThreadRead();
   const deleteEmail = useDeleteEmail();
 
@@ -213,14 +215,18 @@ export default function EmailListRoute() {
   const handleDelete = (e: React.MouseEvent, emailId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (mailboxId) {
-      const confirmed = window.confirm(
-        "Are you sure you want to delete this email?",
-      );
+    if (!mailboxId) return;
+    void (async () => {
+      const confirmed = await confirm({
+        title: "Delete this email?",
+        body: "The email will be moved to Trash and removed from this folder.",
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (!confirmed) return;
       deleteEmail.mutate({ mailboxId, id: emailId });
       if (selectedEmailId === emailId) closePanel();
-    }
+    })();
   };
 
   const handleRefresh = () => {

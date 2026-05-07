@@ -4,6 +4,7 @@
 import { Button, Dialog } from "~/ui";
 import { useToastManager } from "~/ui/toast";
 import { useMemo, useState } from "react";
+import { useConfirm } from "~/components/ConfirmDialog";
 
 interface MemberLite {
   user_id: string;
@@ -35,6 +36,7 @@ export default function TransferOwnershipDialog({
   onDeleted,
 }: TransferOwnershipDialogProps) {
   const toastManager = useToastManager();
+  const confirm = useConfirm();
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,9 +86,12 @@ export default function TransferOwnershipDialog({
   };
 
   const handleDelete = async () => {
-    const confirmed = window.confirm(
-      `Delete "${groupName}"? This cannot be undone.`,
-    );
+    const confirmed = await confirm({
+      title: `Delete "${groupName}"?`,
+      body: "All members lose access immediately and the group cannot be recovered.",
+      confirmLabel: "Delete group",
+      destructive: true,
+    });
     if (!confirmed) return;
     setError(null);
     setIsSubmitting(true);

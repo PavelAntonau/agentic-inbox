@@ -23,6 +23,7 @@ import { useParams } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUIStore } from "~/hooks/useUIStore";
+import { useConfirm } from "~/components/ConfirmDialog";
 import type { UIMessage } from "ai";
 
 const TOOL_LABELS: Record<string, { label: string; icon: React.ReactNode }> = {
@@ -302,6 +303,7 @@ function AgentChatConnected({
     agent,
   });
   const isStreaming = status === "streaming" || status === "submitted";
+  const confirm = useConfirm();
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -349,9 +351,15 @@ function AgentChatConnected({
                 size="sm"
                 icon={<TrashIcon size={14} />}
                 onClick={() => {
-                  if (window.confirm("Clear chat history?")) {
-                    setMessages([]);
-                  }
+                  void (async () => {
+                    const ok = await confirm({
+                      title: "Clear chat history?",
+                      body: "All messages in this conversation will be removed. This cannot be undone.",
+                      confirmLabel: "Clear",
+                      destructive: true,
+                    });
+                    if (ok) setMessages([]);
+                  })();
                 }}
                 aria-label="Clear chat"
               />

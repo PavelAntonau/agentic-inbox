@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import InviteToGroupDialog from "~/components/groups/InviteToGroupDialog";
 import TransferOwnershipDialog from "~/components/groups/TransferOwnershipDialog";
+import { useConfirm } from "~/components/ConfirmDialog";
 import type { GroupSummary } from "./_layout";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,7 @@ export default function GroupHome() {
   const navigate = useNavigate();
   const { refetchGroups } = useOutletContext<OutletContext>();
   const toastManager = useToastManager();
+  const confirm = useConfirm();
 
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,9 +98,12 @@ export default function GroupHome() {
 
   const handleDelete = async () => {
     if (!groupId || !group) return;
-    const confirmed = window.confirm(
-      `Delete "${group.name}"? This cannot be undone.`,
-    );
+    const confirmed = await confirm({
+      title: `Delete "${group.name}"?`,
+      body: "All members lose access immediately and the group cannot be recovered.",
+      confirmLabel: "Delete group",
+      destructive: true,
+    });
     if (!confirmed) return;
     const res = await fetch(`/api/groups/${groupId}`, { method: "DELETE" });
     if (res.ok) {
