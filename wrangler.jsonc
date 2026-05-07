@@ -129,9 +129,25 @@
 	// Phase G / G-3 — Analytics Engine dataset for auth-event observability.
 	// Binding name: AUTH_ANALYTICS  Dataset name: auth_events
 	// Pass env.AUTH_ANALYTICS + ctx to writeAudit for the AE mirror path.
-	"analytics_engine_datasets": [
-		{ "binding": "AUTH_ANALYTICS", "dataset": "auth_events" }
-	],
+	//
+	// TEMPORARILY DISABLED 2026-05-07 by Pavel's directive (Phase G T3.5
+	// cutover). The Analytics Engine feature is not yet enabled on this CF
+	// account; enabling it requires a one-click dashboard action at
+	// https://dash.cloudflare.com/3e96bfb3a3edded75b781064e5d743a3/workers/analytics-engine
+	// Cutover proceeds without the AE mirror — audit-log writes still hit
+	// D1 (the canonical store) and the cron alerter still polls D1 for
+	// tier-1 anomalies. workers/lib/audit-log.ts:231 guards the AE write
+	// with `if (row.analyticsEngine && row.ctx)` so the absent binding is
+	// a no-op, not a crash. Test `audit-log-g3.test.ts` covers this case.
+	//
+	// To re-enable after the operator clicks Enable in the dashboard:
+	//   1. Uncomment the `analytics_engine_datasets` block below.
+	//   2. `npm run deploy` (with CLOUDFLARE_API_TOKEN env).
+	// Tracked as a Phase 3 follow-up in DECISIONS.md / action plan.
+	//
+	// "analytics_engine_datasets": [
+	//	{ "binding": "AUTH_ANALYTICS", "dataset": "auth_events" }
+	// ],
 	// Phase G / G-3 — Cron trigger for the tier-1 auth alerter.
 	// Handler: workers/cron/auth-alerter.ts → exported `scheduled` handler.
 	// Fires every 2 minutes. Sends a single email per fingerprint to
