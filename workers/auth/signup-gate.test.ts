@@ -104,7 +104,12 @@ describe("evaluateSignupGate (Phase C1 / A-01)", () => {
     expect((result.data as { email: string }).email).toBe("alice@actionnow.ai");
   });
 
-  it("rejects an uninvited, non-bootstrap email with FORBIDDEN", async () => {
+  // Phase G-1 / OQ-PG-1: non-bootstrap deny paths emit UNAUTHORIZED (not
+  // FORBIDDEN) so attackers cannot distinguish "not on invite list" from
+  // "wrong OTP for an invited email" by status code alone.  FORBIDDEN is
+  // reserved for bootstrap-specific errors (single-use lockout, token
+  // mismatch) which are not enumerable by external callers.
+  it("rejects an uninvited, non-bootstrap email with UNAUTHORIZED", async () => {
     const env = mkEnv("owner@actionnow.ai");
     const orm = makeOrm() as unknown as Parameters<
       typeof evaluateSignupGate
@@ -112,17 +117,17 @@ describe("evaluateSignupGate (Phase C1 / A-01)", () => {
     getQueue = [null]; // invite query returns nothing
     await expect(
       evaluateSignupGate({ email: "intruder@evil.example" }, env, orm),
-    ).rejects.toMatchObject({ status: "FORBIDDEN" });
+    ).rejects.toMatchObject({ status: "UNAUTHORIZED" });
   });
 
-  it("rejects a missing-email user with FORBIDDEN before any DB lookup", async () => {
+  it("rejects a missing-email user with UNAUTHORIZED before any DB lookup", async () => {
     const env = mkEnv("owner@actionnow.ai");
     const orm = makeOrm() as unknown as Parameters<
       typeof evaluateSignupGate
     >[2];
     await expect(
       evaluateSignupGate({ email: "" }, env, orm),
-    ).rejects.toMatchObject({ status: "FORBIDDEN" });
+    ).rejects.toMatchObject({ status: "UNAUTHORIZED" });
   });
 });
 

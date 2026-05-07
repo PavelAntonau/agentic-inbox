@@ -9,6 +9,7 @@ import type { AuthzContext } from "../../db/control-plane/forGroup";
 import type { Env } from "../../types";
 import { canAct } from "../../lib/peer-protection";
 import { writeAudit } from "../../lib/audit-log";
+import { requireFreshBetterAuthSession } from "../../auth";
 import { upsertEmail } from "../../lib/cloudflare-access-policy";
 import { getSettings } from "../../lib/settings-cache";
 import { getEmailBinding } from "../../lib/mocks/email-binding";
@@ -293,6 +294,26 @@ router.post("/:id/promote", async (c) => {
   const db = c.env.DB;
   const orm = drizzle(db, { schema });
 
+  // Phase G-1 / Task 6 — promote is privileged; require a fresh better-auth
+  // session.  CF Access path (null) bypass through — that token has its own
+  // edge-side freshness guarantee.
+  const freshness = await requireFreshBetterAuthSession(c.env, c.req.raw);
+  if (freshness !== null && !freshness.fresh) {
+    void writeAudit(db, {
+      action: "auth.fresh_session_denied",
+      target: { kind: "user", id: actor.user_id },
+      meta: { operation: "admin.promote", target_user_id: targetId },
+      actor,
+    });
+    return c.json(
+      {
+        error: "Session too old for this operation",
+        code: "FRESH_SESSION_REQUIRED",
+      },
+      401,
+    );
+  }
+
   const target = await orm
     .select({
       id: schema.users.id,
@@ -401,6 +422,24 @@ router.post("/:id/demote", async (c) => {
   const db = c.env.DB;
   const orm = drizzle(db, { schema });
 
+  // Phase G-1 / Task 6 — demote is privileged; require a fresh session.
+  const freshness = await requireFreshBetterAuthSession(c.env, c.req.raw);
+  if (freshness !== null && !freshness.fresh) {
+    void writeAudit(db, {
+      action: "auth.fresh_session_denied",
+      target: { kind: "user", id: actor.user_id },
+      meta: { operation: "admin.demote", target_user_id: targetId },
+      actor,
+    });
+    return c.json(
+      {
+        error: "Session too old for this operation",
+        code: "FRESH_SESSION_REQUIRED",
+      },
+      401,
+    );
+  }
+
   const target = await orm
     .select({
       id: schema.users.id,
@@ -464,6 +503,24 @@ router.delete("/:id", async (c) => {
   const targetId = c.req.param("id")!;
   const db = c.env.DB;
   const orm = drizzle(db, { schema });
+
+  // Phase G-1 / Task 6 — delete is privileged; require a fresh session.
+  const freshness = await requireFreshBetterAuthSession(c.env, c.req.raw);
+  if (freshness !== null && !freshness.fresh) {
+    void writeAudit(db, {
+      action: "auth.fresh_session_denied",
+      target: { kind: "user", id: actor.user_id },
+      meta: { operation: "admin.delete", target_user_id: targetId },
+      actor,
+    });
+    return c.json(
+      {
+        error: "Session too old for this operation",
+        code: "FRESH_SESSION_REQUIRED",
+      },
+      401,
+    );
+  }
 
   const target = await orm
     .select({

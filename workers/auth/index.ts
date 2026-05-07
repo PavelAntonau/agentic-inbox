@@ -493,6 +493,12 @@ export function createAuth(
       emailOTP({
         otpLength: 6,
         expiresIn: 600, // 10 minutes
+        // Phase G-1 / Task 8 — store OTPs as HMAC hex so the verify path
+        // routes through better-auth's `verifyStoredOTP` "hashed" branch,
+        // which calls `constantTimeEqual(hash(submitted), stored)`.  This
+        // closes the timing-oracle on OTP comparison and ensures DB dumps
+        // never expose active OTPs in plaintext.
+        storeOTP: "hashed",
         sendVerificationOTP({ email, otp, type }) {
           // Phase G-1 / Task 3 — move the email send off the synchronous
           // hot path via ctx.waitUntil so request latency is constant

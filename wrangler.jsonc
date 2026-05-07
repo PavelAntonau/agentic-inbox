@@ -26,7 +26,14 @@
 		// stringified JSON `{kid,alg,crv,publicJwk,privateJwk}` (Ed25519). Set
 		// via `wrangler secret put OAUTH_JWT_SIGNING_KEY`; mirrored in Keychain
 		// at `cloudflare/OAUTH_JWT_SIGNING_KEY`.
-		"BETTER_AUTH_URL": "https://mail.actionnow.ai"
+		"BETTER_AUTH_URL": "https://mail.actionnow.ai",
+		// Phase G-2 — Cloudflare Turnstile widget site key (public, safe in repo).
+		// Pair with the secret `TURNSTILE_SECRET_KEY` (set via
+		// `wrangler secret put TURNSTILE_SECRET_KEY`). The site key drives
+		// the client widget; the secret drives server-side siteverify.
+		// Default value is Cloudflare's public always-passes test key for
+		// dev/testing; production deploys must override with the real key.
+		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
 	},
 	// Outbound mail goes through Resend (workers/lib/resend-client.ts) — the
 	// previous Cloudflare Email Routing `send_email` binding was reply-only /

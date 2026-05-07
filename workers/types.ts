@@ -85,4 +85,11 @@ export interface Env extends Cloudflare.Env {
    * Absent → Turnstile middleware fails closed (returns 403 TURNSTILE_FAILED).
    */
   TURNSTILE_SECRET_KEY?: string;
+  /**
+   * Phase G / G-2 — Cloudflare Turnstile widget site key (public).
+   * Mirrored into the React build via `vite.config.ts` `define` so the
+   * login form can mount the widget without an extra fetch.  Defined in
+   * wrangler.jsonc `vars.TURNSTILE_SITE_KEY`.
+   */
+  TURNSTILE_SITE_KEY?: string;
 }

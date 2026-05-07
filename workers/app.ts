@@ -14,6 +14,10 @@ import { EmailMCP } from "./mcp";
 import { createAuth } from "./auth";
 import { requireMailboxV2 } from "./lib/mailbox-v2";
 import { generateCspNonce, buildCspDirectives, CSP_NONCE_VAR } from "./lib/csp";
+import { securityHeadersMiddleware } from "./middleware/security-headers";
+import { requireTurnstile } from "./middleware/turnstile";
+import { authRateLimitByEmail } from "./middleware/auth-rate-limit";
+import { assertOauthClientsRequirePkce } from "./auth/pkce-assertion";
 import type { Env } from "./types";
 
 /**
@@ -195,6 +199,15 @@ app.use("*", async (c, next) => {
   c.res = rewritten;
 });
 
+// Phase G-2 — security-headers middleware.  Applies the standard header
+// baseline (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+// Turnstile-aware CSP) on every response.  The Phase E HTMLRewriter above
+// overwrites Content-Security-Policy on HTML responses with its
+// nonce-stamped form, which is strictly stronger; on API responses this
+// middleware's CSP is the final value.  Mounted AFTER the Phase E nonce
+// block so HTML-response CSP from there wins on text/html.
+app.use("*", securityHeadersMiddleware());
+
 // Phase C3 / TASK-C3.17 — worker-wide error redaction.
 //
 // Hono's `app.onError` fires for any handler that throws an unhandled error
@@ -290,12 +303,72 @@ app.get("/logout", (c) => {
   });
 });
 
+// Phase G-2 — Turnstile gate on the OTP-send endpoint.  Must be mounted
+// BEFORE the better-auth catch-all below so the middleware runs first;
+// Hono dispatches the most specific match.  All other /api/auth/* requests
+// fall through to the catch-all unchanged.
+//
+// The handler delegates to better-auth (same shape as the catch-all).
+// Constant-time failure path is owned by requireTurnstile(); on success
+// the request reaches `auth.handler` exactly as it would via the catch-all.
+app.post(
+  "/api/auth/email-otp/send-verification-otp",
+  authRateLimitByEmail(),
+  requireTurnstile(),
+  async (c) => {
+    const auth = createAuth(c.env, c.req.raw, c.executionCtx);
+    return auth.handler(c.req.raw);
+  },
+);
+
+// Phase G-1 / Task 4 — per-email rate-limit on the OTP-verify endpoint.
+// Pairs with better-auth's per-IP rule so an attacker rotating IPs cannot
+// enumerate valid OTPs faster than 5 attempts / 15 min / email.
+//
+// Phase G-1 / Task 10 — emit auth.otp_verified / auth.otp_failed events
+// based on the better-auth response status.  The actual constant-time OTP
+// comparison is handled by better-auth's `verifyStoredOTP` (which calls
+// `constantTimeEqual` internally — we ensure `storeOTP: "hashed"` in
+// workers/auth/index.ts so the compare runs on equal-length HMAC hex).
+app.post("/api/auth/sign-in/email-otp", authRateLimitByEmail(), async (c) => {
+  const auth = createAuth(c.env, c.req.raw, c.executionCtx);
+  // Capture the email up-front so the audit row carries the user
+  // identifier even when better-auth rejects (the body is consumed by
+  // auth.handler, so we read it first via clone()).
+  let email = "unknown";
+  try {
+    const parsed = (await c.req.raw.clone().json()) as Record<string, unknown>;
+    if (typeof parsed["email"] === "string") email = parsed["email"];
+  } catch {
+    // body might be malformed — fall through to better-auth's 400
+  }
+  const response = await auth.handler(c.req.raw);
+  const { writeAudit } = await import("./lib/audit-log");
+  const action = response.ok ? "auth.otp_verified" : "auth.otp_failed";
+  c.executionCtx.waitUntil(
+    writeAudit(c.env.DB, {
+      action,
+      target: { kind: "user", id: email },
+      meta: {
+        status: response.status,
+        timestamp: Date.now(),
+      },
+    }),
+  );
+  return response;
+});
+
 // Phase 6.1 — better-auth handler. MUST be registered BEFORE the CF Access
 // JWT middleware so /api/auth/* requests reach the handler without first
 // requiring a CF Access token (the whole point of the new auth surface).
 // The path-allowlist below ALSO excludes /api/auth/* from the JWT check so
 // even if a request slipped through ordering, the bypass still applies.
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+  // Phase G-1 / Task 9 — fail-closed assertion that no oauth_client row
+  // has require_pkce!=1.  Once-per-isolate (cached on success) so the
+  // happy path pays the D1 round-trip exactly once after a cold start.
+  await assertOauthClientsRequirePkce(c.env);
+
   // Phase E / TASK-E.2 — pass the raw Request to createAuth so the
   // databaseHooks.user.create.before hook can read the `x-bootstrap-token`
   // header off it for the second-factor check.
