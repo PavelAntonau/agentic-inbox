@@ -31,9 +31,14 @@
 		// Pair with the secret `TURNSTILE_SECRET_KEY` (set via
 		// `wrangler secret put TURNSTILE_SECRET_KEY`). The site key drives
 		// the client widget; the secret drives server-side siteverify.
-		// Default value is Cloudflare's public always-passes test key for
-		// dev/testing; production deploys must override with the real key.
-		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+		//
+		// This is the REAL site key for the `mail.actionnow.ai` Turnstile
+		// widget (account 3e96bfb3a3edded75b781064e5d743a3, created
+		// 2026-05-07 via the CF API). For local dev, `.dev.vars` overrides
+		// this key with Cloudflare's always-pass test pair so the OTP-send
+		// path doesn't need a real challenge response. Mirrored in Keychain
+		// at cloudflare/turnstile-sitekey for reference.
+		"TURNSTILE_SITE_KEY": "0x4AAAAAADK-roDEjck74qJj",
 		// Phase G / G-3 — tier-1 auth alerter destination + sender.
 		// ADMIN_ALERT_EMAIL receives the alert (off-domain by design — admin
 		// preference 2026-05-07: a mail.actionnow.ai outage must not suppress
