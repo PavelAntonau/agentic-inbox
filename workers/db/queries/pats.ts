@@ -259,18 +259,30 @@ export async function touchPatLastUsedAt(
 }
 
 /**
- * Revoke a PAT (soft-delete: set revoked_at). Returns the revocation
- * timestamp on success or null when the row does not belong to `userId`,
- * does not exist, or is already revoked. Owner-only by construction —
- * "wrong owner" and "already revoked" both surface as 404 at the route
- * layer (intentional info-non-disclosure, mirrors agent-authorizations).
+ * Hard-delete a PAT row. Returns true on success, false when the row does
+ * not exist or is owned by another user. Owner-only by construction —
+ * "wrong owner" and "no such id" both surface as 404 at the route layer
+ * (intentional info-non-disclosure, mirrors agent-authorizations).
+ *
+ * Phase F (one-inbox-one-client, 2026-05-06): replaced the prior soft-
+ * delete (`revoked_at = now`). The user spec is hard-delete; the row's
+ * `ON DELETE CASCADE` references drop the matching `mcp_inbox_binding`
+ * row, which is the whole point — soft-delete kept the PAT row around
+ * and required follow-up bookkeeping to clear the binding sentinel.
+ *
+ * The `revoked_at` column remains on the schema for legacy rows that
+ * predate this change; `getActivePatByHash` still filters
+ * `revoked_at IS NULL` defensively. A future migration may drop the
+ * column once all soft-revoked rows have been purged.
+ *
+ * The audit-log row is intentionally NOT removed — that's the "server
+ * log" retained per the user's Phase F spec.
  */
-export async function revokePatForUser(
+export async function hardDeletePatForUser(
   orm: Orm,
   userId: string,
   patId: string,
-  now: number,
-): Promise<number | null> {
+): Promise<boolean> {
   const owned = await orm
     .select({ id: schema.oauth_personal_access_token.id })
     .from(schema.oauth_personal_access_token)
@@ -278,18 +290,81 @@ export async function revokePatForUser(
       and(
         eq(schema.oauth_personal_access_token.id, patId),
         eq(schema.oauth_personal_access_token.userId, userId),
-        isNull(schema.oauth_personal_access_token.revokedAt),
       ),
     )
     .limit(1)
     .get();
 
-  if (!owned) return null;
+  if (!owned) return false;
 
   await orm
-    .update(schema.oauth_personal_access_token)
-    .set({ revokedAt: now })
+    .delete(schema.oauth_personal_access_token)
     .where(eq(schema.oauth_personal_access_token.id, patId));
 
-  return now;
+  return true;
+}
+
+/**
+ * Build a D1-prepared `INSERT INTO oauth_personal_access_token` statement.
+ *
+ * Returned as a `D1PreparedStatement` so routes/pats.ts can compose it
+ * with the binding insert into a single `db.batch([patStmt, bindingStmt])`
+ * — the two writes commit atomically, which is required for the Phase F
+ * mint guard (a pre-existing `mcp_inbox_binding` row for the same
+ * (user, mailbox) pair must abort the whole mint, not leave a dangling
+ * PAT row behind).
+ *
+ * Column list is the same as `insertPat`'s `values` block above; if you
+ * change one you MUST change the other.
+ */
+export function buildPatInsertStmt(
+  db: D1Database,
+  input: PatInsert,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO oauth_personal_access_token (
+         id, user_id, label, token_hash, token_prefix, token_suffix,
+         scopes, mailbox_id, ip_allowlist, created_at, last_used_at,
+         expires_at, revoked_at
+       ) VALUES (
+         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, NULL
+       )`,
+    )
+    .bind(
+      input.id,
+      input.userId,
+      input.label,
+      input.tokenHash,
+      input.tokenPrefix,
+      input.tokenSuffix,
+      JSON.stringify(input.scopes),
+      input.mailboxId,
+      input.ipAllowlist == null ? null : JSON.stringify(input.ipAllowlist),
+      input.createdAt,
+      input.expiresAt,
+    );
+}
+
+/**
+ * Project a `PatInsert` back into the public `PatListRow` shape — used
+ * by `routes/pats.ts` after a successful batched mint, where the route
+ * already has the canonical inputs and just needs the projected return
+ * for the response body. `last_used_at` and `revoked_at` are always
+ * `null` on a freshly-inserted row.
+ */
+export function projectPatInsert(input: PatInsert): PatListRow {
+  return {
+    id: input.id,
+    label: input.label,
+    token_prefix: input.tokenPrefix,
+    token_suffix: input.tokenSuffix,
+    scopes: input.scopes,
+    mailbox_id: input.mailboxId,
+    ip_allowlist: input.ipAllowlist,
+    created_at: input.createdAt,
+    last_used_at: null,
+    expires_at: input.expiresAt,
+    revoked_at: null,
+  };
 }

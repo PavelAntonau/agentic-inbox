@@ -19,10 +19,17 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import * as schema from "../db/control-plane/schema";
 import {
+  buildPatInsertStmt,
+  hardDeletePatForUser,
   insertPat,
   listPatsForUser,
-  revokePatForUser,
+  projectPatInsert,
+  type PatInsert,
 } from "../db/queries/pats";
+import {
+  buildPatBindingInsertStmt,
+  isInboxBindingPkConflict,
+} from "../db/queries/mcp-inbox-binding";
 import { mintPat, newPatId } from "../lib/pat-tokens";
 import { writeAudit } from "../lib/audit-log";
 import type { AuthzContext } from "../db/control-plane/forGroup";
@@ -105,7 +112,7 @@ router.post("/", async (c) => {
   }
   const minted = await mintPat(pepper);
 
-  const pat = await insertPat(orm, {
+  const insertInput: PatInsert = {
     id: newPatId(),
     userId: ctx.user_id,
     label,
@@ -117,7 +124,42 @@ router.post("/", async (c) => {
     ipAllowlist: ip_allowlist ?? null,
     createdAt: now,
     expiresAt: expires_at ?? null,
-  });
+  };
+
+  // Phase F (one-inbox-one-client): when the PAT is mailbox-scoped, the
+  // mint must atomically insert the matching mcp_inbox_binding row so
+  // that a pre-existing binding for (user, mailbox) aborts the whole
+  // mint via SQLITE_CONSTRAINT_PRIMARYKEY. Without the batch, the PAT
+  // row would land first and only the binding would 409, leaving a
+  // dangling token behind.
+  let pat;
+  if (insertInput.mailboxId != null) {
+    const patStmt = buildPatInsertStmt(c.env.DB, insertInput);
+    const bindingStmt = buildPatBindingInsertStmt(c.env.DB, {
+      userId: insertInput.userId,
+      mailboxId: insertInput.mailboxId,
+      patId: insertInput.id,
+      now,
+    });
+    try {
+      await c.env.DB.batch([patStmt, bindingStmt]);
+    } catch (err) {
+      if (isInboxBindingPkConflict(err)) {
+        return c.json(
+          {
+            error: "inbox-credential-exists",
+            detail:
+              "This inbox already has an active MCP credential. Revoke the existing one before minting a new PAT.",
+          },
+          409,
+        );
+      }
+      throw err;
+    }
+    pat = projectPatInsert(insertInput);
+  } else {
+    pat = await insertPat(orm, insertInput);
+  }
 
   await writeAudit(c.env.DB, {
     action: "pat.create",
@@ -158,15 +200,22 @@ router.get("/", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /api/users/me/pats/:id — revoke (soft-delete)
+// DELETE /api/users/me/pats/:id — hard-delete
 // ---------------------------------------------------------------------------
 //
-// Sets revoked_at = now. Idempotent at the user-visible level: re-revoking an
-// already-revoked PAT or revoking someone else's PAT both return 404 (info-
-// non-disclosure, mirrors /api/users/me/agent-authorizations).
+// Phase F (one-inbox-one-client, 2026-05-06): hard-deletes the PAT row.
+// `ON DELETE CASCADE` on `mcp_inbox_binding.pat_id` drops the matching
+// binding sentinel row in the same statement, freeing the (user, mailbox)
+// pair for a fresh mint or for an OAuth-client bind on the next /mcp call.
+// The audit-log row stays (server log retained per spec).
 //
-// 204 No Content on success. T3.3's bearer middleware will reject revoked
-// tokens (`WHERE revoked_at IS NULL` filter on the hash lookup).
+// Idempotent at the user-visible level: deleting a non-existent PAT or
+// another user's PAT both return 404 (info-non-disclosure, mirrors
+// /api/users/me/agent-authorizations).
+//
+// 204 No Content on success. The bearer middleware's `revoked_at IS NULL`
+// filter remains for legacy soft-revoked rows but is moot for new
+// deletes — the row is gone, so the SELECT returns nothing.
 
 router.delete("/:id", async (c) => {
   const ctx = c.var.authzContext!;
@@ -174,15 +223,14 @@ router.delete("/:id", async (c) => {
   if (!id) return c.json({ error: "id required" }, 400);
 
   const orm = drizzle(c.env.DB, { schema });
-  const now = Date.now();
-  const revokedAt = await revokePatForUser(orm, ctx.user_id, id, now);
-  if (revokedAt == null) return c.json({ error: "PAT not found" }, 404);
+  const deleted = await hardDeletePatForUser(orm, ctx.user_id, id);
+  if (!deleted) return c.json({ error: "PAT not found" }, 404);
 
   await writeAudit(c.env.DB, {
-    action: "pat.revoke",
+    action: "pat.delete",
     target: { kind: "oauth_personal_access_token", id },
     actor: ctx,
-    meta: { revoked_at: revokedAt },
+    meta: { deleted_at: Date.now() },
   });
 
   return new Response(null, { status: 204 });

@@ -268,19 +268,24 @@ describe("display-once invariant", () => {
 // ---------------------------------------------------------------------------
 
 describe("owner-only invariant — fixture-driven", () => {
-  it("DELETE returns null when the PAT belongs to a different user", () => {
+  it("DELETE returns false when the PAT belongs to a different user", () => {
     // Simulated: authzContext.user_id = "u-alice", DB row owned by "u-bob".
-    // The queries module's owned-check returns null → route returns 404.
-    // (Enforced in workers/db/queries/pats.ts:revokePatForUser via
-    //  `WHERE id = ? AND user_id = ? AND revoked_at IS NULL`.)
+    // The queries module's owned-check returns false → route returns 404.
+    // (Enforced in workers/db/queries/pats.ts:hardDeletePatForUser via
+    //  `WHERE id = ? AND user_id = ?`.)
+    //
+    // Phase F (2026-05-06): switched from soft-delete (revoked_at) to
+    // hard-delete; a wrong-owner DELETE still no-ops because the row
+    // does not match the (id, user_id) filter — same 404 surface.
     const ownedRow: { id: string; userId: string } | null = null;
     expect(ownedRow).toBeNull();
   });
 
-  it("DELETE returns null when the PAT is already revoked (idempotent 404)", () => {
-    // Same WHERE clause excludes already-revoked rows; route returns 404.
-    // Mirrors agent-authorizations: re-revoke and wrong-owner are
-    // indistinguishable to the caller (intentional info-non-disclosure).
+  it("DELETE returns false when the PAT does not exist (idempotent 404)", () => {
+    // Hard-delete is idempotent: the second DELETE finds no row and
+    // returns false → route returns 404. Mirrors agent-authorizations
+    // and matches the prior soft-delete behavior at the user-visible
+    // surface.
     const ownedRow: { id: string; userId: string } | null = null;
     expect(ownedRow).toBeNull();
   });
