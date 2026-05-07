@@ -18,6 +18,7 @@ import { securityHeadersMiddleware } from "./middleware/security-headers";
 import { requireTurnstile } from "./middleware/turnstile";
 import { authRateLimitByEmail } from "./middleware/auth-rate-limit";
 import { assertOauthClientsRequirePkce } from "./auth/pkce-assertion";
+import { scheduled as authAlerterScheduled } from "./cron/auth-alerter";
 import type { Env } from "./types";
 
 /**
@@ -1925,9 +1926,16 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-// Export the Hono app as the default export with an email handler
+// Export the Hono app as the default export with email + scheduled handlers.
+//
+// `scheduled` is the cron entry point — wrangler.jsonc declares
+// `triggers.crons = ["*/2 * * * *"]` for the tier-1 auth alerter
+// (workers/cron/auth-alerter.ts). Without re-exporting it here, the cron
+// trigger has nothing to invoke and `/cdn-cgi/handler/scheduled` returns
+// HTTP 500 on local dev. Found during Phase 3 dev-verify probe (e).
 export default {
   fetch: app.fetch,
+  scheduled: authAlerterScheduled,
   async email(
     event: { raw: ReadableStream; rawSize: number },
     env: Env,
