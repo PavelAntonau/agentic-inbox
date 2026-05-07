@@ -11,11 +11,52 @@
 // During Phase 6.1 this page is reachable INSIDE the existing CF Access
 // authentication shell (CF Access still wraps the worker). After Phase 6.2's
 // cutover this becomes the primary auth gate.
+//
+// Phase G-2 — Turnstile widget integration.
+//   • The Turnstile JS is loaded via a <script> tag injected into <head> on
+//     mount.  The widget renders in the email-entry step form.
+//   • On submit, `window.turnstile.getResponse()` provides the token, which is
+//     forwarded as the `X-Turnstile-Token` header on the OTP-send fetch.
+//   • The site key is read from the `TURNSTILE_SITE_KEY` env var inlined at
+//     build time by Vite (see vite.config.ts `define`).  Integrators MUST set
+//     this var (see docs/phase-g-dashboard-config.md).
 
 import { Button, Input, Loader, useToastManager } from "~/ui";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
+
+// ---------------------------------------------------------------------------
+// Turnstile globals — declared so TypeScript does not error on window.turnstile.
+// The actual implementation is injected at runtime by the CF Turnstile script.
+// ---------------------------------------------------------------------------
+declare global {
+  interface Window {
+    turnstile?: {
+      render(
+        container: string | HTMLElement,
+        options: TurnstileOptions,
+      ): string;
+      getResponse(widgetId?: string): string | undefined;
+      reset(widgetId?: string): void;
+      remove(widgetId?: string): void;
+    };
+  }
+}
+
+interface TurnstileOptions {
+  sitekey: string;
+  callback?: (token: string) => void;
+  "error-callback"?: () => void;
+  "expired-callback"?: () => void;
+  theme?: "light" | "dark" | "auto";
+}
+
+// Vite build-time constant. Provide via `define: { TURNSTILE_SITE_KEY: ... }`
+// in vite.config.ts, or fall back to empty string (widget won't render).
+declare const TURNSTILE_SITE_KEY: string;
+const SITE_KEY: string =
+  typeof TURNSTILE_SITE_KEY !== "undefined" ? TURNSTILE_SITE_KEY : "";
 
 export function meta() {
   return [{ title: "Sign in | ActionNowAI Mail" }];
@@ -77,6 +118,70 @@ export default function LoginRoute() {
   const [submitting, setSubmitting] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
+  // Phase G-2 — Turnstile widget state.
+  // `turnstileToken` holds the most recent solved-challenge token. It is
+  // populated by the Turnstile callback and cleared when the form is submitted
+  // or when the challenge expires. `turnstileWidgetId` lets us reset the
+  // widget after a successful submission so it is fresh for any retry.
+  const [turnstileToken, setTurnstileToken] = useState<string>("");
+  const turnstileWidgetId = useRef<string>("");
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+
+  // Phase G-2 — load the Turnstile script once on mount and render the widget
+  // into `turnstileContainerRef` as soon as the script is ready.
+  useEffect(() => {
+    if (!SITE_KEY) return; // site key not configured — skip (dev / CI)
+
+    const SCRIPT_ID = "cf-turnstile-script";
+    const CALLBACK_NAME = "__turnstileOnLoad";
+
+    // Idempotent: if the script is already present (HMR re-mount), skip.
+    if (!document.getElementById(SCRIPT_ID)) {
+      // Register a global onload callback that Turnstile will invoke once the
+      // script has finished bootstrapping its runtime.
+      (window as unknown as Record<string, unknown>)[CALLBACK_NAME] = () => {
+        if (!turnstileContainerRef.current || !window.turnstile) return;
+        turnstileWidgetId.current = window.turnstile.render(
+          turnstileContainerRef.current,
+          {
+            sitekey: SITE_KEY,
+            theme: "auto",
+            callback: (token: string) => setTurnstileToken(token),
+            "expired-callback": () => setTurnstileToken(""),
+            "error-callback": () => setTurnstileToken(""),
+          },
+        );
+      };
+
+      const script = document.createElement("script");
+      script.id = SCRIPT_ID;
+      script.src = `https://challenges.cloudflare.com/turnstile/v0/api.js?onload=${CALLBACK_NAME}&render=explicit`;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    } else if (window.turnstile && turnstileContainerRef.current) {
+      // Script already loaded (HMR case) — render directly.
+      turnstileWidgetId.current = window.turnstile.render(
+        turnstileContainerRef.current,
+        {
+          sitekey: SITE_KEY,
+          theme: "auto",
+          callback: (token: string) => setTurnstileToken(token),
+          "expired-callback": () => setTurnstileToken(""),
+          "error-callback": () => setTurnstileToken(""),
+        },
+      );
+    }
+
+    return () => {
+      // Clean up the widget on unmount to avoid duplicate renders.
+      if (window.turnstile && turnstileWidgetId.current) {
+        window.turnstile.remove(turnstileWidgetId.current);
+        turnstileWidgetId.current = "";
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally once
+
   // Already-authenticated short-circuit. If the user lands on /login but
   // already has a valid better-auth session, send them through to redirect.
   useEffect(() => {
@@ -108,12 +213,36 @@ export default function LoginRoute() {
       toast.add({ title: "Enter a valid email address", variant: "error" });
       return;
     }
+
+    // Phase G-2 — Turnstile gate. If SITE_KEY is configured and no token has
+    // been resolved yet, refuse to submit and prompt the user to complete the
+    // challenge.  When SITE_KEY is absent (dev / CI) we skip this check so
+    // the flow is unaffected in environments without a real site key.
+    const token = turnstileToken || window.turnstile?.getResponse() || "";
+    if (SITE_KEY && !token) {
+      toast.add({
+        title: "Please complete the security challenge.",
+        variant: "error",
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const { error } = await authClient.emailOtp.sendVerificationOtp({
         email: trimmed,
         type: "sign-in",
+        ...(token
+          ? { fetchOptions: { headers: { "X-Turnstile-Token": token } } }
+          : {}),
       });
+
+      // Phase G-2 — reset widget after each submission attempt so the token
+      // cannot be replayed on a second send.
+      if (window.turnstile && turnstileWidgetId.current) {
+        window.turnstile.reset(turnstileWidgetId.current);
+      }
+      setTurnstileToken("");
       if (error) {
         toast.add({
           title: error.message ?? "Failed to send code",
@@ -187,12 +316,22 @@ export default function LoginRoute() {
                 autoComplete="email"
                 disabled={submitting}
               />
+              {/* Phase G-2 — Turnstile widget mount point.
+                  Rendered only when a site key is configured.
+                  The widget is populated by the Turnstile JS loaded in useEffect. */}
+              {SITE_KEY && (
+                <div
+                  ref={turnstileContainerRef}
+                  className="flex justify-center"
+                  aria-label="Security challenge"
+                />
+              )}
               <Button
                 type="submit"
                 variant="primary"
                 size="base"
                 loading={submitting}
-                disabled={!email.trim()}
+                disabled={!email.trim() || (SITE_KEY ? !turnstileToken : false)}
               >
                 {submitting ? <Loader size="sm" /> : "Send code"}
               </Button>

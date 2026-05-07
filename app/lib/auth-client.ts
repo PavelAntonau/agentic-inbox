@@ -27,6 +27,12 @@ export interface AuthClient {
     sendVerificationOtp(args: {
       email: string;
       type: "sign-in" | "email-verification" | "forget-password";
+      /**
+       * Phase G-2 — pass extra fetch options so the Turnstile token can be
+       * forwarded as a header to the OTP-send endpoint:
+       *   fetchOptions: { headers: { "X-Turnstile-Token": token } }
+       */
+      fetchOptions?: { headers?: Record<string, string> };
     }): Promise<{ data: unknown; error: { message?: string } | null }>;
   };
   signIn: {
