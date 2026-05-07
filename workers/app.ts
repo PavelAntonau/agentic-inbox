@@ -472,6 +472,8 @@ async function dispatchMcpRequest(
   } = await import("./lib/mcp-tool-policy");
   const { buildAuthzContextFromUserId } =
     await import("./lib/mcp-list-mailboxes");
+  const { bindOauthOnFirstCall } =
+    await import("./db/queries/mcp-inbox-binding");
 
   const startedAt = Date.now();
   const bearer = await validateBearer(request, env);
@@ -606,6 +608,52 @@ async function dispatchMcpRequest(
         });
         finishAudit(r, method, tool);
         return r;
+      }
+
+      // ── Phase F (one-inbox-one-client) — OAuth bind-at-first-call ───
+      //
+      // For OAuth-JWT bearers (`bearer.source === "jwt"`), enforce the
+      // sentinel: per (user, mailbox) at most ONE active MCP credential,
+      // exclusively PAT XOR OAuth-client. Trusted MCP clients (Claude
+      // Code, Cursor, …) bypass the consent screen via skip_consent=1
+      // so we cannot intercept "user opts client X into mailbox Y" at
+      // the consent layer — instead, the binding is created here at
+      // first /mcp call, race-protected by mcp_inbox_binding's
+      // composite PK.
+      //
+      // PAT bearers already have their binding row written atomically
+      // at mint time (F.3, routes/pats.ts), so they don't enter this
+      // branch — the PAT mailbox_id check above (lines ~530–551) is
+      // their enforcement.
+      //
+      //   - bound          → proceed (INSERT landed OR existing oauth
+      //                      row already matches `bearer.client_id`).
+      //   - conflict-pat   → 403 `inbox-bound-to-pat`.
+      //   - conflict-oauth → 403 `inbox-bound-to-other-client`.
+      if (bearer.source === "jwt") {
+        const outcome = await bindOauthOnFirstCall(env.DB, {
+          userId: bearer.user_id,
+          mailboxId: resolvedId,
+          oauthClientId: bearer.client_id,
+          now: startedAt,
+        });
+        if (outcome.kind === "conflict-pat") {
+          const r = insufficientScopeResponse("inbox-bound-to-pat", {
+            tool,
+            mailbox_id: resolvedId,
+          });
+          finishAudit(r, method, tool);
+          return r;
+        }
+        if (outcome.kind === "conflict-oauth") {
+          const r = insufficientScopeResponse("inbox-bound-to-other-client", {
+            tool,
+            mailbox_id: resolvedId,
+          });
+          finishAudit(r, method, tool);
+          return r;
+        }
+        // outcome.kind === "bound" — fall through to the McpAgent.
       }
     }
 

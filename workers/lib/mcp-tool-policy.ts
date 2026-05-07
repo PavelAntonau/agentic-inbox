@@ -315,7 +315,17 @@ export type T36RejectReason =
   // mailbox is outside the caller's `authorized_mailbox_ids` (intersected
   // with PAT mailbox_id when set).
   | "tool-mailbox-arg-required"
-  | "mailbox-not-authorized";
+  | "mailbox-not-authorized"
+  // Phase F (one-inbox-one-client, migration 0017) — `mcp_inbox_binding`
+  // sentinel violations. `inbox-bound-to-pat` fires when an OAuth-JWT
+  // bearer hits a mailbox that is already bound to a PAT credential.
+  // `inbox-bound-to-other-client` fires when an OAuth-JWT bearer's
+  // `client_id` does not match the binding's `oauth_client_id` (i.e.
+  // a second OAuth client tried to bind the same mailbox). Both are
+  // resolved by the user explicitly revoking the existing credential
+  // via DELETE /api/users/me/mailboxes/:id/mcp-credential.
+  | "inbox-bound-to-pat"
+  | "inbox-bound-to-other-client";
 
 /**
  * Build a 403 `insufficient_scope` response with the same `WWW-Authenticate`
