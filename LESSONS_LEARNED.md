@@ -6,6 +6,43 @@ underlying mental models so the next agent doesn't re-derive them.
 
 ---
 
+## L-2026-05-06 — `wrangler d1 migrations apply --remote` runs ALL pending migrations in order
+
+**Context.** Phase F warm-up authorized "cloudflare-deploy w/ 0017" (the
+`mcp_inbox_binding` sentinel). Pre-deploy `wrangler d1 migrations list --remote`
+revealed both 0016 (Phase C3 email canonicalization + users-table rebuild,
+created weeks earlier) AND 0017 pending — production D1 was running on
+0015 even though the source tree had advanced through Phase E without
+ever applying 0016.
+
+**Root cause.** `wrangler deploy` does NOT auto-apply D1 migrations
+(reinforces graph lesson `22ELquzajU7GPQ9kT2YYl`). Phase E shipped its
+worker without a migration step, leaving 0016 marooned. Source-tree
+discipline — committing a migration file — is decoupled from
+remote-state discipline — applying it. There is no per-file flag for
+`migrations apply --remote`; it sweeps every pending migration in
+numerical order. So a deploy that authorized one new migration
+necessarily applies any unapplied predecessors as well.
+
+**Fix.** Surface the discrepancy to the user via `AskUserQuestion`
+(Phase F.10 did this). `wrangler d1 migrations list --remote` BEFORE
+`migrations apply --remote` is the canonical pre-flight. If the
+caller insists on a single-file path, `wrangler d1 execute --remote
+--file=...` works but loses migration-table tracking — almost never
+the right move.
+
+**Prevention.**
+- Pre-flight gate: every Cloudflare deploy that touches D1 runs
+  `wrangler d1 migrations list --remote` and surfaces unexpected
+  pending entries.
+- If a migration sits in source for ≥1 phase boundary without being
+  deployed, expect the next deploy to sweep it in. Plan accordingly.
+- The `cloudflare-deploy` skill should grow a "list pending
+  migrations and confirm" gate ahead of `apply --remote` — out of
+  scope for Phase F.10 but tracked.
+
+---
+
 ## L-2026-05-05 — Schema UNIQUE is the security invariant for tokens and identifiers; non-unique index is silent danger
 
 **Context.** The `agentic-inbox-audit` Phase 2 static review (`.research/audit-auth-permissions.md`) found
