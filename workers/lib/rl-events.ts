@@ -85,3 +85,38 @@ export function emitRateLimitEvent(env: Env, event: RateLimitEvent): void {
     // Intentionally swallowed — AE write must not propagate to the gate path.
   }
 }
+
+/**
+ * Phase v1.1 G-5 / TASK-2.1 — Workers Rate Limit binding observation mode.
+ *
+ * Calls `rl.limit({ key })` as the first edge-defense layer, but does NOT
+ * reject on `!success`. Instead, emits a `WOULD_LIMIT` event to AE so we
+ * can shape thresholds during the 48-h shadow soak (TASK-2.2). The flip
+ * to enforce mode happens in TASK-2.5 — at that point, callers replace
+ * this helper with a direct `result.success ? next() : 429` branch.
+ *
+ * Best-effort: never throws, never propagates. Missing binding (tests /
+ * local-dev) → silent no-op. Throwing binding (transient infra issue) →
+ * silent swallow. The gate path must remain available even when edge RL
+ * is degraded.
+ *
+ * Composite key convention (set by the caller):
+ *   pre-auth  → `${ip}:${route}`
+ *   post-auth → `${user_id}:${route}`
+ */
+export async function observeRateLimit(
+  rl: RateLimit | undefined,
+  key: string,
+  env: Env,
+  emitBase: Omit<RateLimitEvent, "outcome">,
+): Promise<void> {
+  if (!rl) return;
+  try {
+    const result = await rl.limit({ key });
+    if (!result.success) {
+      emitRateLimitEvent(env, { ...emitBase, outcome: "WOULD_LIMIT" });
+    }
+  } catch {
+    // Intentionally swallowed — RL probe must not propagate to the gate path.
+  }
+}

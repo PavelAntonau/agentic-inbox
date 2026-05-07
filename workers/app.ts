@@ -19,7 +19,7 @@ import { requireTurnstile } from "./middleware/turnstile";
 import { authRateLimitByEmail } from "./middleware/auth-rate-limit";
 import { assertOauthClientsRequirePkce } from "./auth/pkce-assertion";
 import { scheduled as authAlerterScheduled } from "./cron/auth-alerter";
-import { emitRateLimitEvent } from "./lib/rl-events";
+import { emitRateLimitEvent, observeRateLimit } from "./lib/rl-events";
 import type { Env } from "./types";
 
 /**
@@ -337,6 +337,22 @@ app.post(
     } catch {
       // Body wasn't JSON — leave actor as "unknown".
     }
+    // Phase v1.1 G-5 / TASK-2.1 — RL_LOGIN binding in OBSERVATION mode.
+    // Composite key: pre-auth → ${ip}:${route}. Always falls through;
+    // emits WOULD_LIMIT to AE on `!success` so the 48-h shadow soak
+    // (TASK-2.2) can shape thresholds before TASK-2.5 flips to enforce.
+    await observeRateLimit(
+      c.env.RL_LOGIN,
+      `${ip}:/api/auth/email-otp/send-verification-otp`,
+      c.env,
+      {
+        route: "/api/auth/email-otp/send-verification-otp",
+        actor,
+        ipOrSessionId: ip,
+        count: 1,
+        latencyMs: 0,
+      },
+    );
     const auth = createAuth(c.env, c.req.raw, c.executionCtx);
     const response = await auth.handler(c.req.raw);
     // Phase v1.1 G-5 / TASK-1.4 — AE emit on OTP send.
@@ -365,7 +381,6 @@ app.post(
 app.post("/api/auth/sign-in/email-otp", authRateLimitByEmail(), async (c) => {
   const t0 = Date.now();
   const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-  const auth = createAuth(c.env, c.req.raw, c.executionCtx);
   // Capture the email up-front so the audit row carries the user
   // identifier even when better-auth rejects (the body is consumed by
   // auth.handler, so we read it first via clone()).
@@ -376,6 +391,21 @@ app.post("/api/auth/sign-in/email-otp", authRateLimitByEmail(), async (c) => {
   } catch {
     // body might be malformed — fall through to better-auth's 400
   }
+  // Phase v1.1 G-5 / TASK-2.1 — RL_LOGIN_VERIFY binding in OBSERVATION mode.
+  // Pre-auth route; key on IP. WOULD_LIMIT emitted on `!success`.
+  await observeRateLimit(
+    c.env.RL_LOGIN_VERIFY,
+    `${ip}:/api/auth/sign-in/email-otp`,
+    c.env,
+    {
+      route: "/api/auth/sign-in/email-otp",
+      actor: typeof email === "string" ? email.trim().toLowerCase() : "unknown",
+      ipOrSessionId: ip,
+      count: 1,
+      latencyMs: 0,
+    },
+  );
+  const auth = createAuth(c.env, c.req.raw, c.executionCtx);
   const response = await auth.handler(c.req.raw);
   const { writeAudit } = await import("./lib/audit-log");
   const action = response.ok ? "auth.otp_verified" : "auth.otp_failed";

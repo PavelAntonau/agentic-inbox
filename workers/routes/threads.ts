@@ -18,7 +18,7 @@ import { ThreadNotFoundError, ConflictError } from "../durableObject/index";
 import type { MailboxDO } from "../durableObject";
 import type { Env } from "../types";
 import { Folders } from "../../shared/folders";
-import { emitRateLimitEvent } from "../lib/rl-events";
+import { emitRateLimitEvent, observeRateLimit } from "../lib/rl-events";
 
 type AppVariables = {
   authzContext?: AuthzContext;
@@ -159,6 +159,22 @@ router.post("/:mid/threads/:tid/messages", async (c) => {
   const mailboxId = c.req.param("mid");
   const threadId = c.req.param("tid");
   const ctx = c.var.authzContext!;
+
+  // Phase v1.1 G-5 / TASK-2.1 — RL_API_MESSAGES binding in OBSERVATION mode.
+  // Composite key: post-auth → ${user_id}:${route}. Always falls through;
+  // WOULD_LIMIT emitted to AE on `!success`. TASK-2.5 flips to enforce.
+  await observeRateLimit(
+    c.env.RL_API_MESSAGES,
+    `${ctx.user_id}:/api/messages`,
+    c.env,
+    {
+      route: "/api/messages",
+      actor: ctx.user_id,
+      ipOrSessionId: ctx.user_id,
+      count: 1,
+      latencyMs: 0,
+    },
+  );
 
   // D-PLAT-5: If-Match is required.
   const ifMatch = c.req.header("If-Match");
