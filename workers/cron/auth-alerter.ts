@@ -43,12 +43,11 @@ import { sendViaResend } from "../lib/resend-client";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AlerterEnv extends Env {
-  /** Recipient mailbox for tier-1 alerts. Set in wrangler.jsonc `vars`. */
-  ADMIN_ALERT_EMAIL?: string;
-  /** Sender address — must be on a Resend-verified domain. */
-  ADMIN_ALERT_FROM?: string;
-}
+// ADMIN_ALERT_EMAIL and ADMIN_ALERT_FROM are inherited from Env (which
+// inherits from Cloudflare.Env, where wrangler-typegen types them as the
+// literal `vars` strings from wrangler.jsonc). AlerterEnv stays as a
+// nominal alias so the cron handler signature reads as intent-tagged.
+export type AlerterEnv = Env;
 
 interface AlertCondition {
   /** Human-readable name for the email subject + body. */

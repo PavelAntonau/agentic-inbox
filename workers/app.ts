@@ -370,7 +370,11 @@ app.post(
     const quotaBlock = await checkAndIncrementDailyOtpQuota(c.env);
     if (quotaBlock) return quotaBlock;
 
-    const auth = createAuth(c.env, c.req.raw, c.executionCtx);
+    const auth = createAuth(
+      c.env,
+      c.req.raw,
+      c.executionCtx as ExecutionContext,
+    );
     const response = await auth.handler(c.req.raw);
     // Phase v1.1 G-5 / TASK-1.4 — AE emit on OTP send.
     // Schema: blobs=[route,actor,outcome] / doubles=[count,latency_ms] / indexes=[ip_or_session_id]
@@ -422,7 +426,7 @@ app.post("/api/auth/sign-in/email-otp", authRateLimitByEmail(), async (c) => {
       latencyMs: 0,
     },
   );
-  const auth = createAuth(c.env, c.req.raw, c.executionCtx);
+  const auth = createAuth(c.env, c.req.raw, c.executionCtx as ExecutionContext);
   const response = await auth.handler(c.req.raw);
   const { writeAudit } = await import("./lib/audit-log");
   const action = response.ok ? "auth.otp_verified" : "auth.otp_failed";
@@ -465,7 +469,7 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
   // header off it for the second-factor check.
   // Phase G-1 / Task 3 — pass ctx so sendVerificationOTP can defer the
   // email send via ctx.waitUntil, keeping OTP-send latency constant.
-  const auth = createAuth(c.env, c.req.raw, c.executionCtx);
+  const auth = createAuth(c.env, c.req.raw, c.executionCtx as ExecutionContext);
   return auth.handler(c.req.raw);
 });
 

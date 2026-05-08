@@ -499,7 +499,7 @@ export function createAuth(
         // closes the timing-oracle on OTP comparison and ensures DB dumps
         // never expose active OTPs in plaintext.
         storeOTP: "hashed",
-        sendVerificationOTP({ email, otp, type }) {
+        async sendVerificationOTP({ email, otp, type }) {
           // Phase G-1 / Task 3 — move the email send off the synchronous
           // hot path via ctx.waitUntil so request latency is constant
           // whether the email send succeeds or fails. The OTP code is
@@ -520,8 +520,8 @@ export function createAuth(
             ctx.waitUntil(sendPromise);
           } else {
             // Fallback: no ExecutionContext available (authz-context path or
-            // tests). Run synchronously so the email is not silently dropped.
-            return sendPromise as unknown as void;
+            // tests). Await synchronously so the email is not silently dropped.
+            await sendPromise;
           }
         },
       }),

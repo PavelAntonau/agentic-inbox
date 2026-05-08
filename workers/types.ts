@@ -2,15 +2,18 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Production-only secrets that `wrangler types` cannot generate (they're set
-// via `wrangler secret put`, not in wrangler.jsonc or .dev.vars). Everything
-// else — DOMAINS, EMAIL_ADDRESSES, BOOTSTRAP_OWNER_EMAIL, BOOTSTRAP_DEV_EMAIL,
-// CF_ACCESS_DEV_MODE, all bindings — is generated into Cloudflare.Env by
-// `wrangler types` from wrangler.jsonc + .dev.vars and is inherited.
+// Most env vars (DOMAINS, EMAIL_ADDRESSES, BOOTSTRAP_OWNER_EMAIL,
+// BOOTSTRAP_DEV_EMAIL, CF_ACCESS_DEV_MODE, MOCK_MODE, ADMIN_ALERT_*,
+// TURNSTILE_*, BETTER_AUTH_SECRET, OAUTH_JWT_SIGNING_KEY, TOKEN_PEPPER,
+// RESEND_API_KEY, all bindings) are generated into Cloudflare.Env by
+// `wrangler types` from wrangler.jsonc + .dev.vars and inherited
+// verbatim — do NOT redeclare them here, widening the wrangler-generated
+// type (e.g. literal "pavel@digifirst.org" → string | undefined) violates
+// the parent interface contract.
 //
-// CF_ACCESS_DEV_MODE: present in .dev.vars (gitignored), absent in prod. Type
-// is widened to `string` by wrangler-typegen — runtime checks compare to
-// "mock" / "bypass" literals.
+// This interface only adds env vars that wrangler-typegen cannot infer:
+// CF Access policy mutators (set via `wrangler secret put`) and the
+// bootstrap-owner second-factor token (likewise).
 export interface Env extends Cloudflare.Env {
   POLICY_AUD: string;
   TEAM_DOMAIN: string;
@@ -20,26 +23,6 @@ export interface Env extends Cloudflare.Env {
   CF_POLICY_ID?: string;
   /** Cloudflare API token with Access: Apps and Policies Write scope. */
   CF_ACCESS_API_TOKEN?: string;
-  /** HMAC pepper for agent token secret hashing. Set via wrangler secret put. */
-  TOKEN_PEPPER?: string;
-  /** better-auth signing secret — set via `wrangler secret put BETTER_AUTH_SECRET`. */
-  BETTER_AUTH_SECRET: string;
-  /**
-   * Static OAuth JWT signing key for the better-auth `jwt()` plugin. Stringified
-   * JSON of `{ kid, alg, crv, publicJwk, privateJwk }` (Ed25519). Set via
-   * `wrangler secret put OAUTH_JWT_SIGNING_KEY`; mirrored in macOS Keychain at
-   * `cloudflare/OAUTH_JWT_SIGNING_KEY` (Key MCP). Provisioned in T1.4 of the
-   * mcp-oauth plan.
-   */
-  OAUTH_JWT_SIGNING_KEY: string;
-  /**
-   * Resend API key (transactional outbound mail). Set via
-   * `wrangler secret put RESEND_API_KEY`. Required in production —
-   * `getResendBinding` throws on first send if absent. Not needed in
-   * MOCK_MODE (outbound is captured to the R2 outbox).
-   */
-  RESEND_API_KEY?: string;
-  // BETTER_AUTH_URL is declared in wrangler.jsonc and inherited via Cloudflare.Env.
   /**
    * Phase E / TASK-E.2 (OQ-P0-7) — defense-in-depth second factor on the
    * bootstrap-owner signup path. When set, the better-auth signup hook
@@ -53,13 +36,6 @@ export interface Env extends Cloudflare.Env {
    */
   BOOTSTRAP_OWNER_TOKEN?: string;
   /**
-   * Autonomous-local-testing umbrella switch. Set to `"1"` in `.dev.vars`
-   * (gitignored) to enable: mock CF Access shim, canned AI replies, R2-backed
-   * outbox, fixture data for CF management API, /__mock/* router. Production
-   * deploys must NEVER set this. See workers/lib/mock-mode.ts.
-   */
-  MOCK_MODE?: string;
-  /**
    * Phase G / G-3 — Analytics Engine dataset for auth-event observability.
    * Binding declared in wrangler.jsonc under `analytics_engine_datasets`.
    * Pass to `writeAudit({ analyticsEngine: env.AUTH_ANALYTICS, ctx })` on
@@ -67,38 +43,4 @@ export interface Env extends Cloudflare.Env {
    * Absent in local dev unless explicitly bound via wrangler --local.
    */
   AUTH_ANALYTICS?: AnalyticsEngineDataset;
-  /**
-   * Phase G / G-3 — Recipient mailbox for the tier-1 auth alerter cron.
-   * Set in wrangler.jsonc `vars.ADMIN_ALERT_EMAIL` (non-secret — the
-   * destination address is operational config, not a credential).
-   * Admin preference 2026-05-07: a single off-domain email channel
-   * (e.g. pavel@digifirst.org) so a mail.actionnow.ai outage doesn't
-   * suppress alerts about itself. Slack/Teams/etc. intentionally not used.
-   * Absent → alerter skips silently.
-   */
-  ADMIN_ALERT_EMAIL?: string;
-  /**
-   * Phase G / G-3 — Sender address for the tier-1 auth alerter. Must be
-   * on a Resend-verified domain — the established default is
-   * `noreply@actionnow.ai`. Set in wrangler.jsonc `vars.ADMIN_ALERT_FROM`.
-   * Absent → alerter skips silently.
-   */
-  ADMIN_ALERT_FROM?: string;
-  /**
-   * Phase G / G-2 — Cloudflare Turnstile server-side secret key.
-   * Used by workers/middleware/turnstile.ts to verify tokens submitted by
-   * the login form before sending an OTP.
-   * Set via `wrangler secret put TURNSTILE_SECRET_KEY`.
-   * Obtain the value from the Cloudflare dashboard → Turnstile → your widget
-   * → Secret Key (see docs/phase-g-dashboard-config.md §4).
-   * Absent → Turnstile middleware fails closed (returns 403 TURNSTILE_FAILED).
-   */
-  TURNSTILE_SECRET_KEY?: string;
-  /**
-   * Phase G / G-2 — Cloudflare Turnstile widget site key (public).
-   * Mirrored into the React build via `vite.config.ts` `define` so the
-   * login form can mount the widget without an extra fetch.  Defined in
-   * wrangler.jsonc `vars.TURNSTILE_SITE_KEY`.
-   */
-  TURNSTILE_SITE_KEY?: string;
 }
