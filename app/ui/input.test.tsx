@@ -83,8 +83,16 @@ describe("KUMO_INPUT_VARIANTS size tiers", () => {
     expect(KUMO_INPUT_VARIANTS.size.lg.classes).toContain("h-11");
   });
 
+  it("lg tier emits text-[16px] to prevent iOS Safari zoom-on-focus", () => {
+    expect(KUMO_INPUT_VARIANTS.size.lg.classes).toContain("text-[16px]");
+  });
+
   it("xl tier emits h-14 (56 px primary CTA)", () => {
     expect(KUMO_INPUT_VARIANTS.size.xl.classes).toContain("h-14");
+  });
+
+  it("xl tier emits text-[16px] to prevent iOS Safari zoom-on-focus", () => {
+    expect(KUMO_INPUT_VARIANTS.size.xl.classes).toContain("text-[16px]");
   });
 });
 

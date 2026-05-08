@@ -35,11 +35,15 @@ export const KUMO_INPUT_VARIANTS = {
       description: "Medium input (40 px)",
     },
     lg: {
-      classes: "h-11 gap-2 rounded-lg px-4 text-base",
+      // text-[16px] overrides the kumo @theme inline --text-base:14px token.
+      // iOS Safari zooms when font-size < 16px; the lg/xl tiers are the
+      // mobile-native sizes so we hard-pin to 16px here.
+      classes: "h-11 gap-2 rounded-lg px-4 text-[16px]",
       description: "Large input — 44 px, meets Apple HIG tap-target floor",
     },
     xl: {
-      classes: "h-14 gap-2 rounded-lg px-4 text-base",
+      // Same 16px fix as lg — primary CTA inputs must not trigger zoom.
+      classes: "h-14 gap-2 rounded-lg px-4 text-[16px]",
       description: "Extra-large input — 56 px, primary CTA tier",
     },
   },
