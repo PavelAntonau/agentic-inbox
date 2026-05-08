@@ -161,16 +161,27 @@
 	//   1001 = RL_LOGIN          — pre-auth /login POST          (5 req / 10s)
 	//   1002 = RL_LOGIN_VERIFY   — pre-auth /login/verify POST  (10 req / 60s)
 	//   1003 = RL_API_MESSAGES   — post-auth /api/messages       (200 req / 60s)
+	//   1004 = RL_LOGIN_GLOBAL   — aggregate /login POST          (100 req / 10s)
 	//
-	// Per D-PG-G5-ARCH (`Ul_YET43hsABcWM901XDm`): edge counter is per-colo
-	// loose; the existing app-layer rate-limiter
-	// (workers/middleware/auth-rate-limit.ts) remains the global tight
+	// Per D-PG-G5-ARCH (`Ul_YET43hsABcWM901XDm`): per-IP edge counter is
+	// per-colo loose; the existing app-layer rate-limiter
+	// (workers/middleware/auth-rate-limit.ts) remains the per-email tight
 	// limiter. Both run; D-PG-1 sizing rule (`MoK4pLGOtP08xrr_Ewkvd`) holds.
+	//
+	// RL_LOGIN_GLOBAL is the AGGREGATE backstop — called with a constant
+	// key (`global:otp-send`) so every OTP-send request hits the same
+	// counter. Catches mass spray that bypasses per-email and per-IP
+	// caps. Per-colo, not truly global; Cloudflare anycast routes traffic
+	// to the nearest colo so for realistic distributed-attacker scenarios
+	// this is sufficient. Lives in workers/lib/global-rate-limit.ts.
 	//
 	// Thresholds chosen via formula `cf_threshold = max(app_sustained,
 	// k × P99)` with k=2 (login pre-auth) / 3 (verify pre-auth) / 4-5
-	// (post-auth). Re-tune via wrangler.jsonc + redeploy ONLY (req_api_only_threshold
-	// `CYC23X_1LUXNiEh8byU5D`) — never via dashboard.
+	// (post-auth). RL_LOGIN_GLOBAL uses a different formula: 100/10s ≫
+	// realistic legit aggregate traffic; tune downward once Phase 2
+	// shadow-soak data informs us. Re-tune via wrangler.jsonc + redeploy
+	// ONLY (req_api_only_threshold `CYC23X_1LUXNiEh8byU5D`) — never via
+	// dashboard.
 	"ratelimits": [
 		{
 			"name": "RL_LOGIN",
@@ -186,6 +197,11 @@
 			"name": "RL_API_MESSAGES",
 			"namespace_id": "1003",
 			"simple": { "limit": 200, "period": 60 }
+		},
+		{
+			"name": "RL_LOGIN_GLOBAL",
+			"namespace_id": "1004",
+			"simple": { "limit": 100, "period": 10 }
 		}
 	],
 	// Phase G / G-3 — Cron trigger for the tier-1 auth alerter.

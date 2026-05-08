@@ -20,6 +20,10 @@ import { authRateLimitByEmail } from "./middleware/auth-rate-limit";
 import { assertOauthClientsRequirePkce } from "./auth/pkce-assertion";
 import { scheduled as authAlerterScheduled } from "./cron/auth-alerter";
 import { emitRateLimitEvent, observeRateLimit } from "./lib/rl-events";
+import {
+  enforceGlobalOtpEdgeLimit,
+  checkAndIncrementDailyOtpQuota,
+} from "./lib/global-rate-limit";
 import type { Env } from "./types";
 
 /**
@@ -353,6 +357,19 @@ app.post(
         latencyMs: 0,
       },
     );
+
+    // Aggregate-umbrella backstops — both ENFORCE (return 429 on block).
+    // RL_LOGIN_GLOBAL: Workers RL binding with a constant key so the
+    // counter is shared across all OTP-send requests; catches mass spray
+    // that splits across many (email, IP) pairs.
+    // Daily OTP quota: D1-backed sliding-24h counter; caps total OTP
+    // emails sent regardless of source — protects the Resend bill.
+    // Both fail-open on infra errors. See workers/lib/global-rate-limit.ts.
+    const globalBlock = await enforceGlobalOtpEdgeLimit(c.env);
+    if (globalBlock) return globalBlock;
+    const quotaBlock = await checkAndIncrementDailyOtpQuota(c.env);
+    if (quotaBlock) return quotaBlock;
+
     const auth = createAuth(c.env, c.req.raw, c.executionCtx);
     const response = await auth.handler(c.req.raw);
     // Phase v1.1 G-5 / TASK-1.4 — AE emit on OTP send.
