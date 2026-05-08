@@ -36,23 +36,33 @@ export const KUMO_BUTTON_VARIANTS = {
       description: "Extra small button for compact UIs",
     },
     sm: {
-      classes: "h-6.5 gap-1 rounded-md px-2 text-xs",
+      classes: "h-8 gap-1 rounded-md px-2 text-xs",
       description: "Small button for secondary actions",
     },
     base: {
       classes: "h-9 gap-1.5 rounded-lg px-3 text-base",
-      description: "Default button size",
+      description: "Default button size (36 px — backward compat)",
+    },
+    md: {
+      classes: "h-10 gap-1.5 rounded-lg px-3 text-base",
+      description: "Medium button (40 px)",
     },
     lg: {
-      classes: "h-10 gap-2 rounded-lg px-4 text-base",
-      description: "Large button for primary CTAs",
+      classes: "h-11 gap-2 rounded-lg px-4 text-base",
+      description: "Large button — 44 px, meets Apple HIG tap-target floor",
+    },
+    xl: {
+      classes: "h-14 gap-2 rounded-lg px-4 text-base",
+      description: "Extra-large button — 56 px, primary CTA tier",
     },
   },
   compactSize: {
     xs: { classes: "size-3.5" },
-    sm: { classes: "size-6.5" },
+    sm: { classes: "size-8" },
     base: { classes: "size-9" },
-    lg: { classes: "size-10" },
+    md: { classes: "size-10" },
+    lg: { classes: "size-11" },
+    xl: { classes: "size-14" },
   },
   variant: {
     primary: {
@@ -205,7 +215,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         type={type ?? "button"}
         {...props}
       >
-        {loading && <Loader size={size === "lg" ? 16 : 14} />}
+        {loading && <Loader size={size === "xl" || size === "lg" ? 16 : 14} />}
         {!loading && renderIcon(icon)}
         {children}
       </button>

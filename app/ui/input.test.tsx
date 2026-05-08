@@ -4,7 +4,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { Input } from "./input";
+import { Input, KUMO_INPUT_VARIANTS, inputVariants } from "./input";
 
 describe("Input", () => {
   it("renders an input element", () => {
@@ -59,5 +59,45 @@ describe("Input", () => {
     render(<Input aria-label="Error field" variant="error" />);
     const input = screen.getByRole("textbox");
     expect(input.className).toContain("ring-kumo-danger");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tap-target tier assertions (T1.1)
+// ---------------------------------------------------------------------------
+
+describe("KUMO_INPUT_VARIANTS size tiers", () => {
+  it("sm tier emits h-8", () => {
+    expect(KUMO_INPUT_VARIANTS.size.sm.classes).toContain("h-8");
+  });
+
+  it("base tier emits h-9 (backward compat)", () => {
+    expect(KUMO_INPUT_VARIANTS.size.base.classes).toContain("h-9");
+  });
+
+  it("md tier emits h-10", () => {
+    expect(KUMO_INPUT_VARIANTS.size.md.classes).toContain("h-10");
+  });
+
+  it("lg tier emits h-11 (44 px tap-target floor)", () => {
+    expect(KUMO_INPUT_VARIANTS.size.lg.classes).toContain("h-11");
+  });
+
+  it("xl tier emits h-14 (56 px primary CTA)", () => {
+    expect(KUMO_INPUT_VARIANTS.size.xl.classes).toContain("h-14");
+  });
+});
+
+describe("inputVariants() size output", () => {
+  it("size=lg includes h-11", () => {
+    expect(inputVariants({ size: "lg" })).toContain("h-11");
+  });
+
+  it("size=xl includes h-14", () => {
+    expect(inputVariants({ size: "xl" })).toContain("h-14");
+  });
+
+  it("size=base still includes h-9", () => {
+    expect(inputVariants({ size: "base" })).toContain("h-9");
   });
 });

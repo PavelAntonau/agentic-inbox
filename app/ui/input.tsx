@@ -23,16 +23,24 @@ export const KUMO_INPUT_VARIANTS = {
       description: "Extra small input for compact UIs",
     },
     sm: {
-      classes: "h-6.5 gap-1 rounded-md px-2 text-xs",
+      classes: "h-8 gap-1 rounded-md px-2 text-xs",
       description: "Small input for secondary fields",
     },
     base: {
       classes: "h-9 gap-1.5 rounded-lg px-3 text-base",
-      description: "Default input size",
+      description: "Default input size (36 px — backward compat)",
+    },
+    md: {
+      classes: "h-10 gap-1.5 rounded-lg px-3 text-base",
+      description: "Medium input (40 px)",
     },
     lg: {
-      classes: "h-10 gap-2 rounded-lg px-4 text-base",
-      description: "Large input for prominent fields",
+      classes: "h-11 gap-2 rounded-lg px-4 text-base",
+      description: "Large input — 44 px, meets Apple HIG tap-target floor",
+    },
+    xl: {
+      classes: "h-14 gap-2 rounded-lg px-4 text-base",
+      description: "Extra-large input — 56 px, primary CTA tier",
     },
   },
   variant: {
