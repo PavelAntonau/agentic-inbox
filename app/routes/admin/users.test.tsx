@@ -4,8 +4,27 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import AdminLayout from "./_layout";
 import AdminUsersRoute from "./users";
+
+// AdminLayout now includes <Header /> (which mounts GlobalSearch + a
+// useQuery on /api/mailboxes/tree). The Header relocation in commit
+// e4c2e19 moved Header out of root.tsx into the authenticated layouts
+// to fix the public-shell leak; that means tests rendering the layout
+// directly need their own QueryClientProvider. Helper below wraps every
+// render with a fresh QueryClient (per-test isolation).
+function renderWithProviders(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 // Mock toast manager since happy-dom doesn't have the real provider
 vi.mock("~/ui/toast", async () => {
@@ -103,7 +122,7 @@ describe("AdminLayout role gate", () => {
       ],
       { initialEntries: ["/admin/users"] },
     );
-    render(<RouterProvider router={router} />);
+    renderWithProviders(<RouterProvider router={router} />);
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/");
     });
@@ -122,7 +141,7 @@ describe("AdminLayout role gate", () => {
       ],
       { initialEntries: ["/admin/users"] },
     );
-    render(<RouterProvider router={router} />);
+    renderWithProviders(<RouterProvider router={router} />);
     await waitFor(() => {
       expect(screen.getByText("users-content")).toBeInTheDocument();
     });
@@ -142,7 +161,7 @@ describe("AdminUsersRoute", () => {
       [{ path: "/admin/users", element: <AdminUsersRoute /> }],
       { initialEntries: ["/admin/users"] },
     );
-    render(<RouterProvider router={router} />);
+    renderWithProviders(<RouterProvider router={router} />);
     await waitFor(() => {
       expect(screen.getByText("alice@actionnow.ai")).toBeInTheDocument();
       expect(screen.getByText("bob@actionnow.ai")).toBeInTheDocument();
@@ -154,7 +173,7 @@ describe("AdminUsersRoute", () => {
       [{ path: "/admin/users", element: <AdminUsersRoute /> }],
       { initialEntries: ["/admin/users"] },
     );
-    render(<RouterProvider router={router} />);
+    renderWithProviders(<RouterProvider router={router} />);
     await waitFor(() => {
       expect(screen.getByText("Owner")).toBeInTheDocument();
     });
@@ -165,7 +184,7 @@ describe("AdminUsersRoute", () => {
       [{ path: "/admin/users", element: <AdminUsersRoute /> }],
       { initialEntries: ["/admin/users"] },
     );
-    render(<RouterProvider router={router} />);
+    renderWithProviders(<RouterProvider router={router} />);
     await waitFor(() => {
       expect(
         screen.getByRole("button", { name: "Promote" }),
@@ -178,7 +197,7 @@ describe("AdminUsersRoute", () => {
       [{ path: "/admin/users", element: <AdminUsersRoute /> }],
       { initialEntries: ["/admin/users"] },
     );
-    render(<RouterProvider router={router} />);
+    renderWithProviders(<RouterProvider router={router} />);
     await waitFor(() => {
       expect(
         screen.getByRole("button", { name: /Invite/ }),
