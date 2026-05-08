@@ -118,7 +118,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           sizes="180x180"
           href="/apple-touch-icon.png"
         />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#1c5cb6" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <title>ActionNowAI Mail</title>
         {/* Apply theme class on <html> BEFORE first paint to avoid the
          * flash-of-wrong-theme. Reads localStorage["anai-theme"]; falls
