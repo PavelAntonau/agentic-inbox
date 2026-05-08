@@ -12,8 +12,10 @@
 //   /            — root HTML (authenticated inbox)
 //   /login       — pre-auth login page
 //   /manifest.webmanifest — manifest (needed offline for installability)
-//   /favicon-192.png      — icon (used by browser UI after install)
-//   /favicon-512.png      — large icon (splash screen)
+//   /favicon-192.png         — icon (used by browser UI after install)
+//   /favicon-512.png         — large icon (splash screen)
+//   /icon-maskable-192.png   — maskable icon (Android adaptive shape)
+//   /icon-maskable-512.png   — maskable icon (large)
 //
 // Fetch strategy:
 //   HTML routes  (/login, /, /consent)  → network-first  (always try live)
@@ -26,7 +28,7 @@
 
 "use strict";
 
-const CACHE_VERSION = "anai-shell-v1";
+const CACHE_VERSION = "anai-shell-v2";
 
 // Minimal offline fallback HTML — inlined so it needs no network fetch.
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -66,6 +68,8 @@ self.addEventListener("install", (event) => {
           "/manifest.webmanifest",
           "/favicon-192.png",
           "/favicon-512.png",
+          "/icon-maskable-192.png",
+          "/icon-maskable-512.png",
         ]),
       )
       .then(() => self.skipWaiting()),
