@@ -153,17 +153,20 @@ describe("useToastManager", () => {
 });
 
 describe("toastVariants", () => {
-  it("returns default variant classes for no args (success-green tone)", () => {
+  it("returns default variant classes for no args (glassy green fill)", () => {
     // After the @cloudflare/kumo → @base-ui/react migration (commit 34ed2e4)
-    // and the toast-style follow-up (9508b1b), the default variant carries
-    // the positive-confirmation green treatment, not a kumo-fill background.
+    // and the toast-style follow-ups (9508b1b plus the glass-fill restyle),
+    // the default variant carries a richly-filled emerald background with
+    // backdrop-blur — readable white text on top in any theme.
     const cls = toastVariants();
-    expect(cls).toContain("border-emerald-500/60");
+    expect(cls).toContain("bg-emerald-500/90");
+    expect(cls).toContain("text-white");
   });
 
-  it("returns error variant classes (red tone)", () => {
+  it("returns error variant classes (glassy red fill)", () => {
     const cls = toastVariants({ variant: "error" });
-    expect(cls).toContain("border-red-500/60");
+    expect(cls).toContain("bg-rose-600/90");
+    expect(cls).toContain("text-white");
   });
 
   it("KUMO_TOAST_DEFAULT_VARIANTS.variant is default", () => {

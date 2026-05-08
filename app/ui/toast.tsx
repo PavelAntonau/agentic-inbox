@@ -34,30 +34,31 @@ export const KUMO_TOAST_VARIANTS = {
     description: "Close button with X icon",
   },
   variant: {
-    // Default = positive confirmation (green). Most confirmation toasts in
-    // the app ("Email sent", "Visibility updated", "Code sent") fire with
-    // no explicit variant, so default carries the success treatment.
+    // Default = positive confirmation (rich glassy green). Filled fill +
+    // backdrop-blur so white text on top is unambiguously readable in any
+    // theme. Light + dark mode share the same treatment — the fill carries
+    // the message; the surrounding theme is irrelevant.
     default: {
       classes:
-        "border-emerald-500/60 bg-emerald-500/15 [&_[data-toast-title]]:text-emerald-700 dark:border-emerald-400/55 dark:bg-emerald-500/20 dark:[&_[data-toast-title]]:text-emerald-200",
-      description: "Success toast — positive confirmation (green)",
+        "border-white/25 bg-emerald-500/90 text-white shadow-xl backdrop-blur-md ring-1 ring-emerald-300/30",
+      description: "Success toast — rich glassy green fill",
     },
     // Explicit success variant for clarity when a caller wants to be loud
     // about it. Same visual treatment as default.
     success: {
       classes:
-        "border-emerald-500/60 bg-emerald-500/15 [&_[data-toast-title]]:text-emerald-700 dark:border-emerald-400/55 dark:bg-emerald-500/20 dark:[&_[data-toast-title]]:text-emerald-200",
-      description: "Success toast — positive confirmation (green)",
+        "border-white/25 bg-emerald-500/90 text-white shadow-xl backdrop-blur-md ring-1 ring-emerald-300/30",
+      description: "Success toast — rich glassy green fill",
     },
     error: {
       classes:
-        "border-red-500/60 bg-red-500/15 [&_[data-toast-title]]:text-red-700 dark:border-red-400/55 dark:bg-red-500/20 dark:[&_[data-toast-title]]:text-red-200",
-      description: "Error toast — failed operation (red)",
+        "border-white/25 bg-rose-600/90 text-white shadow-xl backdrop-blur-md ring-1 ring-rose-300/30",
+      description: "Error toast — rich glassy red fill",
     },
     warning: {
       classes:
-        "border-amber-500/60 bg-amber-500/15 [&_[data-toast-title]]:text-amber-700 dark:border-amber-400/55 dark:bg-amber-500/20 dark:[&_[data-toast-title]]:text-amber-200",
-      description: "Warning toast — cautionary message (amber)",
+        "border-white/25 bg-amber-500/95 text-white shadow-xl backdrop-blur-md ring-1 ring-amber-300/30",
+      description: "Warning toast — rich glassy amber fill",
     },
   },
 } as const;
@@ -167,13 +168,13 @@ function ToastList() {
           <div className="flex flex-col gap-1 overflow-hidden">
             <Toast.Title
               data-toast-title
-              className="text-[0.975rem] leading-5 font-semibold"
+              className="text-[0.975rem] leading-5 font-semibold text-current"
             />
-            <Toast.Description className="text-[0.925rem] leading-5 text-kumo-subtle" />
+            <Toast.Description className="text-[0.925rem] leading-5 text-current/90" />
           </div>
         </div>
         <Toast.Close
-          className="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded border-none bg-transparent text-current/50 hover:bg-kumo-contrast/10 hover:text-current"
+          className="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded border-none bg-transparent text-current/70 hover:bg-white/15 hover:text-current"
           aria-label="Close"
         >
           <svg
