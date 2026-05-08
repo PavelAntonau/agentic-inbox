@@ -21,7 +21,7 @@
 //     build time by Vite (see vite.config.ts `define`).  Integrators MUST set
 //     this var (see docs/phase-g-dashboard-config.md).
 
-import { Button, Input, Loader, useToastManager } from "~/ui";
+import { Button, Input, useToastManager } from "~/ui";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
@@ -390,13 +390,13 @@ export default function LoginRoute() {
                   variant="primary"
                   size="base"
                   loading={submitting}
-                  className="w-full"
+                  className="w-full justify-center"
                   disabled={
                     !isValidEmailShape(email) ||
                     (SITE_KEY ? !turnstileToken : false)
                   }
                 >
-                  {submitting ? <Loader size="sm" /> : "Send code"}
+                  Send code
                 </Button>
               </form>
 
@@ -451,10 +451,10 @@ export default function LoginRoute() {
                 variant="primary"
                 size="base"
                 loading={submitting}
-                className="w-full"
+                className="w-full justify-center"
                 disabled={otp.length < 6}
               >
-                {submitting ? <Loader size="sm" /> : "Verify"}
+                Verify
               </Button>
               <button
                 type="button"
