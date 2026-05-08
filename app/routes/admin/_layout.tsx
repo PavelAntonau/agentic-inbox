@@ -4,6 +4,7 @@
 import { Loader } from "~/ui";
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router";
+import Header from "~/components/Header";
 
 /**
  * Admin layout — auth + role gate redirect.
@@ -56,10 +57,15 @@ export default function AdminLayout() {
   }, [navigate, location.pathname, location.search, location.hash]);
 
   if (checking) {
+    // Header is rendered above the loader so the admin shell looks
+    // continuous from the moment the redirect-check resolves.
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader size="lg" />
-      </div>
+      <>
+        <Header />
+        <div className="flex items-center justify-center py-20">
+          <Loader size="lg" />
+        </div>
+      </>
     );
   }
 
@@ -70,12 +76,15 @@ export default function AdminLayout() {
   // audit-log) just clip and the user has no way to reach the rest of the
   // page (UAT round-3 batch-3 finding).
   return (
-    <div className="flex flex-col h-full bg-bg overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl px-4 py-8 md:px-6 md:py-12">
-          <Outlet />
+    <>
+      <Header />
+      <div className="flex flex-col h-full bg-bg overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-5xl px-4 py-8 md:px-6 md:py-12">
+            <Outlet />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

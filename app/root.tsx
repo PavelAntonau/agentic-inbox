@@ -26,7 +26,6 @@ import {
   Scripts,
   ScrollRestoration,
 } from "react-router";
-import Header from "~/components/Header";
 import { ConfirmDialogProvider } from "~/components/ConfirmDialog";
 import { ApiError } from "~/services/api";
 import "./index.css";
@@ -161,10 +160,17 @@ export default function App() {
         <TooltipProvider>
           <ConfirmDialogProvider>
             <Toasty>
-              {/* flex flex-col h-screen so child routes using flex-1 fill
-                  the space below the sticky Header correctly. */}
+              {/*
+               * flex flex-col h-screen so child layouts using flex-1 fill
+               * the viewport. The <Header /> is rendered INSIDE the
+               * authenticated layouts (_app.tsx, admin/_layout.tsx) so
+               * it never appears on public pages like /login, /consent,
+               * /not-found. Earlier, Header was here at the App level,
+               * which leaked the search bar + notification bell + a
+               * /api/notifications/unseen polling loop onto the
+               * pre-auth /login screen.
+               */}
               <div className="flex flex-col h-screen overflow-hidden">
-                <Header />
                 <Outlet />
               </div>
             </Toasty>
