@@ -95,6 +95,23 @@ function safeRedirect(raw: string | null): string {
 // Phase C3 / TASK-C3.22 — exported so the test file can exercise it directly.
 export { safeRedirect, SAFE_REDIRECT_PATTERN };
 
+// Client-side email-shape gate. Prevents the "Send code" button from
+// activating on a half-typed string and burning a Turnstile challenge or
+// a per-email-rate-limit slot on garbage. The backend remains the source
+// of truth (better-auth's email validator + the per-email rate-limiter
+// in workers/middleware/auth-rate-limit.ts both enforce on the wire).
+//
+// Pattern is the standard "local @ domain . tld" shape — accepts +tags,
+// dots, and Unicode in the local part; rejects whitespace, double-@, and
+// missing TLD. Conservative enough to catch typos, lenient enough not to
+// reject legitimate addresses (we don't enforce RFC 5321 here; the server
+// and the eventual SMTP exchange handle the long-tail).
+const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmailShape(s: string): boolean {
+  return EMAIL_SHAPE_RE.test(s.trim());
+}
+export { EMAIL_SHAPE_RE, isValidEmailShape };
+
 export default function LoginRoute() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -208,8 +225,13 @@ export default function LoginRoute() {
 
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault();
+    // Defensive: the Send button is disabled when the email shape is
+    // invalid, but Enter-submit can bypass the disabled attribute on some
+    // browsers, and a future refactor could forget the disabled gate.
+    // Validate here too — the backend will also reject, but this saves a
+    // wasted Turnstile token + a per-email-rate-limit slot.
     const trimmed = email.trim();
-    if (!trimmed || !trimmed.includes("@")) {
+    if (!isValidEmailShape(trimmed)) {
       toast.add({ title: "Enter a valid email address", variant: "error" });
       return;
     }
@@ -331,7 +353,10 @@ export default function LoginRoute() {
                 variant="primary"
                 size="base"
                 loading={submitting}
-                disabled={!email.trim() || (SITE_KEY ? !turnstileToken : false)}
+                disabled={
+                  !isValidEmailShape(email) ||
+                  (SITE_KEY ? !turnstileToken : false)
+                }
               >
                 {submitting ? <Loader size="sm" /> : "Send code"}
               </Button>
