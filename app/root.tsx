@@ -118,6 +118,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           sizes="180x180"
           href="/apple-touch-icon.png"
         />
+        <link rel="manifest" href="/manifest.webmanifest" />
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover"
