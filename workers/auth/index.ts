@@ -671,15 +671,59 @@ async function sendOtpEmail(
     "— ActionNowAI Mail",
   ].join("\n");
 
+  // Light-theme branded HTML matching the SPA visual language (cream
+  // background, dark text, brand-green accents, "Trusted Agent Inbox"
+  // subtitle). Inline CSS only — Gmail / Outlook strip <style> blocks.
+  // Table layout for cross-client compatibility. No prefers-color-scheme
+  // override: the spec is light-only across clients.
   const html = `<!doctype html>
-<html><body style="margin:0;padding:24px;background:#0b1220;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#e2e8f0;">
-  <div style="max-width:480px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:12px;padding:32px;">
-    <h1 style="margin:0 0 16px;font-size:20px;color:#f1f5f9;">Sign in to ActionNowAI Mail</h1>
-    <p style="margin:0 0 24px;color:#94a3b8;line-height:1.5;">Use the code below to sign in:</p>
-    <div style="font-size:32px;font-weight:700;letter-spacing:0.25em;color:#22d3ee;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:16px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${otp}</div>
-    <p style="margin:24px 0 0;color:#64748b;font-size:13px;line-height:1.5;">This code expires in 10 minutes. If you didn't request it, ignore this message — your account stays safe.</p>
-  </div>
-</body></html>`;
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Your ActionNow.AI sign-in code</title>
+</head>
+<body style="background:#ece8e2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:32px 16px;color:#141310;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr>
+      <td style="padding-bottom:24px;text-align:center;">
+        <span style="font-size:24px;font-weight:700;color:#141310;letter-spacing:-0.02em;">
+          ActionNow.AI
+        </span>
+        <p style="margin:4px 0 0;font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#6b665c;">
+          Trusted Agent Inbox
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="background:#f0ede8;border:1px solid #d4d0c8;border-radius:17px;padding:36px 32px;text-align:center;">
+        <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#141310;">
+          Your sign-in code
+        </h1>
+        <p style="color:#2c2a26;font-size:15px;margin:0 0 28px;line-height:1.55;">
+          Enter this code in the browser tab where you started signing in.
+        </p>
+        <div style="background:#ffffff;border:1px solid #d4d0c8;border-radius:14px;padding:22px 16px;margin:0 auto 28px;max-width:340px;">
+          <code style="display:block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:36px;font-weight:700;color:#141310;letter-spacing:0.32em;line-height:1;">${otp}</code>
+        </div>
+        <p style="color:#2c2a26;font-size:14px;margin:0 0 8px;line-height:1.55;">
+          This code expires in <strong>10 minutes</strong>.
+        </p>
+        <p style="color:#6b665c;font-size:13px;margin:0;line-height:1.55;">
+          If you didn't request this code, you can safely ignore this email — your account stays safe.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding-top:20px;text-align:center;">
+        <p style="color:#9e9e9e;font-size:11px;margin:0;line-height:1.5;">
+          © ${new Date().getFullYear()} ActionNow.AI · Powered by mail.actionnow.ai
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 
   await sendEmail(getEmailBinding(env), {
     to,
