@@ -16,7 +16,8 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useState } from "react";
+import { registerServiceWorker } from "~/lib/service-worker-register";
 import {
   isRouteErrorResponse,
   Links,
@@ -161,6 +162,13 @@ export default function App() {
   // Use useState to ensure each SSR request gets a fresh client while the
   // browser reuses the same singleton across navigations.
   const [queryClient] = useState(getQueryClient);
+
+  // Register the app-shell service worker once on first client render.
+  // No-op in dev (import.meta.env.DEV guard inside registerServiceWorker).
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <LinkProvider component={KumoLink}>
