@@ -125,6 +125,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
         <meta name="theme-color" content="#1c5cb6" />
+        {/* `mobile-web-app-capable` is the W3C-standard tag honoured by
+         * Chromium / WebKit on Android. `apple-mobile-web-app-capable` is
+         * the iOS Safari shim — required for "Add to Home Screen" to
+         * launch standalone on iOS and still recognised today. We carry
+         * both so the deprecation warning Chromium emits goes away
+         * without losing iOS standalone support. */}
+        <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <title>ActionNowAI Mail</title>
