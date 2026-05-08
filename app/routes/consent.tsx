@@ -320,7 +320,7 @@ export default function ConsentRoute() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg p-6">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md mx-4">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-semibold text-text-bright">
             Authorize access

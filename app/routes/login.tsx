@@ -350,7 +350,7 @@ export default function LoginRoute() {
 
       {/* ── Left: form column ─────────────────────────────────────────── */}
       <div className="flex-1 flex items-center justify-center px-6 py-10 md:px-12 md:py-12 relative z-10">
-        <div className={`w-full max-w-sm ${mobileGlassCard}`}>
+        <div className={`w-full max-w-md mx-4 ${mobileGlassCard}`}>
           <div className="flex flex-col items-center text-center mb-6 md:mb-8">
             <Logo height={72} to={null} className="mb-4" />
             <h1 className="text-2xl font-semibold text-text-bright">
