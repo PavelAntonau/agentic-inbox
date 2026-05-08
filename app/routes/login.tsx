@@ -22,10 +22,13 @@
 //     this var (see docs/phase-g-dashboard-config.md).
 
 import { Button, Input, useToastManager } from "~/ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
 import Logo from "~/components/Logo";
+import { MobileBottomSheet } from "~/components/MobileBottomSheet";
+import { OTPInput } from "~/ui/otp-input";
+import { ResendCountdown } from "~/components/ResendCountdown";
 import loginHeroUrl from "~/assets/branding/login-hero.webp?url";
 
 // ---------------------------------------------------------------------------
@@ -135,7 +138,19 @@ export default function LoginRoute() {
   const [email, setEmail] = useState(prefilledEmail);
   const [otp, setOtp] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const otpInputRef = useRef<HTMLInputElement>(null);
+
+  // Phase 2 — breakpoint gate for mobile shape.
+  // Read at mount; update on resize. md breakpoint = 768px (Tailwind default).
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 767px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    setIsMobile(mql.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   // Phase G-2 — Turnstile widget state.
   // `turnstileToken` holds the most recent solved-challenge token. It is
@@ -145,6 +160,67 @@ export default function LoginRoute() {
   const [turnstileToken, setTurnstileToken] = useState<string>("");
   const turnstileWidgetId = useRef<string>("");
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
+
+  // Phase 2 — OTPInput fires onComplete when all 6 digits are filled;
+  // auto-submit the verification form on that event.
+  const handleOtpComplete = useCallback(
+    (value: string) => {
+      setOtp(value);
+      // Trigger verification immediately: synthesise a form submit.
+      // We schedule via setTimeout so state has settled before the async call.
+      setTimeout(() => {
+        void (async () => {
+          setSubmitting(true);
+          try {
+            const { error } = await authClient.signIn.emailOtp({
+              email: email.trim(),
+              otp: value,
+            });
+            if (error) {
+              toast.add({
+                title: error.message ?? "Invalid or expired code",
+                variant: "error",
+              });
+              setOtp("");
+              return;
+            }
+            toast.add({ title: "Signed in." });
+            navigate(redirect, { replace: true });
+          } catch {
+            toast.add({
+              title: "Network error — try again.",
+              variant: "error",
+            });
+          } finally {
+            setSubmitting(false);
+          }
+        })();
+      }, 0);
+    },
+    [email, navigate, redirect, toast],
+  );
+
+  // Phase 2 — resend OTP handler.
+  const handleResendOtp = useCallback(async () => {
+    const trimmed = email.trim();
+    try {
+      const { error } = await authClient.emailOtp.sendVerificationOtp({
+        email: trimmed,
+        type: "sign-in",
+      });
+      if (error) {
+        toast.add({
+          title: error.message ?? "Failed to resend code",
+          variant: "error",
+        });
+      } else {
+        toast.add({ title: "Code resent — check your inbox." });
+        setOtp("");
+      }
+    } catch {
+      toast.add({ title: "Network error — try again.", variant: "error" });
+    }
+  }, [email, toast]);
 
   // Phase G-2 — load the Turnstile script once on mount and render the widget
   // into `turnstileContainerRef` as soon as the script is ready.
@@ -220,10 +296,7 @@ export default function LoginRoute() {
     };
   }, [navigate, redirect]);
 
-  // When we transition to the OTP step, focus the OTP input.
-  useEffect(() => {
-    if (step === "otp") otpInputRef.current?.focus();
-  }, [step]);
+  // OTPInput auto-focuses its first box on mount; no manual focus needed.
 
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault();
@@ -313,171 +386,176 @@ export default function LoginRoute() {
     }
   }
 
-  // Mobile-only: the form column is wrapped in a glass-morphism card
-  // (semi-transparent surface + backdrop-blur) that floats centered over
-  // a full-screen hero image background. Desktop (md+) keeps the
-  // two-column split where the image lives in its own right column —
-  // these classes are no-ops on md+ thanks to `md:bg-transparent` etc.
-  // bg-card/55 reads correctly in BOTH light and dark themes (the token
-  // is theme-aware, so the glass panel inverts with the rest of the UI).
+  // ---------------------------------------------------------------------------
+  // Shared auth form content — used inside both the mobile bottom-sheet and
+  // the desktop card.  Extracted to avoid duplication.
+  // ---------------------------------------------------------------------------
+
+  const emailForm = (
+    <>
+      <form
+        onSubmit={handleSendOtp}
+        className="flex flex-col gap-3"
+        aria-label="Sign in with email"
+      >
+        <Input
+          aria-label="Email address"
+          type="email"
+          size="lg"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoFocus
+          autoComplete="email"
+          inputMode="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={submitting}
+        />
+        {/* Send button — full-width primary. Disabled until email validates
+            AND Turnstile token has resolved (when SITE_KEY is configured). */}
+        <Button
+          type="submit"
+          variant="primary"
+          size="xl"
+          loading={submitting}
+          className="w-full justify-center"
+          disabled={
+            !isValidEmailShape(email) || (SITE_KEY ? !turnstileToken : false)
+          }
+        >
+          Send code
+        </Button>
+      </form>
+
+      {/* Phase G-2 — Turnstile challenge widget */}
+      {SITE_KEY && (
+        <div className="mt-5 rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4 shadow-sm">
+          <div
+            ref={turnstileContainerRef}
+            className="flex justify-center"
+            aria-label="Security challenge"
+          />
+        </div>
+      )}
+
+      <p className="text-xs text-text-muted text-center mt-6">
+        We&apos;ll email you a 6-digit code that expires in 10 minutes.
+      </p>
+    </>
+  );
+
+  const otpForm = (
+    <form
+      onSubmit={handleVerifyOtp}
+      className="flex flex-col gap-3 items-center"
+      aria-label="Verify code"
+    >
+      <p className="text-xs text-text-muted text-center w-full">
+        Code sent to <span className="text-text-bright">{email}</span>
+      </p>
+      {/* Phase 2 — 6-box OTPInput replaces the single text Input.
+          onComplete auto-submits when the 6th digit is entered. */}
+      <OTPInput
+        value={otp}
+        onChange={setOtp}
+        onComplete={handleOtpComplete}
+        disabled={submitting}
+      />
+      <Button
+        type="submit"
+        variant="primary"
+        size="xl"
+        loading={submitting}
+        className="w-full justify-center"
+        disabled={otp.replace(/\D/g, "").length < 6}
+      >
+        Verify
+      </Button>
+      {/* Phase 2 — ResendCountdown beneath the Verify button */}
+      <ResendCountdown
+        onResend={handleResendOtp}
+        disabled={submitting}
+        className="w-full flex justify-center"
+      />
+      <button
+        type="button"
+        className="text-xs text-text-muted hover:text-text transition-colors mt-2"
+        onClick={() => {
+          setStep("email");
+          setOtp("");
+        }}
+      >
+        Use a different email
+      </button>
+    </form>
+  );
+
+  // Header block reused in both shapes.
+  const authHeader = (
+    <div className="flex flex-col items-center text-center mb-6">
+      <Logo height={72} to={null} className="mb-4" />
+      <h1 className="text-2xl font-semibold text-text-bright">
+        {step === "email" ? "Welcome back" : "Check your inbox"}
+      </h1>
+      <p className="text-sm text-text-muted mt-1">
+        {step === "email"
+          ? "Sign in with your email to continue."
+          : "Enter the 6-digit code we just sent."}
+      </p>
+    </div>
+  );
+
+  // ── Mobile shape (<md): bottom-sheet ──────────────────────────────────────
+  if (isMobile) {
+    return (
+      <div className="min-h-screen bg-bg relative overflow-hidden">
+        {/* Full-bleed hero behind the bottom-sheet */}
+        <div
+          className="absolute inset-0 z-0 pointer-events-none"
+          aria-hidden="true"
+        >
+          <img
+            src={loginHeroUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-black/15" />
+        </div>
+
+        {/* MobileBottomSheet — always open on this route; no dismiss */}
+        <MobileBottomSheet
+          open={true}
+          onOpenChange={() => {
+            /* auth sheet stays open */
+          }}
+          forceMobile={true}
+        >
+          <MobileBottomSheet.Header>{authHeader}</MobileBottomSheet.Header>
+          <MobileBottomSheet.Body>
+            {step === "email" ? emailForm : otpForm}
+          </MobileBottomSheet.Body>
+        </MobileBottomSheet>
+      </div>
+    );
+  }
+
+  // ── Desktop shape (≥md): existing two-column glass-card layout ────────────
   const mobileGlassCard =
-    "rounded-2xl bg-card/55 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-2xl p-6 " +
-    "md:bg-transparent md:backdrop-blur-0 md:border-0 md:shadow-none md:p-0 md:rounded-none";
+    "rounded-2xl bg-card/55 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-2xl p-6";
 
   return (
-    // Two-column split: form on the left, brand hero image on the right.
-    // Mobile (< md): the right column collapses; in its place a
-    // full-bleed hero image fills the viewport and the form sits on a
-    // glass card on top. The page sits on the site's existing `bg-bg`
-    // + the fixed radial-gradient pseudo-elements painted by
-    // app/index.css for the desktop case.
     <div className="min-h-screen flex items-stretch bg-bg relative overflow-hidden">
-      {/* ── Mobile-only: full-bleed hero behind the form ──────────────── */}
-      <div
-        className="md:hidden absolute inset-0 z-0 pointer-events-none"
-        aria-hidden="true"
-      >
-        <img
-          src={loginHeroUrl}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        {/* Light dim layer to keep the foreground form readable on bright
-            sections of the image. Theme-neutral; tuned by visual check
-            (Playwright headed at 390 × 844). */}
-        <div className="absolute inset-0 bg-black/15" />
-      </div>
-
       {/* ── Left: form column ─────────────────────────────────────────── */}
       <div className="flex-1 flex items-center justify-center px-6 py-10 md:px-12 md:py-12 relative z-10">
         <div className={`w-full max-w-md mx-4 ${mobileGlassCard}`}>
-          <div className="flex flex-col items-center text-center mb-6 md:mb-8">
-            <Logo height={72} to={null} className="mb-4" />
-            <h1 className="text-2xl font-semibold text-text-bright">
-              {step === "email" ? "Welcome back" : "Check your inbox"}
-            </h1>
-            <p className="text-sm text-text-muted mt-1">
-              {step === "email"
-                ? "Sign in with your email to continue."
-                : "Enter the 6-digit code we just sent."}
-            </p>
-          </div>
-
-          {step === "email" ? (
-            <>
-              <form
-                onSubmit={handleSendOtp}
-                className="flex flex-col gap-3"
-                aria-label="Sign in with email"
-              >
-                <Input
-                  aria-label="Email address"
-                  type="email"
-                  size="lg"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoFocus
-                  autoComplete="email"
-                  inputMode="email"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  disabled={submitting}
-                />
-                {/* Send button sits directly under the email input,
-                    full-width, primary variant. Shimmer-on-hover comes
-                    from `bg-kumo-brand` in app/index.css automatically.
-                    Stays disabled until the email shape validates AND
-                    the Turnstile token has resolved. */}
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="xl"
-                  loading={submitting}
-                  className="w-full justify-center"
-                  disabled={
-                    !isValidEmailShape(email) ||
-                    (SITE_KEY ? !turnstileToken : false)
-                  }
-                >
-                  Send code
-                </Button>
-              </form>
-
-              {/* Phase G-2 — Turnstile widget. Wrapped in a rounded
-                  surface so the CF challenge sits inside the same visual
-                  language as the rest of the form. The widget itself
-                  renders inside `turnstileContainerRef`; we only style
-                  the surrounding card here. On mobile we skip the
-                  inner glass (the outer card already provides it) and
-                  drop the bg fill so it reads as part of one surface. */}
-              {SITE_KEY && (
-                <div className="mt-5 rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4 shadow-sm md:bg-card/60 md:backdrop-blur-sm">
-                  <div
-                    ref={turnstileContainerRef}
-                    className="flex justify-center"
-                    aria-label="Security challenge"
-                  />
-                </div>
-              )}
-
-              <p className="text-xs text-text-muted text-center mt-6">
-                We'll email you a 6-digit code that expires in 10 minutes.
-              </p>
-            </>
-          ) : (
-            <form
-              onSubmit={handleVerifyOtp}
-              className="flex flex-col gap-3"
-              aria-label="Verify code"
-            >
-              <p className="text-xs text-text-muted text-center">
-                Code sent to <span className="text-text-bright">{email}</span>
-              </p>
-              <Input
-                ref={otpInputRef}
-                aria-label="Verification code"
-                type="text"
-                size="lg"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                placeholder="123456"
-                value={otp}
-                onChange={(e) =>
-                  setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                autoComplete="one-time-code"
-                maxLength={6}
-                disabled={submitting}
-                className="text-center text-lg tracking-[0.5em] font-mono"
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                size="xl"
-                loading={submitting}
-                className="w-full justify-center"
-                disabled={otp.length < 6}
-              >
-                Verify
-              </Button>
-              <button
-                type="button"
-                className="text-xs text-text-muted hover:text-text transition-colors mt-2"
-                onClick={() => {
-                  setStep("email");
-                  setOtp("");
-                }}
-              >
-                Use a different email
-              </button>
-            </form>
-          )}
+          <div className="mb-6 md:mb-8">{authHeader}</div>
+          {step === "email" ? emailForm : otpForm}
         </div>
       </div>
 
-      {/* ── Right: hero image (md+ only) ──────────────────────────────── */}
+      {/* ── Right: hero image ─────────────────────────────────────────── */}
       <div
         className="hidden md:block flex-1 relative overflow-hidden"
         aria-hidden="true"
@@ -486,13 +564,8 @@ export default function LoginRoute() {
           src={loginHeroUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
-          // The intrinsic 1122 × 1402 source carries the file (~118 KB
-          // WebP). object-cover crops to fit; on a half-screen panel
-          // the framing keeps the central robot composition centered
-          // at all common viewport ratios.
         />
-        {/* Subtle inner shadow on the seam so the image edge never reads
-            as a hard cut on the form-side gradient. */}
+        {/* Subtle inner shadow on the seam */}
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
