@@ -373,11 +373,16 @@ export default function LoginRoute() {
                 <Input
                   aria-label="Email address"
                   type="email"
+                  size="lg"
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoFocus
                   autoComplete="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   disabled={submitting}
                 />
                 {/* Send button sits directly under the email input,
@@ -388,7 +393,7 @@ export default function LoginRoute() {
                 <Button
                   type="submit"
                   variant="primary"
-                  size="base"
+                  size="xl"
                   loading={submitting}
                   className="w-full justify-center"
                   disabled={
@@ -434,6 +439,7 @@ export default function LoginRoute() {
                 ref={otpInputRef}
                 aria-label="Verification code"
                 type="text"
+                size="lg"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 placeholder="123456"
@@ -449,7 +455,7 @@ export default function LoginRoute() {
               <Button
                 type="submit"
                 variant="primary"
-                size="base"
+                size="xl"
                 loading={submitting}
                 className="w-full justify-center"
                 disabled={otp.length < 6}
