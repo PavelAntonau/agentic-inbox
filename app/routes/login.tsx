@@ -29,7 +29,17 @@ import Logo from "~/components/Logo";
 import { MobileBottomSheet } from "~/components/MobileBottomSheet";
 import { OTPInput } from "~/ui/otp-input";
 import { ResendCountdown } from "~/components/ResendCountdown";
+import { track } from "~/services/telemetry";
 import loginHeroUrl from "~/assets/branding/login-hero.webp?url";
+
+/**
+ * T3.3 — how long to wait after the Turnstile script appends to <head>
+ * before we declare a mount timeout. Real-world bootstrap on the slowest
+ * paths (Pixel 7 over LTE) lands in 2–4 s; 10 s is generous enough that
+ * we don't false-positive on slow networks but short enough that a stuck
+ * mount surfaces as a telemetry signal before the user gives up.
+ */
+const TURNSTILE_MOUNT_TIMEOUT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Turnstile globals — declared so TypeScript does not error on window.turnstile.
@@ -200,52 +210,127 @@ export default function LoginRoute() {
     [email, navigate, redirect, toast],
   );
 
-  // Phase 2 — resend OTP handler.
+  // Phase 2 + T3.3 — resend OTP handler.
+  //
+  // Production OTP-send is gated by `requireTurnstile()` (workers/middleware/
+  // turnstile.ts). The first send carries `X-Turnstile-Token` from the widget
+  // callback; after that send the widget is `reset()` so its token is
+  // single-use. Resend MUST attach a fresh token or the backend correctly
+  // returns 403 TURNSTILE_FAILED — that 403 is the reason the Phase 2 retro
+  // flagged "resend doesn't re-fire Turnstile" as a 4th telemetry concern.
+  //
+  // Behaviour:
+  //   • SITE_KEY configured + token absent → `resend.no-token` telemetry,
+  //     refuse with a clear toast prompting the user to re-solve the
+  //     challenge. The widget container is still mounted (the email step is
+  //     still in the DOM behind the OTP step on mobile); the user scrolls
+  //     up, solves, retries.
+  //   • SITE_KEY configured + token present → forward via X-Turnstile-Token,
+  //     reset the widget after the send so the next resend also requires a
+  //     fresh challenge.
+  //   • SITE_KEY absent (dev / CI) → unchanged from before; no token plumbed.
   const handleResendOtp = useCallback(async () => {
     const trimmed = email.trim();
+    const token = turnstileToken || window.turnstile?.getResponse() || "";
+    if (SITE_KEY && !token) {
+      track("turnstile", "resend.no-token");
+      toast.add({
+        title: "Solve the security challenge to resend.",
+        variant: "error",
+      });
+      return;
+    }
     try {
       const { error } = await authClient.emailOtp.sendVerificationOtp({
         email: trimmed,
         type: "sign-in",
+        ...(token
+          ? { fetchOptions: { headers: { "X-Turnstile-Token": token } } }
+          : {}),
       });
+      // Single-use token — reset the widget after every resend attempt so a
+      // replay is not possible on the next click.
+      if (window.turnstile && turnstileWidgetId.current) {
+        window.turnstile.reset(turnstileWidgetId.current);
+      }
+      setTurnstileToken("");
       if (error) {
+        track("turnstile", "resend.error", {
+          message: error.message ?? null,
+        });
         toast.add({
           title: error.message ?? "Failed to resend code",
           variant: "error",
         });
       } else {
+        track("turnstile", "resend.success");
         toast.add({ title: "Code resent — check your inbox." });
         setOtp("");
       }
     } catch {
+      track("turnstile", "resend.network-error");
       toast.add({ title: "Network error — try again.", variant: "error" });
     }
-  }, [email, toast]);
+  }, [email, turnstileToken, toast]);
 
   // Phase G-2 — load the Turnstile script once on mount and render the widget
   // into `turnstileContainerRef` as soon as the script is ready.
+  //
+  // T3.3 — telemetry covers four lifecycle states:
+  //   • `mount.script_loaded`    — onload callback fired (script bootstrapped).
+  //   • `mount.widget_rendered`  — render() returned a widget id (visible).
+  //   • `mount.timeout`          — neither happened within TURNSTILE_MOUNT_TIMEOUT_MS.
+  //   • `error` / `expired` / `success` — solver-side outcomes.
+  // The 4th audit concern (resend without token) is instrumented in
+  // handleResendOtp below.
   useEffect(() => {
     if (!SITE_KEY) return; // site key not configured — skip (dev / CI)
 
     const SCRIPT_ID = "cf-turnstile-script";
     const CALLBACK_NAME = "__turnstileOnLoad";
+    const mountStart = Date.now();
+    let widgetRendered = false;
+
+    function renderWidget() {
+      if (!turnstileContainerRef.current || !window.turnstile) return;
+      turnstileWidgetId.current = window.turnstile.render(
+        turnstileContainerRef.current,
+        {
+          sitekey: SITE_KEY,
+          theme: "auto",
+          callback: (token: string) => {
+            setTurnstileToken(token);
+            track("turnstile", "success", {
+              elapsed_ms: Date.now() - mountStart,
+            });
+          },
+          "expired-callback": () => {
+            setTurnstileToken("");
+            track("turnstile", "expired");
+          },
+          "error-callback": () => {
+            setTurnstileToken("");
+            track("turnstile", "error");
+          },
+        },
+      );
+      widgetRendered = !!turnstileWidgetId.current;
+      if (widgetRendered) {
+        track("turnstile", "mount.widget_rendered", {
+          elapsed_ms: Date.now() - mountStart,
+        });
+      }
+    }
 
     // Idempotent: if the script is already present (HMR re-mount), skip.
     if (!document.getElementById(SCRIPT_ID)) {
       // Register a global onload callback that Turnstile will invoke once the
       // script has finished bootstrapping its runtime.
       (window as unknown as Record<string, unknown>)[CALLBACK_NAME] = () => {
-        if (!turnstileContainerRef.current || !window.turnstile) return;
-        turnstileWidgetId.current = window.turnstile.render(
-          turnstileContainerRef.current,
-          {
-            sitekey: SITE_KEY,
-            theme: "auto",
-            callback: (token: string) => setTurnstileToken(token),
-            "expired-callback": () => setTurnstileToken(""),
-            "error-callback": () => setTurnstileToken(""),
-          },
-        );
+        track("turnstile", "mount.script_loaded", {
+          elapsed_ms: Date.now() - mountStart,
+        });
+        renderWidget();
       };
 
       const script = document.createElement("script");
@@ -256,19 +341,24 @@ export default function LoginRoute() {
       document.head.appendChild(script);
     } else if (window.turnstile && turnstileContainerRef.current) {
       // Script already loaded (HMR case) — render directly.
-      turnstileWidgetId.current = window.turnstile.render(
-        turnstileContainerRef.current,
-        {
-          sitekey: SITE_KEY,
-          theme: "auto",
-          callback: (token: string) => setTurnstileToken(token),
-          "expired-callback": () => setTurnstileToken(""),
-          "error-callback": () => setTurnstileToken(""),
-        },
-      );
+      renderWidget();
     }
 
+    // Mount-timeout watchdog. Fires once if neither the onload callback nor
+    // the direct render() call produces a widget id. Surfaces a telemetry
+    // event the next auditor can grep for (and a future iteration can use
+    // to render a "Continue without challenge" fallback CTA gated by
+    // server policy — audit recommendation E.14).
+    const timeoutHandle = window.setTimeout(() => {
+      if (!widgetRendered) {
+        track("turnstile", "mount.timeout", {
+          elapsed_ms: TURNSTILE_MOUNT_TIMEOUT_MS,
+        });
+      }
+    }, TURNSTILE_MOUNT_TIMEOUT_MS);
+
     return () => {
+      window.clearTimeout(timeoutHandle);
       // Clean up the widget on unmount to avoid duplicate renders.
       if (window.turnstile && turnstileWidgetId.current) {
         window.turnstile.remove(turnstileWidgetId.current);
