@@ -390,3 +390,122 @@ app.all("/agents/email-agent/:mailboxId", agentAuthzGate);
 - **When a feature is "process-wide" and you can't see why, that's the bug.** Per-session is almost always achievable; "Playwright doesn't expose a per-session toggle" was the surface excuse — the real toggle is the launch arg, and that IS per-session because each session launches its own Chrome process. The original assumption was wrong; flagging it surfaced the structural fix.
 
 This is a reprimand-class cross-agent reliability fix, not just a project-local tweak. The browser-mcp change benefits every agent on the machine, not just the agentic-inbox runner.
+
+---
+
+## L-2026-05-08 — Mobile-native-redesign Phase 3 lessons (T3.5)
+
+The Phase 3 wrap-up bundles four short lessons surfaced during the
+mobile-native-redesign. Each is short on purpose; the full
+investigation lives in the action plan and the audit doc.
+
+### L-2026-05-08a — Kumo's `@theme inline` block silently overrides Tailwind `text-base`
+
+**Context.** Audit flagged email input fontSize measuring 14px on
+mobile when the variant declared `text-base` (Tailwind's 16px). iOS
+Safari zooms-on-focus when an input's effective fontSize is `<16px`.
+
+**Root cause.** `app/index.css` imports `@cloudflare/kumo/styles/tailwind`,
+which declares `--text-base: 14px` inside an `@theme inline` block.
+Tailwind v4's `text-base` utility resolves to `var(--text-base)` —
+which now reads 14px. Every `text-base` callsite inherited the
+override silently.
+
+**Fix.** New `lg` and `xl` Input/Button tiers use the Tailwind v4
+arbitrary-value escape `text-[16px]`, which compiles to a literal
+`font-size: 16px` and bypasses the variable. `base` and `md` keep
+`text-base` for desktop back-compat where 14px is fine.
+
+**Prevention.** When introducing a vendor stylesheet, grep for
+`@theme` and inventory every CSS variable it overrides — those
+overrides aren't visible at the call site. Any variable that
+something else (Tailwind utilities, raw CSS) reads transitively
+becomes part of the project's contract.
+
+### L-2026-05-08b — Fixed-width auth cards (`max-w-sm` / `w-[384px]`) overflow on iPhone SE
+
+**Context.** Login card at `max-w-sm` (384px) overflowed the iPhone
+SE viewport (375px). Resulting horizontal scrollbar visible on every
+mobile capture before the fix.
+
+**Root cause.** `max-w-sm` in Tailwind = 24rem = 384px, which is
+≥ several real device viewport widths (SE: 375px, Galaxy S21: 360px).
+
+**Fix.** `max-w-sm` → `max-w-md mx-4` in `app/routes/{login,consent}.tsx`.
+The `mx-4` provides a 16px gutter on each side; `max-w-md` (28rem =
+448px) is the desktop ceiling. Width naturally clamps to viewport
+minus 32px on small screens.
+
+**Prevention.** No fixed-width assumption above 320px (the iPhone 5
+era floor) on auth surfaces. Default to `w-full + max-w-* + mx-N`.
+The visual regression script (`scripts/mobile-audit-phase3.sh`)
+asserts `scrollWidth <= innerWidth + 1` at four viewports — repeats
+this check on every Phase 3 cycle.
+
+### L-2026-05-08c — Missing PWA chrome makes a web app feel like a website
+
+**Context.** Mobile audit recommended adding `manifest.webmanifest`,
+`theme-color`, `apple-mobile-web-app-*` metas, and a service worker.
+Pre-redesign, none existed — Add-to-Home-Screen produced a "browser
+chrome" launch, not a standalone app feel.
+
+**Root cause.** The default React Router 7 + Cloudflare Workers
+template ships zero PWA chrome. Easy to forget when the app boots
+fine in a browser tab.
+
+**Fix.** Phase 2 added all of: `/manifest.webmanifest` (kumo theme
+colors, 192/512/maskable icons), `<meta name="theme-color">` for
+Android status bar tint, both `mobile-web-app-capable` flavours
+(see D-MOBILE-1), `<meta name="apple-mobile-web-app-status-bar-style">`,
+`public/sw.js` (hand-rolled app-shell SW with offline fallback,
+production-only `register('/sw.js')`), Lighthouse mobile-PWA gate
+≥90 on PR and main branches.
+
+**Prevention.** New web projects start with a "PWA chrome ships in
+v0.1" checklist. The Lighthouse CI gate is the durable enforcement.
+
+### L-2026-05-08d — Production CSP audits MUST run against the built path, not Vite dev
+
+**Context.** Mobile audit reported "14 inline-script CSP violations"
+on `/login`. T3.2 investigation against the production-built path
+(`npm run build && wrangler dev`) found zero violations.
+
+**Root cause.** The audit was run via `react-router dev` (Vite + HMR).
+Vite injects an HMR-bootstrap inline `<script>` block on every
+Vite-served HTML response; that block does NOT flow through the
+worker's HTMLRewriter (Vite owns the dev response pipeline). The
+worker's CSP header still applies, so the browser blocks the inline
+HMR script and emits a violation per occurrence — pure dev-mode
+artifact.
+
+**Fix.** Documented as `D-CSP-2` in DECISIONS.md. T3.2's empirical
+verification now lives in `workers/csp.test.ts` (existing) plus the
+direct probe captured in `T3.2-prod-build-home-clean-console.png`
+under `.scratch/csp-probe/`.
+
+**Prevention.** Any CSP / Trusted Types / script-loading audit MUST
+run against `npm run build && wrangler dev --local` (or production).
+Vite dev's HMR runtime is benign noise that masks (or fabricates)
+real findings. CLAUDE.md "Audit conventions" section codifies this
+for future auditors.
+
+### L-2026-05-08e — workers/* type-drift accumulated silently, broke the Phase 3 gate
+
+**Context.** T3.7 cleared 4 pre-existing typecheck regressions in
+`workers/*` that had accrued during the multi-month MTV2 work without
+a typecheck gate in CI. The build was green because `react-router
+build` doesn't typecheck the workers/ tree by default.
+
+**Root cause.** Two-bundle project (`app/` for React, `workers/` for
+the worker) with separate tsconfig boundaries. Vite + RR build only
+exercises the React bundle; the workers/ bundle's types drift until
+someone runs `tsc -b --noEmit` explicitly.
+
+**Fix.** T3.7 ran `npx tsc -b --noEmit`, cleared the 4 errors,
+committed as `6ec1c76`. Should add a CI gate (`tsc --noEmit` on every
+PR) so this doesn't recur.
+
+**Prevention.** Standing rule: `tsc -b --noEmit` is part of every
+phase-end acceptance gate, not just `npm run build`. Open question
+for a follow-up cycle: add a GitHub Actions step that runs
+`tsc -b --noEmit` on PR + main and fails the build on regressions.

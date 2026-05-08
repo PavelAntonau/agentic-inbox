@@ -132,3 +132,113 @@ launch.
 **decision.** Carry both tags. Standard tag silences the Chromium
 deprecation warning; iOS Safari shim retains standalone support. Two
 lines in `app/root.tsx`; zero functional risk.
+
+---
+
+## D-MNR-1 — Mobile-native-redesign phase decomposition (3 phases)
+
+**status:** active (mobile-native-redesign, graph node `5H__5x3lTSb-s-plgWgn0`)
+
+**context.** The audit produced ~25 mobile-correctness recommendations
+spanning size tiers, OTP shape, PWA chrome, hydration / CSP, and copy.
+A monolithic implementation phase would have stranded reviewable
+checkpoints; a 5+ phase decomposition would have over-fragmented.
+
+**decision.** Three phases:
+1. **Mobile-correctness foundation** — additive size tiers, iOS input
+   attrs, fixed-width card removal, viewport metas (low-risk; can ship
+   independently).
+2. **Mobile-native shape + PWA chrome** — new components
+   (`MobileBottomSheet`, `OTPInput`, `ResendCountdown`), service
+   worker, manifest, Lighthouse gate.
+3. **Integration + regression + cutover** — CSP audit (T3.2),
+   Turnstile telemetry (T3.3), visual regression (T3.4), docs
+   (T3.5), final push (T3.6).
+
+**rationale.** Aligns with the `feature` recipe (research → design →
+implement → test → integrate). Each phase ships independently
+reviewable and individually pushable.
+
+---
+
+## D-MNR-2 — Mobile-only auth shape: bottom-sheet snapping at `<md`
+
+**status:** active (Phase 2, graph node `xAkVscRSfoS5uBnBoISww`)
+
+**context.** Audit measured the centered-card desktop layout as
+"insufficient" on mobile — 384px fixed width overflowed iPhone SE,
+"Use a different email" 18px text link failed the 44px tap-target
+floor, primary CTA sat above the thumb zone.
+
+**decision.** On viewports `<md` (`<768px`), render the auth flow as
+a `MobileBottomSheet` snapping to the lower 75% of the viewport with
+the primary CTA in the thumb zone. Brand mark + tagline live in the
+top section. At `≥md` the existing centered card stays exactly as it
+was (no desktop regression).
+
+**rejected:** full-bleed (would require additional design exploration)
+and centered-card-tightened (insufficient per audit).
+
+---
+
+## D-MNR-3 — OTP entry: 6 individual digit boxes with paste-spread + auto-advance
+
+**status:** active (Phase 2, graph node `5ta2zWCX2YvWF2mBKyQRm`)
+
+**context.** Native iOS / Material 3 OTP UI is six discrete digit
+boxes, not a single input field. The previous single-input
+implementation had the right HTML attrs (`autoComplete="one-time-code"`
++ `inputMode="numeric"`) but the wrong shape.
+
+**decision.** Render six `<input>` boxes via the new `OTPInput`
+component. Paste of a 6-digit string spreads across boxes; typed
+digits auto-advance focus; backspace on an empty box pulls focus
+left; the `autoComplete="one-time-code"` attribute lives on a
+hidden master input so iOS Safari's keyboard suggestions still
+populate the entire string at once.
+
+---
+
+## D-MNR-4 — Native-feel ambition: PWA-first, defer native shells
+
+**status:** active (Phase 2, graph node `uJN-2glSp5XGE9C5bzMzY`)
+
+**context.** Audit recommended both PWA chrome (manifest + theme-color
++ service worker) and Capacitor / PWA-Builder native shells. PWA
+delivers most of the "feels installed" UX with one-tenth the surface
+area.
+
+**decision.** Ship PWA-first: `/manifest.webmanifest`,
+`<meta name="theme-color">`, both `mobile-web-app-capable` tags
+(see D-MOBILE-1), `public/sw.js` registered with origin-root scope.
+Native-shell wrappers stay deferred — revisit only if PWA usage
+proves real and the ceiling is genuinely the wrapper, not the web
+runtime.
+
+**rejected:** Capacitor / PWA-Builder shells (premature; no signal
+that the PWA layer is the bottleneck).
+
+---
+
+## D-MNR-5 — Tap-target tier introduction: additive `lg` (44px) + `xl` (56px)
+
+**status:** active (Phase 1, graph node `4y3zY16kyq9Bkch88IO5l`)
+
+**context.** Existing Input/Button size variants topped out at `base`
+(h-10/40px) — below the iOS HIG and Material guideline floor (44px),
+let alone primary-CTA (56px). The audit flagged "Use a different
+email" at 18px tall as the most egregious case.
+
+**decision.** Add two new tiers to `app/ui/{input,button}.tsx`:
+- `lg` — h-11 (44px), `text-[16px]` (bypasses kumo `--text-base` 14px
+  override that was triggering iOS Safari zoom-on-focus; see
+  L-2026-05-08 in LESSONS_LEARNED.md).
+- `xl` — h-14 (56px), `text-[16px]`.
+
+Existing `base` callsites keep working; the auth surface migrates
+deliberately to `lg` (email input) + `xl` (primary CTA). Additive,
+zero unrelated regressions.
+
+**rejected:** replacing `base` with h-11 (forces unrelated callsite
+migrations); single-tier override at CSS level (loses per-component
+intent + makes the tier table unreadable).

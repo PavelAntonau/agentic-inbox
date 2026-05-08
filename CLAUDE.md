@@ -396,15 +396,102 @@ npm run db:migrate:local
 
 ---
 
+## Mobile-first patterns (mobile-native-redesign, Phase 1–3, 2026-05-08)
+
+The auth surface and shared primitives now follow a mobile-first contract.
+Decisions tracked under D-MNR-1..5 + D-MOBILE-1 + D-CSP-1..2 in
+[`DECISIONS.md`](./DECISIONS.md). Lessons under L-2026-05-08a..e in
+[`LESSONS_LEARNED.md`](./LESSONS_LEARNED.md).
+
+### Size-tier table (Input + Button)
+
+`app/ui/{input,button}.tsx` expose five size tiers; pick by tap-target
+floor and visual hierarchy:
+
+| Tier | Height | Font-size | Use for |
+|---|---|---|---|
+| `sm` | h-8 (32px) | inherits `text-base` (kumo-overridden to 14px) | Compact internal UI; admin tables. |
+| `base` | h-9 (36px) | inherits `text-base` (14px) | Default; back-compat with pre-redesign callsites. |
+| `md` | h-10 (40px) | inherits `text-base` (14px) | Mid-density desktop forms (settings, dialogs). |
+| `lg` | h-11 (44px) | `text-[16px]` literal | Mobile inputs / buttons — meets iOS HIG + Material 3 tap-target floor; the literal `text-[16px]` bypasses iOS Safari zoom-on-focus. |
+| `xl` | h-14 (56px) | `text-[16px]` literal | Primary CTA; one per surface. |
+
+The auth surface (`app/routes/{login,consent}.tsx`) uses `lg` for the
+email input and `xl` for the primary CTA. Other mobile-facing surfaces
+should follow the same pattern. Don't reach below `lg` for any
+input or button visible on mobile without a documented reason.
+
+### `MobileBottomSheet` (`app/components/MobileBottomSheet.tsx`)
+
+Mobile-only bottom-sheet shell. At viewports `<md` (`<768px`) it
+snaps to the lower 75% of the viewport and anchors content in the
+thumb-zone. At `≥md` it renders nothing — the desktop surface uses
+its own layout (e.g. centered card). Used by the email + OTP steps
+on `/login`.
+
+```tsx
+<MobileBottomSheet>{authForm}</MobileBottomSheet>
+{/* desktop card sits behind, visible only at md+ */}
+<div className="hidden md:block">{authForm}</div>
+```
+
+Test scaffolding: `MobileBottomSheet.test.tsx` covers the snap point
+and the `<md` / `≥md` visibility split.
+
+### `OTPInput` (`app/ui/otp-input.tsx`)
+
+Six discrete digit boxes implementing the native OTP pattern. Paste
+of a 6-digit string spreads across boxes; typed digits auto-advance;
+backspace on an empty box pulls focus left; the
+`autoComplete="one-time-code"` attribute lives on a hidden master
+input so iOS Safari's keyboard suggestions populate the entire
+string. Use this everywhere a 6-digit code is collected.
+
+```tsx
+<OTPInput value={otp} onChange={setOtp} onComplete={handleVerifyOtp} />
+```
+
+### `ResendCountdown` (`app/components/ResendCountdown.tsx`)
+
+30-second countdown affordance for OTP resend. Disables the button
+during countdown; shows the seconds remaining; calls `onResend()`
+on click after the countdown expires. Required surface on every
+OTP step. Phase 2 + T3.3 wires this into `handleResendOtp` in
+`login.tsx`, which now also re-attaches the Turnstile token to
+the resend fetch.
+
+### Audit conventions
+
+- **CSP / Trusted Types / script-loading audits** MUST run against
+  the production-built path (`npm run build && wrangler dev --local`
+  via `npm run mock:up`), NEVER against the Vite dev server. Vite's
+  HMR runtime injects unnonced inline scripts that look like
+  violations but aren't part of the production code path. See
+  `D-CSP-2` + `L-2026-05-08d`.
+- **Visual regression sweeps** run via
+  `scripts/mobile-audit-phase3.sh` — 4 viewports
+  (iPhone 14 Pro 393×852, iPhone SE 375×667, Pixel 7 412×915,
+  iPad mini 768×1024) × 2 routes (`/login`, `/`). Outputs to
+  `.scratch/mobile-audit/post-phase-3/` (gitignored). Pre-redesign
+  baseline lives at `.scratch/mobile-audit/post-phase-1/` for
+  comparison.
+- **Lighthouse mobile-PWA gate** (`>=90`) runs on every PR + main
+  push via `.github/workflows/lighthouse-pwa.yml`.
+
+---
+
 ## Tests
 
 - **Unit:** `npm test` (vitest) — currently **336 tests** across 31 files
-  (workers + app/ui + app/components + app/routes)
+  (workers + app/ui + app/components + app/routes). After T3.3, **+4**
+  for `app/services/telemetry.test.ts`.
 - **Visual:** `npm run test:visual` (Playwright) — locked baselines in
   `test/visual/__screenshots__/`. Re-locked after Phase 4 (intermediate) and
-  Phase 7 (final, launch-time source-of-truth).
+  Phase 7 (final, launch-time source-of-truth). Phase-3 mobile sweep is
+  separate (`scripts/mobile-audit-phase3.sh`, see above).
 - **Typecheck:** `npm run typecheck` runs `wrangler types` + `react-router typegen`
-  + `tsc -b`.
+  + `tsc -b`. **Run this every phase boundary** — `react-router build` does NOT
+  exercise the `workers/` tree's types (see L-2026-05-08e).
 
 ### Route-registration sanity (Phase 7 T7.8)
 
