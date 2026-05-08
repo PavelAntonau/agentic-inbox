@@ -3,20 +3,26 @@
 
 import { Loader } from "~/ui";
 import { useEffect, useState } from "react";
-import { Outlet, useNavigate } from "react-router";
+import { Outlet, useNavigate, useLocation } from "react-router";
 
 /**
- * Admin layout — role-gate redirect.
+ * Admin layout — auth + role gate redirect.
  *
- * Fetches GET /api/admin/users on mount; if the server returns 401 or 403
- * (non-global-admin/owner), redirects to /. Otherwise renders the nested
- * admin pages via <Outlet />.
+ * Fetches GET /api/admin/users on mount and branches on the response:
+ *   401            → unauthenticated. Hard-redirect to /login?from=<path>
+ *                    (post-CF-Access cutover, no server-side gate is left;
+ *                    /  would just hit the same 401 chain).
+ *   403            → authenticated but not admin. SPA-redirect to /.
+ *   network error  → SPA-redirect to /. Data fetches inside the layout
+ *                    will re-trigger the auth path on the next attempt.
+ *   2xx            → render <Outlet />.
  *
- * This is a client-side guard (the server enforces auth on every API call).
- * The redirect prevents non-admin users from seeing the admin shell at all.
+ * The Worker enforces auth on every data API; this is a UX recovery
+ * affordance, not a security boundary.
  */
 export default function AdminLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [checking, setChecking] = useState(true);
   const [allowed, setAllowed] = useState(false);
 
@@ -25,11 +31,18 @@ export default function AdminLayout() {
     fetch("/api/admin/users")
       .then((res) => {
         if (cancelled) return;
-        if (res.status === 401 || res.status === 403) {
-          navigate("/", { replace: true });
-        } else {
-          setAllowed(true);
+        if (res.status === 401) {
+          const target = location.pathname + location.search + location.hash;
+          const from = encodeURIComponent(target);
+          window.location.replace(`/login?from=${from}`);
+          return;
         }
+        if (res.status === 403) {
+          // Authenticated but lacks the admin role — bounce to home.
+          navigate("/", { replace: true });
+          return;
+        }
+        setAllowed(true);
       })
       .catch(() => {
         if (!cancelled) navigate("/", { replace: true });
@@ -40,7 +53,7 @@ export default function AdminLayout() {
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, location.pathname, location.search, location.hash]);
 
   if (checking) {
     return (

@@ -15,8 +15,14 @@ import { Outlet } from "react-router";
 import ComposeEmail from "~/components/ComposeEmail";
 import MailboxTreeRail from "~/components/shell/MailboxTreeRail";
 import ResizablePanel from "~/components/shell/ResizablePanel";
+import { useAuthGuard } from "~/hooks/useAuthGuard";
 
 export default function AppShell() {
+  // Post-CF-Access cutover (2026-05-07, commit bc7297e): the SPA shell is
+  // publicly served. Without this guard, an unauthenticated incognito tab
+  // can load the empty shell and never get redirected to /login. The
+  // server still 401s every data API — this is purely UX recovery.
+  useAuthGuard();
   return (
     // flex-1 fills remaining height below the global Header rendered in root.tsx.
     // overflow-hidden prevents double scrollbars; inner panes scroll independently.

@@ -2,10 +2,11 @@
 // Licensed under the Apache 2.0 license
 
 import { Button } from "~/ui";
-import { ListIcon } from "@phosphor-icons/react";
+import { ListIcon, SignOutIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
+import { authClient } from "~/lib/auth-client";
 import GlobalSearch from "~/components/GlobalSearch";
 import Logo from "~/components/Logo";
 import NotificationBell from "~/components/notifications/NotificationBell";
@@ -61,15 +62,47 @@ export default function Header() {
   // header (email-list.tsx) — everything specific to one mailbox lives
   // alongside the inbox itself, not in the global chrome.
   //   Avatar  →  Bell  →  Theme  →  Settings (workspace-only)
+  // Defensive sign-out (post-CF-Access cutover, 2026-05-07): when `me`
+  // is null because /api/users/me 401'd (orphaned/expired session), the
+  // ProfileMenu's sign-out is invisible exactly when needed most. Show a
+  // small icon-only sign-out instead so the user can always recover. The
+  // useAuthGuard hook in _app/admin layouts will hard-redirect to /login
+  // for new visits — this handles the brief window where the user is
+  // already inside the shell when their session goes invalid, and any
+  // unguarded route surface (e.g. /login itself, where Header still
+  // renders but we suppress the fallback to avoid a double sign-out).
+  const onLoginPage = location.pathname.startsWith("/login");
+  const handleFallbackSignOut = async () => {
+    try {
+      await authClient.signOut();
+    } catch {
+      // best-effort — redirect regardless
+    }
+    window.location.href = "/login";
+  };
+
   const rightCluster = (
     <div className="flex items-center gap-1.5 ml-auto shrink-0">
-      {me && (
+      {me ? (
         <ProfileMenu
           userId={me.id}
           displayName={me.display_name}
           email={me.email}
           avatarUrl={me.avatar_url}
         />
+      ) : (
+        !onLoginPage && (
+          <Button
+            variant="ghost"
+            shape="square"
+            size="sm"
+            icon={<SignOutIcon size={20} />}
+            onClick={handleFallbackSignOut}
+            aria-label="Sign out"
+            title="Sign out"
+            className={HEADER_GHOST_BTN_CLASS}
+          />
+        )
       )}
       <NotificationBell />
       <ThemeToggle />
