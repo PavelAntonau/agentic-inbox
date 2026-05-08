@@ -25,6 +25,8 @@ import { Button, Input, Loader, useToastManager } from "~/ui";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
+import Logo from "~/components/Logo";
+import loginHeroUrl from "~/assets/branding/login-hero.webp?url";
 
 // ---------------------------------------------------------------------------
 // Turnstile globals — declared so TypeScript does not error on window.turnstile.
@@ -312,58 +314,89 @@ export default function LoginRoute() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg p-6">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-text-bright">
-            ActionNowAI Mail
-          </h1>
-          <p className="text-sm text-text-muted mt-1">
-            {step === "email"
-              ? "Sign in with your email."
-              : "Check your inbox for a 6-digit code."}
-          </p>
-        </div>
+    // Two-column split: form on the left, brand hero image on the right.
+    // Mobile (< md): the right column collapses, the form fills the screen.
+    // The page sits on the site's existing `bg-bg` + the fixed radial-
+    // gradient pseudo-elements painted by app/index.css (no override here).
+    <div className="min-h-screen flex items-stretch bg-bg">
+      {/* ── Left: form column ─────────────────────────────────────────── */}
+      <div className="flex-1 flex items-center justify-center px-6 py-10 md:px-12 md:py-12">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center text-center mb-8">
+            <Logo height={72} to={null} className="mb-4" />
+            <h1 className="text-2xl font-semibold text-text-bright">
+              {step === "email" ? "Welcome back" : "Check your inbox"}
+            </h1>
+            <p className="text-sm text-text-muted mt-1">
+              {step === "email"
+                ? "Sign in with your email to continue."
+                : "Enter the 6-digit code we just sent."}
+            </p>
+          </div>
 
-        <div className="rounded-xl border border-border bg-card p-6 shadow-lg">
           {step === "email" ? (
-            <form onSubmit={handleSendOtp} className="flex flex-col gap-4">
-              <Input
-                aria-label="Email address"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                autoComplete="email"
-                disabled={submitting}
-              />
-              {/* Phase G-2 — Turnstile widget mount point.
-                  Rendered only when a site key is configured.
-                  The widget is populated by the Turnstile JS loaded in useEffect. */}
-              {SITE_KEY && (
-                <div
-                  ref={turnstileContainerRef}
-                  className="flex justify-center"
-                  aria-label="Security challenge"
-                />
-              )}
-              <Button
-                type="submit"
-                variant="primary"
-                size="base"
-                loading={submitting}
-                disabled={
-                  !isValidEmailShape(email) ||
-                  (SITE_KEY ? !turnstileToken : false)
-                }
+            <>
+              <form
+                onSubmit={handleSendOtp}
+                className="flex flex-col gap-3"
+                aria-label="Sign in with email"
               >
-                {submitting ? <Loader size="sm" /> : "Send code"}
-              </Button>
-            </form>
+                <Input
+                  aria-label="Email address"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoFocus
+                  autoComplete="email"
+                  disabled={submitting}
+                />
+                {/* Send button sits directly under the email input,
+                    full-width, primary variant. Shimmer-on-hover comes
+                    from `bg-kumo-brand` in app/index.css automatically.
+                    Stays disabled until the email shape validates AND
+                    the Turnstile token has resolved. */}
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="base"
+                  loading={submitting}
+                  className="w-full"
+                  disabled={
+                    !isValidEmailShape(email) ||
+                    (SITE_KEY ? !turnstileToken : false)
+                  }
+                >
+                  {submitting ? <Loader size="sm" /> : "Send code"}
+                </Button>
+              </form>
+
+              {/* Phase G-2 — Turnstile widget. Wrapped in a rounded
+                  surface so the CF challenge sits inside the same visual
+                  language as the rest of the form. The widget itself
+                  renders inside `turnstileContainerRef`; we only style
+                  the surrounding card here. */}
+              {SITE_KEY && (
+                <div className="mt-5 rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4 shadow-sm">
+                  <div
+                    ref={turnstileContainerRef}
+                    className="flex justify-center"
+                    aria-label="Security challenge"
+                  />
+                </div>
+              )}
+
+              <p className="text-xs text-text-muted text-center mt-6">
+                We'll email you a 6-digit code that expires in 10 minutes.
+              </p>
+            </>
           ) : (
-            <form onSubmit={handleVerifyOtp} className="flex flex-col gap-4">
-              <p className="text-xs text-text-muted">
+            <form
+              onSubmit={handleVerifyOtp}
+              className="flex flex-col gap-3"
+              aria-label="Verify code"
+            >
+              <p className="text-xs text-text-muted text-center">
                 Code sent to <span className="text-text-bright">{email}</span>
               </p>
               <Input
@@ -387,13 +420,14 @@ export default function LoginRoute() {
                 variant="primary"
                 size="base"
                 loading={submitting}
+                className="w-full"
                 disabled={otp.length < 6}
               >
                 {submitting ? <Loader size="sm" /> : "Verify"}
               </Button>
               <button
                 type="button"
-                className="text-xs text-text-muted hover:text-text transition-colors"
+                className="text-xs text-text-muted hover:text-text transition-colors mt-2"
                 onClick={() => {
                   setStep("email");
                   setOtp("");
@@ -404,10 +438,30 @@ export default function LoginRoute() {
             </form>
           )}
         </div>
+      </div>
 
-        <p className="text-xs text-text-muted text-center mt-6">
-          We'll email you a 6-digit code that expires in 10 minutes.
-        </p>
+      {/* ── Right: hero image (md+ only) ──────────────────────────────── */}
+      <div
+        className="hidden md:block flex-1 relative overflow-hidden"
+        aria-hidden="true"
+      >
+        <img
+          src={loginHeroUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          // The intrinsic 1122 × 1402 source carries the file (~118 KB
+          // WebP). object-cover crops to fit; on a half-screen panel
+          // the framing keeps the central robot composition centered
+          // at all common viewport ratios.
+        />
+        {/* Subtle inner shadow on the seam so the image edge never reads
+            as a hard cut on the form-side gradient. */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            boxShadow: "inset 24px 0 48px -24px rgba(10, 29, 68, 0.35)",
+          }}
+        />
       </div>
     </div>
   );
