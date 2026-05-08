@@ -1,0 +1,56 @@
+name: Lighthouse Mobile PWA Gate
+
+on:
+  pull_request:
+    branches: [main, setup/actionnow-ai]
+  push:
+    branches: [main]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Start the Vite preview server in the background on port 4173 (default).
+      # The `&` keeps the step non-blocking; we wait for the port before
+      # running Lighthouse so the audit never races the server.
+      - name: Start preview server
+        run: |
+          npm run preview &
+          echo "PREVIEW_PID=$!" >> "$GITHUB_ENV"
+          # Wait up to 30s for the server to be ready.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4173/ > /dev/null 2>&1; then
+              echo "Preview server ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+      # Install lighthouse globally so npx can resolve it fast in CI.
+      # Pinned to the same major version used locally (lighthouse@13).
+      - name: Install Lighthouse CLI
+        run: npm install -g lighthouse@13
+
+      - name: Run Lighthouse mobile PWA gate
+        run: bash scripts/lighthouse-mobile.sh http://localhost:4173
+
+      - name: Upload Lighthouse report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-mobile-report
+          path: .scratch/lighthouse-mobile.json
+          retention-days: 14
