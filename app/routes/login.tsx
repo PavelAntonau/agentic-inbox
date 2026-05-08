@@ -313,16 +313,45 @@ export default function LoginRoute() {
     }
   }
 
+  // Mobile-only: the form column is wrapped in a glass-morphism card
+  // (semi-transparent surface + backdrop-blur) that floats centered over
+  // a full-screen hero image background. Desktop (md+) keeps the
+  // two-column split where the image lives in its own right column —
+  // these classes are no-ops on md+ thanks to `md:bg-transparent` etc.
+  // bg-card/55 reads correctly in BOTH light and dark themes (the token
+  // is theme-aware, so the glass panel inverts with the rest of the UI).
+  const mobileGlassCard =
+    "rounded-2xl bg-card/55 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-2xl p-6 " +
+    "md:bg-transparent md:backdrop-blur-0 md:border-0 md:shadow-none md:p-0 md:rounded-none";
+
   return (
     // Two-column split: form on the left, brand hero image on the right.
-    // Mobile (< md): the right column collapses, the form fills the screen.
-    // The page sits on the site's existing `bg-bg` + the fixed radial-
-    // gradient pseudo-elements painted by app/index.css (no override here).
-    <div className="min-h-screen flex items-stretch bg-bg">
+    // Mobile (< md): the right column collapses; in its place a
+    // full-bleed hero image fills the viewport and the form sits on a
+    // glass card on top. The page sits on the site's existing `bg-bg`
+    // + the fixed radial-gradient pseudo-elements painted by
+    // app/index.css for the desktop case.
+    <div className="min-h-screen flex items-stretch bg-bg relative overflow-hidden">
+      {/* ── Mobile-only: full-bleed hero behind the form ──────────────── */}
+      <div
+        className="md:hidden absolute inset-0 z-0 pointer-events-none"
+        aria-hidden="true"
+      >
+        <img
+          src={loginHeroUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        {/* Light dim layer to keep the foreground form readable on bright
+            sections of the image. Theme-neutral; tuned by visual check
+            (Playwright headed at 390 × 844). */}
+        <div className="absolute inset-0 bg-black/15" />
+      </div>
+
       {/* ── Left: form column ─────────────────────────────────────────── */}
-      <div className="flex-1 flex items-center justify-center px-6 py-10 md:px-12 md:py-12">
-        <div className="w-full max-w-sm">
-          <div className="flex flex-col items-center text-center mb-8">
+      <div className="flex-1 flex items-center justify-center px-6 py-10 md:px-12 md:py-12 relative z-10">
+        <div className={`w-full max-w-sm ${mobileGlassCard}`}>
+          <div className="flex flex-col items-center text-center mb-6 md:mb-8">
             <Logo height={72} to={null} className="mb-4" />
             <h1 className="text-2xl font-semibold text-text-bright">
               {step === "email" ? "Welcome back" : "Check your inbox"}
@@ -375,9 +404,11 @@ export default function LoginRoute() {
                   surface so the CF challenge sits inside the same visual
                   language as the rest of the form. The widget itself
                   renders inside `turnstileContainerRef`; we only style
-                  the surrounding card here. */}
+                  the surrounding card here. On mobile we skip the
+                  inner glass (the outer card already provides it) and
+                  drop the bg fill so it reads as part of one surface. */}
               {SITE_KEY && (
-                <div className="mt-5 rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4 shadow-sm">
+                <div className="mt-5 rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4 shadow-sm md:bg-card/60 md:backdrop-blur-sm">
                   <div
                     ref={turnstileContainerRef}
                     className="flex justify-center"
