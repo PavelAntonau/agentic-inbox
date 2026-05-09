@@ -804,3 +804,79 @@ body {
     0 12px 28px -8px rgba(0, 0, 0, 0.6),
     0 26px 56px -18px rgba(0, 0, 0, 0.55);
 }
+
+/* ---------------------------------------------------------------------------
+ * Login seam — animated diffuse blue glow on the desktop card↔hero seam.
+ *
+ * Sits in the OUTER login wrapper (NOT inside either column) and straddles
+ * the seam at `left: 50%`, so the radial-gradient "blob" of saturated
+ * kumo-brand blue bleeds equally into the cream form column AND the blue
+ * hero image. A vertical wave-like motion (peak position oscillates
+ * top↔bottom on a slow ~9 s sine-eased cycle) creates a soft shimmer
+ * that reads as depth rather than as a hard line.
+ *
+ * Wrapper `.login-seam-glow`: full-height, narrow (240px) strip centred
+ *   on the seam (`left: 50%; transform: translateX(-50%)`).
+ * Blob `.login-seam-glow::before`: a radial gradient at the centre of
+ *   the wrapper, vertically smaller so it reads as a "peak" — that
+ *   peak is what oscillates.
+ *
+ * Pointer-events disabled (purely decorative); parent `aria-hidden`
+ * covers a11y. Honors `prefers-reduced-motion: reduce` — animation
+ * pauses, blob centres vertically so the seam still reads as decorated
+ * rather than blank.
+ * --------------------------------------------------------------------------- */
+.login-seam-glow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+.login-seam-glow::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 38%;
+  background: radial-gradient(
+    ellipse 50% 50% at 50% 50%,
+    rgba(20, 80, 220, 0.85) 0%,
+    rgba(28, 92, 182, 0.62) 22%,
+    rgba(20, 70, 200, 0.36) 45%,
+    rgba(15, 55, 170, 0.18) 65%,
+    rgba(10, 40, 140, 0) 85%
+  );
+  filter: blur(24px);
+  animation: login-seam-undulate 9s ease-in-out infinite alternate;
+  will-change: transform;
+}
+:root.theme-dark .login-seam-glow::before {
+  background: radial-gradient(
+    ellipse 50% 50% at 50% 50%,
+    rgba(80, 160, 255, 0.78) 0%,
+    rgba(60, 140, 255, 0.5) 25%,
+    rgba(40, 110, 230, 0.3) 50%,
+    rgba(20, 70, 180, 0.16) 70%,
+    rgba(10, 40, 140, 0) 88%
+  );
+}
+@keyframes login-seam-undulate {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(165%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-seam-glow::before {
+    animation: none;
+    transform: translateY(82%);
+  }
+}

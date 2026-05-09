@@ -655,14 +655,16 @@ export default function LoginRoute() {
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
         />
-        {/* Subtle inner shadow on the seam */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            boxShadow: "inset 24px 0 48px -24px rgba(10, 29, 68, 0.35)",
-          }}
-        />
       </div>
+
+      {/* Animated seam glow — diffuse saturated-blue blob undulating
+       * top↔bottom along the cream/hero seam. Lives in the OUTER wrapper
+       * so it straddles both columns at `left: 50%`, bleeding equally
+       * into the cream form side and the blue hero side. Desktop only —
+       * the mobile bottom-sheet layout has no seam to decorate.
+       * CSS: app/index.css `.login-seam-glow`; honors
+       * `prefers-reduced-motion`. */}
+      <div className="login-seam-glow hidden md:block" aria-hidden="true" />
     </div>
   );
 }
