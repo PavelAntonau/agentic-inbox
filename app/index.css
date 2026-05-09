@@ -806,25 +806,29 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
- * Login seam — animated diffuse blue glow on the desktop card↔hero seam.
+ * Login seam — Aurora ribbon along the desktop card↔hero seam.
  *
- * Sits in the OUTER login wrapper (NOT inside either column) and straddles
- * the seam at `left: 50%`, so the radial-gradient "blob" of saturated
- * kumo-brand blue bleeds equally into the cream form column AND the blue
- * hero image. A vertical wave-like motion (peak position oscillates
- * top↔bottom on a slow ~9 s sine-eased cycle) creates a soft shimmer
- * that reads as depth rather than as a hard line.
+ * 10 px-wide vertical ribbon centred on the seam, three stacked
+ * `mix-blend-mode: screen` gradient layers flowing vertically at three
+ * different speeds (11 s / 17 s / 13 s) to create the illusion of
+ * shifting Northern-Lights curtains — colour bands rise and fall
+ * across the ribbon, never repeating exactly. A halo `box-shadow`
+ * extends the glow ~30 px into both surrounding columns so the ribbon
+ * reads as the burner-flame of the robot in the hero image continuing
+ * past the image's edge.
  *
- * Wrapper `.login-seam-glow`: full-height, narrow (240px) strip centred
- *   on the seam (`left: 50%; transform: translateX(-50%)`).
- * Blob `.login-seam-glow::before`: a radial gradient at the centre of
- *   the wrapper, vertically smaller so it reads as a "peak" — that
- *   peak is what oscillates.
+ * Colour palette is anchored to the cyan-teal "average flame
+ * temperature" of the robot's exhaust nozzle in the hero image:
+ *   • cyan        #00d9ff  (primary flame core)
+ *   • teal-mint   #3affd0  (cooler outer flame edge)
+ *   • violet-blue #7a84ff  (transitional aurora hue)
+ *   • magenta     #ff66cc  (aurora highlight band, sparse)
  *
- * Pointer-events disabled (purely decorative); parent `aria-hidden`
- * covers a11y. Honors `prefers-reduced-motion: reduce` — animation
- * pauses, blob centres vertically so the seam still reads as decorated
- * rather than blank.
+ * Lives in the OUTER login wrapper (not inside either column) so the
+ * halo bleeds equally into the cream form side and the hero side.
+ * Pointer-events disabled (decorative); parent `aria-hidden` covers
+ * a11y. Honors `prefers-reduced-motion: reduce` — all three layers
+ * freeze; the static composition still reads as a coloured seam.
  * --------------------------------------------------------------------------- */
 .login-seam-glow {
   position: absolute;
@@ -832,51 +836,109 @@ body {
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 240px;
+  width: 10px;
   pointer-events: none;
-  overflow: hidden;
+  overflow: visible;
   z-index: 5;
+
+  /* Layer 1 — cyan/teal core ribbon. */
+  background: linear-gradient(
+    180deg,
+    rgba(0, 217, 255, 0) 0%,
+    rgba(0, 217, 255, 0.65) 12%,
+    rgba(58, 255, 208, 0.85) 32%,
+    rgba(122, 132, 255, 0.7) 52%,
+    rgba(58, 255, 208, 0.78) 72%,
+    rgba(0, 217, 255, 0.6) 88%,
+    rgba(0, 217, 255, 0) 100%
+  );
+  background-size: 100% 220%;
+  background-repeat: repeat-y;
+  animation: aurora-flow-slow 11s linear infinite;
+  filter: blur(4px);
+  /* Halo — extends the ribbon ~30 px into both surrounding columns so
+   * it reads as a continuation of the robot's exhaust flame. */
+  box-shadow:
+    0 0 16px rgba(0, 217, 255, 0.45),
+    0 0 32px rgba(58, 255, 208, 0.28),
+    0 0 56px rgba(122, 132, 255, 0.16);
+  border-radius: 6px;
 }
+
+/* Layer 2 — slower-moving violet/teal/magenta band. Adds the
+ * aurora's characteristic colour shift; `screen` blend lets the
+ * colours additively brighten where layers overlap. */
 .login-seam-glow::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 38%;
-  background: radial-gradient(
-    ellipse 50% 50% at 50% 50%,
-    rgba(20, 80, 220, 0.85) 0%,
-    rgba(28, 92, 182, 0.62) 22%,
-    rgba(20, 70, 200, 0.36) 45%,
-    rgba(15, 55, 170, 0.18) 65%,
-    rgba(10, 40, 140, 0) 85%
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(122, 132, 255, 0.5) 22%,
+    rgba(255, 102, 204, 0.38) 45%,
+    rgba(58, 255, 208, 0.65) 68%,
+    rgba(122, 132, 255, 0.45) 88%,
+    rgba(0, 0, 0, 0) 100%
   );
-  filter: blur(24px);
-  animation: login-seam-undulate 9s ease-in-out infinite alternate;
-  will-change: transform;
+  background-size: 100% 280%;
+  background-repeat: repeat-y;
+  animation: aurora-flow-mid 17s linear infinite reverse;
+  mix-blend-mode: screen;
+  filter: blur(2px);
 }
-:root.theme-dark .login-seam-glow::before {
-  background: radial-gradient(
-    ellipse 50% 50% at 50% 50%,
-    rgba(80, 160, 255, 0.78) 0%,
-    rgba(60, 140, 255, 0.5) 25%,
-    rgba(40, 110, 230, 0.3) 50%,
-    rgba(20, 70, 180, 0.16) 70%,
-    rgba(10, 40, 140, 0) 88%
+
+/* Layer 3 — fast-moving teal accent for the "shimmering" feel.
+ * Different period than layers 1+2 → never-repeating composition. */
+.login-seam-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(58, 255, 208, 0) 0%,
+    rgba(58, 255, 208, 0.7) 18%,
+    rgba(0, 217, 255, 0.55) 40%,
+    rgba(255, 102, 204, 0.32) 60%,
+    rgba(58, 255, 208, 0.6) 82%,
+    rgba(58, 255, 208, 0) 100%
   );
+  background-size: 100% 320%;
+  background-repeat: repeat-y;
+  animation: aurora-flow-fast 13s linear infinite;
+  mix-blend-mode: screen;
+  filter: blur(3px);
 }
-@keyframes login-seam-undulate {
+
+@keyframes aurora-flow-slow {
   from {
-    transform: translateY(0);
+    background-position: 0 0;
   }
   to {
-    transform: translateY(165%);
+    background-position: 0 -220%;
   }
 }
+@keyframes aurora-flow-mid {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 280%;
+  }
+}
+@keyframes aurora-flow-fast {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -320%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .login-seam-glow::before {
+  .login-seam-glow,
+  .login-seam-glow::before,
+  .login-seam-glow::after {
     animation: none;
-    transform: translateY(82%);
   }
 }
