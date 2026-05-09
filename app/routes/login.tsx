@@ -638,16 +638,40 @@ export default function LoginRoute() {
   return (
     <div className="min-h-screen flex items-stretch bg-bg relative overflow-hidden">
       {/* ── Left: form column ─────────────────────────────────────────── */}
-      <div className="flex-1 flex items-center justify-center px-6 py-10 md:px-12 md:py-12 relative z-10">
+      {/* Explicit `md:w-1/2` forces 50/50 split at md+ — `flex-1
+       *  min-w-0` alone wasn't doing it (suspect a nested-flex
+       *  intrinsic-min-width quirk in this build). The exact 50/50
+       *  split is load-bearing: it makes the column boundary land at
+       *  viewport-50 %, where `.login-seam-glow` is anchored, so the
+       *  hero column actually overlaps the stripe instead of leaving
+       *  a visible gap. Below `md` the form column reverts to
+       *  `flex-1` and takes the full mobile bottom-sheet column. */}
+      <div className="flex-1 min-w-0 md:w-1/2 md:flex-none flex items-center justify-center px-6 py-10 md:px-12 md:py-12 relative z-10">
         <div className={`w-full max-w-md mx-4 ${mobileGlassCard}`}>
           <div className="mb-6 md:mb-8">{authHeader}</div>
           {step === "email" ? emailForm : otpForm}
         </div>
       </div>
 
+      {/* Animated seam glow — aurora ribbon along the cream/hero seam.
+       * Lives in the OUTER wrapper at `left: 50%; z-index: 1` so it
+       * sits BENEATH the hero image (which has z-20 below). Only the
+       * left ~14 px peeks out into the cream side; the right half is
+       * hidden under the photo, exactly per user direction. Desktop
+       * only — mobile bottom-sheet has no seam to decorate.
+       * CSS: app/index.css `.login-seam-glow`; honors
+       * `prefers-reduced-motion`. Order matters: render BEFORE the
+       * photo column so the photo paints on top in z-auto stacking
+       * even before the explicit z-index fight. */}
+      <div className="login-seam-glow hidden md:block" aria-hidden="true" />
+
       {/* ── Right: hero image ─────────────────────────────────────────── */}
+      {/* Mirror of the form column's 50/50 sizing — explicit
+       *  `md:w-1/2 md:flex-none` overrides the `flex-1` shrink-grow
+       *  asymmetry that left a gap between the aurora stripe and the
+       *  hero photo before. `min-w-0` for safety. */}
       <div
-        className="hidden md:block flex-1 relative overflow-hidden"
+        className="hidden md:block flex-1 min-w-0 md:w-1/2 md:flex-none relative overflow-hidden z-20"
         aria-hidden="true"
       >
         <img
@@ -656,15 +680,6 @@ export default function LoginRoute() {
           className="absolute inset-0 h-full w-full object-cover"
         />
       </div>
-
-      {/* Animated seam glow — diffuse saturated-blue blob undulating
-       * top↔bottom along the cream/hero seam. Lives in the OUTER wrapper
-       * so it straddles both columns at `left: 50%`, bleeding equally
-       * into the cream form side and the blue hero side. Desktop only —
-       * the mobile bottom-sheet layout has no seam to decorate.
-       * CSS: app/index.css `.login-seam-glow`; honors
-       * `prefers-reduced-motion`. */}
-      <div className="login-seam-glow hidden md:block" aria-hidden="true" />
     </div>
   );
 }

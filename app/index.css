@@ -808,27 +808,31 @@ body {
 /* ---------------------------------------------------------------------------
  * Login seam — Aurora ribbon along the desktop card↔hero seam.
  *
- * 10 px-wide vertical ribbon centred on the seam, three stacked
- * `mix-blend-mode: screen` gradient layers flowing vertically at three
- * different speeds (11 s / 17 s / 13 s) to create the illusion of
- * shifting Northern-Lights curtains — colour bands rise and fall
- * across the ribbon, never repeating exactly. A halo `box-shadow`
- * extends the glow ~30 px into both surrounding columns so the ribbon
- * reads as the burner-flame of the robot in the hero image continuing
- * past the image's edge.
+ * Iteration 3 (2026-05-09): wider 28 px ribbon positioned so the right
+ * half sits UNDER the hero image (z-index < photo column) — only the
+ * left ~14 px peeks out into the cream form side. Three stacked
+ * `mix-blend-mode: screen` gradient layers flow vertically at three
+ * different speeds (11 s / 17 s / 13 s) AND each carries an
+ * independent `clip-path` polygon animation that morphs the ribbon's
+ * left edge into wavy aurora-curtain amplitude — the visible width
+ * pulses non-uniformly along its length, never the same shape twice.
  *
- * Colour palette is anchored to the cyan-teal "average flame
- * temperature" of the robot's exhaust nozzle in the hero image:
+ * Colour palette anchored to the cyan-teal "average flame temperature"
+ * of the robot's exhaust nozzle in the hero image:
  *   • cyan        #00d9ff  (primary flame core)
  *   • teal-mint   #3affd0  (cooler outer flame edge)
  *   • violet-blue #7a84ff  (transitional aurora hue)
  *   • magenta     #ff66cc  (aurora highlight band, sparse)
  *
- * Lives in the OUTER login wrapper (not inside either column) so the
- * halo bleeds equally into the cream form side and the hero side.
+ * Opacity dialled DOWN ~40 % vs iteration 2 — the user wanted "more
+ * semi-transparent". Halo box-shadow extends ~24 px into the cream
+ * side; no shadow on the right because that side is hidden under the
+ * photo image anyway.
+ *
  * Pointer-events disabled (decorative); parent `aria-hidden` covers
- * a11y. Honors `prefers-reduced-motion: reduce` — all three layers
- * freeze; the static composition still reads as a coloured seam.
+ * a11y. Honors `prefers-reduced-motion: reduce` — all three flow
+ * AND amplitude animations freeze; the static composition still
+ * reads as a coloured aurora ribbon, just stationary.
  * --------------------------------------------------------------------------- */
 .login-seam-glow {
   position: absolute;
@@ -836,33 +840,67 @@ body {
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 10px;
+  /* 40 px wrapper centred on the seam — half (20 px) sits under the
+   * hero photo (z-20), half on the cream side. The clip-path's wavy
+   * left edge keeps left-edge x in the 0%–40 % range so the visible
+   * peek width on the cream side pulses between ~4 px (wave near
+   * 40 %) and the full 20 px (wave at 0 %), like a real aurora
+   * curtain breathing wider/narrower along its height. */
+  width: 40px;
   pointer-events: none;
   overflow: visible;
-  z-index: 5;
+  z-index: 1;
 
-  /* Layer 1 — cyan/teal core ribbon. */
+  /* Layer 1 — cyan/teal core ribbon. Opacity nudged up vs the first
+   * v3 attempt so the peek is actually visible on the cream side
+   * even with the heavy blur softening the edges. */
   background: linear-gradient(
     180deg,
     rgba(0, 217, 255, 0) 0%,
-    rgba(0, 217, 255, 0.65) 12%,
-    rgba(58, 255, 208, 0.85) 32%,
-    rgba(122, 132, 255, 0.7) 52%,
-    rgba(58, 255, 208, 0.78) 72%,
-    rgba(0, 217, 255, 0.6) 88%,
+    rgba(0, 217, 255, 0.55) 12%,
+    rgba(58, 255, 208, 0.7) 32%,
+    rgba(122, 132, 255, 0.6) 52%,
+    rgba(58, 255, 208, 0.65) 72%,
+    rgba(0, 217, 255, 0.5) 88%,
     rgba(0, 217, 255, 0) 100%
   );
   background-size: 100% 220%;
   background-repeat: repeat-y;
-  animation: aurora-flow-slow 11s linear infinite;
-  filter: blur(4px);
-  /* Halo — extends the ribbon ~30 px into both surrounding columns so
-   * it reads as a continuation of the robot's exhaust flame. */
+  animation:
+    aurora-flow-slow 11s linear infinite,
+    aurora-amp-slow 19s ease-in-out infinite alternate;
+  filter: blur(3px);
+  /* Halo — bleeds ~28 px further into the cream side beyond the
+   * stripe itself, so the aurora reads as glow not as a hard shape.
+   * No right-side halo because the photo image covers it anyway. */
   box-shadow:
-    0 0 16px rgba(0, 217, 255, 0.45),
-    0 0 32px rgba(58, 255, 208, 0.28),
-    0 0 56px rgba(122, 132, 255, 0.16);
-  border-radius: 6px;
+    -8px 0 20px -2px rgba(0, 217, 255, 0.4),
+    -14px 0 40px -4px rgba(58, 255, 208, 0.26),
+    -24px 0 64px -8px rgba(122, 132, 255, 0.16);
+  border-radius: 10px;
+  /* clip-path keeps the right edge at 100 % (hidden under the photo);
+   * only the LEFT edge undulates. Wave x values between 0 % and 40 %
+   * so the peek width on the cream side pulses between ~4 px and
+   * 20 px along the height. Vertex count = 16 (must match keyframes
+   * below). */
+  clip-path: polygon(
+    100% 0%,
+    100% 100%,
+    30% 100%,
+    5% 92%,
+    35% 84%,
+    10% 76%,
+    40% 68%,
+    0% 60%,
+    30% 52%,
+    8% 44%,
+    35% 36%,
+    5% 28%,
+    38% 20%,
+    12% 12%,
+    32% 4%,
+    8% 0%
+  );
 }
 
 /* Layer 2 — slower-moving violet/teal/magenta band. Adds the
@@ -875,17 +913,36 @@ body {
   background: linear-gradient(
     180deg,
     rgba(0, 0, 0, 0) 0%,
-    rgba(122, 132, 255, 0.5) 22%,
-    rgba(255, 102, 204, 0.38) 45%,
-    rgba(58, 255, 208, 0.65) 68%,
-    rgba(122, 132, 255, 0.45) 88%,
+    rgba(122, 132, 255, 0.45) 22%,
+    rgba(255, 102, 204, 0.32) 45%,
+    rgba(58, 255, 208, 0.55) 68%,
+    rgba(122, 132, 255, 0.4) 88%,
     rgba(0, 0, 0, 0) 100%
   );
   background-size: 100% 280%;
   background-repeat: repeat-y;
-  animation: aurora-flow-mid 17s linear infinite reverse;
+  animation:
+    aurora-flow-mid 17s linear infinite reverse,
+    aurora-amp-mid 23s ease-in-out infinite alternate;
   mix-blend-mode: screen;
   filter: blur(2px);
+  /* Wave x in 0%–35% range — different amplitude than layer 1 so the
+   * two layers are out of phase, which reads as aurora layering. */
+  clip-path: polygon(
+    100% 0%,
+    100% 100%,
+    20% 100%,
+    35% 90%,
+    5% 80%,
+    30% 70%,
+    10% 60%,
+    35% 50%,
+    0% 40%,
+    25% 30%,
+    8% 20%,
+    32% 10%,
+    5% 0%
+  );
 }
 
 /* Layer 3 — fast-moving teal accent for the "shimmering" feel.
@@ -897,17 +954,37 @@ body {
   background: linear-gradient(
     180deg,
     rgba(58, 255, 208, 0) 0%,
-    rgba(58, 255, 208, 0.7) 18%,
-    rgba(0, 217, 255, 0.55) 40%,
-    rgba(255, 102, 204, 0.32) 60%,
-    rgba(58, 255, 208, 0.6) 82%,
+    rgba(58, 255, 208, 0.55) 18%,
+    rgba(0, 217, 255, 0.45) 40%,
+    rgba(255, 102, 204, 0.28) 60%,
+    rgba(58, 255, 208, 0.5) 82%,
     rgba(58, 255, 208, 0) 100%
   );
   background-size: 100% 320%;
   background-repeat: repeat-y;
-  animation: aurora-flow-fast 13s linear infinite;
+  animation:
+    aurora-flow-fast 13s linear infinite,
+    aurora-amp-fast 29s ease-in-out infinite alternate;
   mix-blend-mode: screen;
-  filter: blur(3px);
+  filter: blur(2.5px);
+  /* Wave x in 0%–30% range — narrower amplitude than layers 1+2 so
+   * this fast accent reads as a thin shimmer rather than a fat band.
+   * 13 vertices to match the keyframes interpolation. */
+  clip-path: polygon(
+    100% 0%,
+    100% 100%,
+    25% 100%,
+    0% 90%,
+    30% 80%,
+    5% 70%,
+    28% 60%,
+    8% 50%,
+    32% 40%,
+    0% 30%,
+    25% 20%,
+    10% 10%,
+    30% 0%
+  );
 }
 
 @keyframes aurora-flow-slow {
@@ -932,6 +1009,129 @@ body {
   }
   to {
     background-position: 0 -320%;
+  }
+}
+
+/* Amplitude keyframes — morph the wavy left edge between two distinct
+ * polygons. Each layer has its own period (19 s / 23 s / 29 s) so
+ * the three amplitude waves combine into a never-repeating shape.
+ * Vertex counts MUST match between keyframe pairs (slow=16, mid=13,
+ * fast=13) and match the rest pose declared on each layer above so
+ * the browser can interpolate. Wave x ranges 0%–40% (slow), 0%–35%
+ * (mid), 0%–32% (fast) — anchored to keep the peek visible on the
+ * cream side at every moment, no matter where the wave is. */
+@keyframes aurora-amp-slow {
+  from {
+    clip-path: polygon(
+      100% 0%,
+      100% 100%,
+      30% 100%,
+      5% 92%,
+      35% 84%,
+      10% 76%,
+      40% 68%,
+      0% 60%,
+      30% 52%,
+      8% 44%,
+      35% 36%,
+      5% 28%,
+      38% 20%,
+      12% 12%,
+      32% 4%,
+      8% 0%
+    );
+  }
+  to {
+    clip-path: polygon(
+      100% 0%,
+      100% 100%,
+      8% 100%,
+      38% 92%,
+      5% 84%,
+      32% 76%,
+      0% 68%,
+      35% 60%,
+      8% 52%,
+      40% 44%,
+      5% 36%,
+      30% 28%,
+      10% 20%,
+      35% 12%,
+      0% 4%,
+      28% 0%
+    );
+  }
+}
+@keyframes aurora-amp-mid {
+  from {
+    clip-path: polygon(
+      100% 0%,
+      100% 100%,
+      20% 100%,
+      35% 90%,
+      5% 80%,
+      30% 70%,
+      10% 60%,
+      35% 50%,
+      0% 40%,
+      25% 30%,
+      8% 20%,
+      32% 10%,
+      5% 0%
+    );
+  }
+  to {
+    clip-path: polygon(
+      100% 0%,
+      100% 100%,
+      35% 100%,
+      5% 90%,
+      30% 80%,
+      0% 70%,
+      32% 60%,
+      8% 50%,
+      30% 40%,
+      5% 30%,
+      35% 20%,
+      10% 10%,
+      30% 0%
+    );
+  }
+}
+@keyframes aurora-amp-fast {
+  from {
+    clip-path: polygon(
+      100% 0%,
+      100% 100%,
+      25% 100%,
+      0% 90%,
+      30% 80%,
+      5% 70%,
+      28% 60%,
+      8% 50%,
+      32% 40%,
+      0% 30%,
+      25% 20%,
+      10% 10%,
+      30% 0%
+    );
+  }
+  to {
+    clip-path: polygon(
+      100% 0%,
+      100% 100%,
+      5% 100%,
+      28% 90%,
+      8% 80%,
+      32% 70%,
+      0% 60%,
+      30% 50%,
+      8% 40%,
+      28% 30%,
+      5% 20%,
+      32% 10%,
+      10% 0%
+    );
   }
 }
 
