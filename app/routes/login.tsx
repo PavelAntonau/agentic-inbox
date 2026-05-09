@@ -677,7 +677,7 @@ export default function LoginRoute() {
         <img
           src={loginHeroUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover login-hero-fade-left"
         />
       </div>
     </div>

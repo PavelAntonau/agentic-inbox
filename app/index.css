@@ -1142,3 +1142,39 @@ body {
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Login hero — soft left-edge fade so the photo blends into the
+ * aurora ribbon underneath instead of butting against it with a hard
+ * line. Pure CSS mask: leftmost 50 px ramps from alpha 0 (fully
+ * transparent at x=0) → alpha 1 (fully opaque at x=50 px); from 50 px
+ * to the right edge, the image is fully opaque (untouched).
+ *
+ * Lives directly on the `<img>` — no image-file manipulation. Works
+ * with the existing webp asset; no PNG conversion needed because the
+ * mask composites the image's own alpha channel against the gradient.
+ * Both unprefixed `mask-image` (Safari ≥ 15.4, all evergreen) and the
+ * `-webkit-mask-image` prefix (older Safari + WebKit-based mobile)
+ * carry the same gradient.
+ *
+ * Companion to `.login-seam-glow` — the aurora sits below the hero
+ * (z-index < photo column); this fade lets it actually peek through
+ * the leftmost 50 px of the image rather than getting hard-clipped
+ * by the image's edge.
+ * --------------------------------------------------------------------------- */
+.login-hero-fade-left {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 1) 50px,
+    rgba(0, 0, 0, 1) 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 1) 50px,
+    rgba(0, 0, 0, 1) 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
