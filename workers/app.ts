@@ -251,9 +251,20 @@ app.onError((err, c) => {
 // better-auth email-OTP form (Phase G T3.5 cutover, 2026-05-07).
 app.get("/login", async (c, next) => {
   if (c.env.CF_ACCESS_DEV_MODE === "mock") {
-    return c.html(renderDevLoginPicker(c.env), 200, {
-      "Cache-Control": "no-store",
-    });
+    // Local-preview escape hatch: `?preview=react` (or `?picker=skip`) lets
+    // the operator hit the production React `/login` route from the
+    // mock-mode dev server without editing `.dev.vars`. Keeps the dev
+    // picker as the default for scenario runs while making
+    // visual-regression / shape preview a one-URL operation. No
+    // production effect — the dev picker only renders under
+    // CF_ACCESS_DEV_MODE=mock, which is forbidden in prod.
+    const preview = c.req.query("preview");
+    const pickerOverride = c.req.query("picker");
+    if (preview !== "react" && pickerOverride !== "skip") {
+      return c.html(renderDevLoginPicker(c.env), 200, {
+        "Cache-Control": "no-store",
+      });
+    }
   }
   // Phase G T3.5 cutover: CF Access dropped from mail.actionnow.ai. The
   // React app's /login route renders the email-OTP form gated by

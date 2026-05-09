@@ -175,11 +175,45 @@ loop:
 
 ```bash
 cd /Users/dev/ActionNowAI/agentic-inbox
-npm run build
-npx wrangler dev --local --port 8788
+npm run mock:up    # one command: build + apply migrations + wrangler dev --local on :8788
 ```
 
 Then open `http://localhost:8788/login`.
+
+### Local preview vs production layouts
+
+Under `MOCK_MODE=1`, the worker intercepts `/login` with the dev identity picker
+(see "Picker" below). This is fast for scenario runs but doesn't show the
+production-shaped React login (with Turnstile widget, mobile bottom-sheet on
+`<md`, animated seam glow, OTP step, resend countdown).
+
+Two URLs:
+
+| URL | Renders |
+|---|---|
+| `http://localhost:8788/login` | Dev identity picker (default; what the scenario suite drives). |
+| `http://localhost:8788/login?preview=react` | The real React `/login` route — exactly what production at `mail.actionnow.ai/login` serves. Use this for visual validation of layout / animation / mobile shape changes BEFORE deploying. |
+
+`?picker=skip` is an equivalent alias for `?preview=react`. Both are gated on
+`CF_ACCESS_DEV_MODE === "mock"`, which is forbidden in production, so the
+escape hatch has zero production effect.
+
+### Local-validate-then-deploy loop
+
+```bash
+# 1. Make changes (CSS, components, etc.)
+# 2. Rebuild + reload (wrangler dev --local watches build/server/*)
+npm run mock:build
+
+# 3. Open the production-shaped page in your browser
+open "http://localhost:8788/login?preview=react"
+
+# 4. Iterate until happy. Then deploy:
+git push origin main          # if you've merged to main
+npx wrangler deploy           # canonical wrangler-deploy path
+# (or invoke the cloudflare-deploy skill which runs the full pipeline
+#  with the Key MCP token + post-deploy verify)
+```
 
 ### Picker
 
